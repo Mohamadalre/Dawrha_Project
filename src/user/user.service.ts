@@ -1,0 +1,44 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Account } from './entities/account.entity';
+
+@Injectable()
+export class UserService {
+  constructor(
+    @InjectRepository(Account)
+    private readonly accountRepository: Repository<Account>,
+  ) {}
+
+  async findByEmail(email: string): Promise<Account> {
+    const account = await this.accountRepository.findOne({
+      where: { email },
+      relations: ['collectorProfile', 'factoryProfile', 'citizenProfile','InstitutionProfile','ExternalPartnerProfile'],
+    });
+
+    if (!account) {
+      throw new NotFoundException(`Account with email ${email} not found`);
+    }
+    return account;
+  }
+
+  async findById(id: string): Promise<Account> {
+    const account = await this.accountRepository.findOne({
+      where: { id },
+      relations: ['collectorProfile', 'factoryProfile', 'citizenProfile'],
+    });
+    if (!account) {
+      throw new NotFoundException(`Account with ID ${id} not found`);
+    }
+    return account;
+  }
+
+
+    async update(id: string,data:object): Promise<Boolean> {
+    const account = await this.accountRepository.update(id,data);
+    if (!account) {
+      throw new NotFoundException(`Account with ID ${id} not found`);
+    }
+    return true;
+  }
+}
