@@ -3,15 +3,16 @@ import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsPhoneNumber, IsString, Match
 
 export class CreateAccountDto {
  
-  @IsNotEmpty()
-  @IsString()
-  @MinLength(6)
-  @MaxLength(20)
-  password: string;
 
   @IsNotEmpty()
   @IsEmail()
   email:string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MinLength(6)
+  @MaxLength(30)
+  password: string;
 
   @IsNotEmpty()
   @Matches(/^(\+?963|0)?9\d{8}$/,{

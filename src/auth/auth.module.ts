@@ -7,18 +7,22 @@ import { AuthService } from './auth.service';
 import { UserDevice } from './entities/user-device.entity';
 import { UserModule } from '../user/user.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { OtpService } from './otp.service';
+import { OtpService } from '../core/mail/otp.service';
 import { Account } from '@src/user/entities/account.entity';
+import { BullModule } from '@nestjs/bullmq';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([UserDevice,Account]),
+    TypeOrmModule.forFeature([UserDevice, Account]),
     UserModule,
     PassportModule,
     JwtModule.register({}),
+    BullModule.registerQueue({
+          name:'mail-queue'
+        }),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, OtpService],
   exports: [AuthService, OtpService],
 })
-export class AuthModule {}
+export class AuthModule { }

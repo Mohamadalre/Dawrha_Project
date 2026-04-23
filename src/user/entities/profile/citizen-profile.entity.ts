@@ -9,17 +9,15 @@ import {
 } from 'typeorm';
 import { Account } from '../account.entity';
 import { Location } from '@src/common/entities/location.entity';
+import { ProfileStatus } from './profile-status.entity';
 
 @Entity('citizen_profiles')
 export class CitizenProfile extends Location {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ nullable: true })
-  firstName: string;
-
-  @Column({ nullable: true })
-  lastName: string;
+  @Column(()=>ProfileStatus)
+  profile:ProfileStatus
 
   @OneToOne(() => Account, (account) => account.citizenProfile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'account_id' })

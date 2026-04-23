@@ -14,8 +14,9 @@ export class UserDevice {
   @Column({ nullable: true })
   fcmToken: string;
 
-  @Column({ nullable: true })
+  @Column({ unique:true,nullable: true })
   deviceId: string;
+
 
   @Column({ nullable: true })
   deviceType: string;

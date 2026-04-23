@@ -21,6 +21,9 @@ export class Account {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column()
+  name:string;
+
   @Column({ unique: true })
   email: string;
 

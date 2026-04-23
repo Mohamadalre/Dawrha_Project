@@ -1,7 +1,7 @@
 import { Controller, Post, Body, UseGuards, Get } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import {RefreshTokenDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto';
-import {RegisterDto} from './dto/register.dto';
+import {RegisterCitizenDto} from './dto/register.dto';
 import {LoginDto} from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -9,39 +9,42 @@ import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/roles.decorator';
 import { Role } from '../user/enums/role.enum';
 
-@Controller('auth')
+@Controller({
+  path:'auth',
+  version:'1'
+})
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('register-citizen')
-  async registerCitizen(@Body() registerDto: RegisterDto) {
+  @Post('citizen/register')
+  async registerCitizen(@Body() registerDto: RegisterCitizenDto) {
     const tokens = await this.authService.register(registerDto,Role.CITIZEN);
     return { message: 'Registration successful', result: tokens };
   }
 
-  @Post('login')
-  async login(@Body() loginDto: LoginDto) {
-    const tokens = await this.authService.login(loginDto);
-    return { message: 'Login successful', result: tokens };
-  }
+  // @Post('login-citizen')
+  // async login(@Body() loginDto: LoginDto) {
+  //   const tokens = await this.authService.login(loginDto);
+  //   return { message: 'Login successful', result: tokens };
+  // }
 
-  @Post('refresh')
-  async refreshTokens(@Body() refreshDto: RefreshTokenDto) {
-    const tokens = await this.authService.refreshTokens(refreshDto);
-    return { message: 'Tokens refreshed successfully', result: tokens };
-  }
+  // @Post('refresh')
+  // async refreshTokens(@Body() refreshDto: RefreshTokenDto) {
+  //   const tokens = await this.authService.refreshTokens(refreshDto);
+  //   return { message: 'Tokens refreshed successfully', result: tokens };
+  // }
 
-  @Post('forgot-password')
-  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
-    const res = await this.authService.forgotPassword(forgotPasswordDto);
-    return { message: res.message };
-  }
+  // @Post('forgot-password')
+  // async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+  //   const res = await this.authService.forgotPassword(forgotPasswordDto);
+  //   return { message: res.message };
+  // }
 
-  @Post('reset-password')
-  async resetPassword(@Body() resetDto: ResetPasswordDto) {
-    const res = await this.authService.resetPassword(resetDto);
-    return { message: res.message };
-  }
+  // @Post('reset-password')
+  // async resetPassword(@Body() resetDto: ResetPasswordDto) {
+  //   const res = await this.authService.resetPassword(resetDto);
+  //   return { message: res.message };
+  // }
 
   @UseGuards(JwtAuthGuard)
   @Get('me')

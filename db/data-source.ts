@@ -12,6 +12,6 @@ export const AppDataSource = new DataSource({
   database: process.env.DB_NAME,
   synchronize: false, 
   entities: ['dist/**/*.entity.js'],
-  migrations: ['dist/migrations/*.js'],
+  migrations: ['dist/db/migrations/*.js'],
   namingStrategy: new SnakeNamingStrategy(),
 });

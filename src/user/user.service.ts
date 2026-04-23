@@ -12,8 +12,7 @@ export class UserService {
 
   async findByEmail(email: string): Promise<Account> {
     const account = await this.accountRepository.findOne({
-      where: { email },
-      relations: ['collectorProfile', 'factoryProfile', 'citizenProfile','InstitutionProfile','ExternalPartnerProfile'],
+      where: { email }
     });
 
     if (!account) {

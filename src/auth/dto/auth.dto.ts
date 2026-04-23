@@ -1,10 +1,6 @@
 import {  IsNotEmpty, IsOptional, IsPhoneNumber, IsString, MinLength } from 'class-validator';
 
 
-
-
-
-
 export class RefreshTokenDto {
   @IsNotEmpty()
   @IsString()
