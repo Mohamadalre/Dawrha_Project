@@ -30,7 +30,7 @@ async function bootstrap() {
 
   
     await app.listen(port);
-console.log("gggggggggg");
+
 
     logger.log(`Server is running on port ${port}`, 'SYSTEM')
 
@@ -38,7 +38,25 @@ console.log("gggggggggg");
     logger.error(`Critical System Failure : ${error.message}`, error.stack, 'SYSTEM');
     console.log(`error ${error}`);
     
-    process.exit(1)
+    setTimeout(()=>process.exit(1),1000)
   }
+
 }
+
+
 bootstrap();
+
+
+
+/**
+ * 
+ *   process.on('uncaughtException', (err) => {
+  const logger = WinstonModule.createLogger(winstonConfig);
+  logger.error(`Uncaught Exception: ${err.message}, err.stack, 'SYSTEM'`);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  const logger = WinstonModule.createLogger(winstonConfig);
+  logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}, 'SYSTEM'`);
+});
+ */

@@ -7,7 +7,7 @@ import * as argon2 from 'argon2';
 import { UserService } from '../user/user.service';
 import { UserDevice } from './entities/user-device.entity';
 import { RefreshTokenDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto';
-import { RegisterCitizenDto } from './dto/register.dto'
+import { RegisterDto } from './dto/register.dto'
 import { OtpService } from '../core/mail/otp.service';
 import { LoginDto } from './dto/login.dto'
 import { Role } from '@src/user/enums/role.enum';
@@ -32,7 +32,7 @@ export class AuthService {
     private readonly otpService: OtpService,
   ) { }
 
-  async register(registerDto: RegisterCitizenDto, role: Role) {
+  async register(registerDto: RegisterDto, role: Role) {
 
     const existAccount = await this.accountRepository.findOne({ where: { email: registerDto.email } });
     if (existAccount) throw new BadRequestException('The email already exists');
@@ -57,7 +57,7 @@ export class AuthService {
       await this.otpService.generateAndSendOtp(saveAccount.email);
  
     }
-    return await this.generateTokens(account.id, account.role,registerDto.deviceId, registerDto.deviceType, registerDto.fcmToken);
+    return await this.generateTokens(account.id, account.role,account.accountStatus,registerDto.deviceId, registerDto.deviceType, registerDto.fcmToken);
   }
 
   // async login(loginDto: LoginDto) {
@@ -69,7 +69,8 @@ export class AuthService {
   //   }
   //   if (!account.isEmailVerified) { 
   //     await this.otpService.generateAndSendOtp(account.email);
-  //     return { message: 'Your account is not activated,please enter a otp code' }
+         //const data = await this.generateTokens(account.id, account.role, loginDto.deviceType, loginDto.fcmToken);
+  //     return { message: 'Your account is not activated,please enter a otp code',data:data }
 
 
   //   }
@@ -77,8 +78,8 @@ export class AuthService {
   //   return await this.generateTokens(account.id, account.role, loginDto.deviceType, loginDto.fcmToken);
   // }
 
-  private async generateTokens(accountId: string, role: Role, deviceId?: string, deviceType?: string, fcmToken?: string) {
-    const payload = { id: accountId, role: role };
+  private async generateTokens(accountId: string, role: Role,accountStatus:AccountStatus, deviceId?: string, deviceType?: string, fcmToken?: string) {
+    const payload = { id: accountId, role: role,accountStatus };
 
     const [accessToken, refreshTokenRaw] = await Promise.all([
       this.jwtService.signAsync(payload, {

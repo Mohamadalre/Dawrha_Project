@@ -1,7 +1,8 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsPhoneNumber, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty,IsString  } from 'class-validator';
+import { DeviceDto } from './auth.dto';
 
 
-export class LoginDto {
+export class LoginDto extends DeviceDto{
   @IsNotEmpty()
   @IsString() 
   @IsEmail()
@@ -11,15 +12,5 @@ export class LoginDto {
   @IsString()
   password: string;
 
-  @IsOptional()
-  @IsString()
-  deviceId?: string;
 
-  @IsOptional()
-  @IsString()
-  deviceType?: string;
-  
-  @IsOptional()
-  @IsString()
-  fcmToken?: string;
 }

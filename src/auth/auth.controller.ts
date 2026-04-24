@@ -1,7 +1,7 @@
 import { Controller, Post, Body, UseGuards, Get } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import {RefreshTokenDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto';
-import {RegisterCitizenDto} from './dto/register.dto';
+import {RegisterDto} from './dto/register.dto';
 import {LoginDto} from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -17,7 +17,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('citizen/register')
-  async registerCitizen(@Body() registerDto: RegisterCitizenDto) {
+  async registerCitizen(@Body() registerDto: RegisterDto) {
     const tokens = await this.authService.register(registerDto,Role.CITIZEN);
     return { message: 'Registration successful', result: tokens };
   }

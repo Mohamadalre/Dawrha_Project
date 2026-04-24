@@ -31,3 +31,18 @@ export class ResetPasswordDto {
   @MinLength(6)
   newPassword: string;
 }
+
+
+export class DeviceDto {
+  @IsOptional()
+  @IsString()
+  deviceId?: string;
+
+  @IsOptional()
+  @IsString()
+  deviceType?: string;
+  
+  @IsOptional()
+  @IsString()
+  fcmToken?: string;
+}

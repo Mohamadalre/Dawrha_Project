@@ -23,7 +23,7 @@ export const winstonConfig = {
   transports: [
 
     new winston.transports.Console({
-      level:'silly',
+      level:'debug',
       format: consoleFormat,
     }),
 
@@ -56,7 +56,7 @@ export const winstonConfig = {
       filename: path.join(LOGS_DIR, 'system', 'system-%DATE%.log'),
       datePattern: 'YYYY-MM-DD',
       maxFiles: '15d',
-      level: 'debug', // سيلتقط info, warn, error
+      level: 'debug', 
       format: winston.format.combine(
         winston.format((info) => {
           // if (info.context !== 'JOBS') {
