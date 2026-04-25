@@ -1,13 +1,15 @@
-import { Controller, Post, Body, UseGuards, Get } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Get, HttpCode } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import {RefreshTokenDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto';
+import {RefreshTokenDto} from './dto/auth.dto';
 import {RegisterDto} from './dto/register.dto';
+import { ForgotPasswordDto,ResetPasswordDto } from './dto/forgot-password.dto'
 import {LoginDto} from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/roles.decorator';
 import { Role } from '../user/enums/role.enum';
+
 
 @Controller({
   path:'auth',
@@ -17,6 +19,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('citizen/register')
+  @HttpCode(201)
   async registerCitizen(@Body() registerDto: RegisterDto) {
     const tokens = await this.authService.register(registerDto,Role.CITIZEN);
     return { message: 'Registration successful', result: tokens };
@@ -34,17 +37,19 @@ export class AuthController {
   //   return { message: 'Tokens refreshed successfully', result: tokens };
   // }
 
-  // @Post('forgot-password')
-  // async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
-  //   const res = await this.authService.forgotPassword(forgotPasswordDto);
-  //   return { message: res.message };
-  // }
+  @Post('forgot-password')
+  @HttpCode(200)
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    const res = await this.authService.forgotPassword(forgotPasswordDto);
+    return { message: res.message };
+  }
 
-  // @Post('reset-password')
-  // async resetPassword(@Body() resetDto: ResetPasswordDto) {
-  //   const res = await this.authService.resetPassword(resetDto);
-  //   return { message: res.message };
-  // }
+  @Post('reset-password')
+  @HttpCode(200)
+  async resetPassword(@Body() resetDto: ResetPasswordDto) {
+    const res = await this.authService.resetPassword(resetDto);
+    return { message: res.message };
+  }
 
   @UseGuards(JwtAuthGuard)
   @Get('me')

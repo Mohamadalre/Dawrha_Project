@@ -11,7 +11,7 @@ export class CreateAccountDto {
   @IsNotEmpty()
   @IsString()
   @MinLength(6)
-  @MaxLength(30)
+  @MaxLength(32)
   password: string;
 
   @IsNotEmpty()

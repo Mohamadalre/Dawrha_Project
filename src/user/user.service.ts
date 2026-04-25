@@ -8,7 +8,7 @@ export class UserService {
   constructor(
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
-  ) {}
+  ) { }
 
   async findByEmail(email: string): Promise<Account> {
     const account = await this.accountRepository.findOne({
@@ -32,8 +32,7 @@ export class UserService {
     return account;
   }
 
-
-    async update(id: string,data:object): Promise<Boolean> {
+  async update(id: string, data: object): Promise<Boolean> {
     const account = await this.accountRepository.update(id,data);
     if (!account) {
       throw new NotFoundException(`Account with ID ${id} not found`);

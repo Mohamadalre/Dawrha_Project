@@ -4,7 +4,8 @@ import { AppService } from './app.service';
 import { CoreModule } from './core/core.module';
 import { UserModule } from './user/user.module';
 import { AuthModule } from './auth/auth.module';
-import { PermissionsModule } from './permissions/permissions.module';
+import { PermissionsModule } from './permission/permissions.module';
+import { NotificationModule } from './notification/notification.module';
 
 @Module({
   imports: [
@@ -12,8 +13,9 @@ import { PermissionsModule } from './permissions/permissions.module';
     UserModule,
     AuthModule,
     PermissionsModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }

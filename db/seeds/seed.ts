@@ -1,5 +1,5 @@
-import { Permission } from "@src/permissions/entities/permission.entity";
-import { RolePermission } from "@src/permissions/entities/role-permission.entity";
+import { Permission } from "@src/permission/entities/permission.entity";
+import { RolePermission } from "@src/permission/entities/role-permission.entity";
 import { ROLE_PERMISSIONS } from "./role-permissions.config";
 import { Role } from "@src/user/enums/role.enum";
 import { DataSource } from "typeorm";

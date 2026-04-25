@@ -6,13 +6,16 @@ import { Repository } from 'typeorm';
 import * as argon2 from 'argon2';
 import { UserService } from '../user/user.service';
 import { UserDevice } from './entities/user-device.entity';
-import { RefreshTokenDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto';
+import { RefreshTokenDto } from './dto/auth.dto';
+import { ForgotPasswordDto, ResetPasswordDto } from './dto/forgot-password.dto'
 import { RegisterDto } from './dto/register.dto'
-import { OtpService } from '../core/mail/otp.service';
+import { MailService } from '../core/mail/mail.service';
 import { LoginDto } from './dto/login.dto'
 import { Role } from '@src/user/enums/role.enum';
 import { Account } from '@src/user/entities/account.entity';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
+import { DeviceType } from '@src/user/enums/deviec-type.enum';
+
 
 
 
@@ -29,35 +32,43 @@ export class AuthService {
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
 
-    private readonly otpService: OtpService,
+    private readonly mailService: MailService,
   ) { }
 
-  async register(registerDto: RegisterDto, role: Role) {
+  async register({
+    fullName,
+    email,
+    phone,
+    password,
+    deviceId,
+    deviceType,
+    fcmToken
+  }: RegisterDto, role: Role) {
 
-    const existAccount = await this.accountRepository.findOne({ where: { email: registerDto.email } });
+    const existAccount = await this.accountRepository.findOne({ where: { email: email } });
     if (existAccount) throw new BadRequestException('The email already exists');
-    const existphone = await this.accountRepository.findOne({ where: { phone: registerDto.phone } });
+    const existphone = await this.accountRepository.findOne({ where: { phone: phone } });
     if (existphone) throw new BadRequestException('The phone already exists');
 
-    const hashPassword = await argon2.hash(registerDto.password);
+    const hashPassword = await argon2.hash(password);
 
     const account = this.accountRepository.create({
-      name:registerDto.fullName,
-      email:registerDto.email,
-      phone:registerDto.phone,
+      name: fullName,
+      email: email,
+      phone: phone,
       passwordHash: hashPassword,
       role: role,
-      accountStatus:role != Role.CITIZEN?AccountStatus.PENDING_PROFILE:AccountStatus.INACTIVE,
-      
+      accountStatus: role != Role.CITIZEN ? AccountStatus.PENDING_PROFILE : AccountStatus.INACTIVE,
+
     });
     const saveAccount = await this.accountRepository.save(account);
- 
+
     if (role == Role.CITIZEN) {
-    
-      await this.otpService.generateAndSendOtp(saveAccount.email);
- 
+
+      await this.mailService.generateAndSendOtp(saveAccount.email);
+
     }
-    return await this.generateTokens(account.id, account.role,account.accountStatus,registerDto.deviceId, registerDto.deviceType, registerDto.fcmToken);
+    return await this.generateTokens(account.id, account.role, account.accountStatus,deviceId,deviceType, fcmToken);
   }
 
   // async login(loginDto: LoginDto) {
@@ -68,18 +79,18 @@ export class AuthService {
   //     throw new UnauthorizedException('Invalid credentials');
   //   }
   //   if (!account.isEmailVerified) { 
-  //     await this.otpService.generateAndSendOtp(account.email);
-         //const data = await this.generateTokens(account.id, account.role, loginDto.deviceType, loginDto.fcmToken);
+  //     await this.mailService.generateAndSendOtp(account.email);
+  //const data = await this.generateTokens(account.id, account.role, loginDto.deviceType, loginDto.fcmToken);
   //     return { message: 'Your account is not activated,please enter a otp code',data:data }
 
 
   //   }
-  
+
   //   return await this.generateTokens(account.id, account.role, loginDto.deviceType, loginDto.fcmToken);
   // }
 
-  private async generateTokens(accountId: string, role: Role,accountStatus:AccountStatus, deviceId?: string, deviceType?: string, fcmToken?: string) {
-    const payload = { id: accountId, role: role,accountStatus };
+  private async generateTokens(accountId: string, role: Role, accountStatus: AccountStatus, deviceId?: string, deviceType?: DeviceType, fcmToken?: string) {
+    const payload = { id: accountId, role: role, accountStatus };
 
     const [accessToken, refreshTokenRaw] = await Promise.all([
       this.jwtService.signAsync(payload, {
@@ -94,7 +105,7 @@ export class AuthService {
 
     const hashedRefreshToken = await argon2.hash(refreshTokenRaw);
 
-    let device = await this.userDeviceRepository.findOne({where:{accountId,deviceId}});
+    let device = await this.userDeviceRepository.findOne({ where: { accountId, deviceId } });
     if (!device) {
       device = this.userDeviceRepository.create({
         accountId,
@@ -143,33 +154,31 @@ export class AuthService {
   //   }
   // }
 
-  // async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
-  //   const account = await this.userService.findByEmail(forgotPasswordDto.email);
-  //   await this.otpService.generateAndSendOtp(account.email);
-  //   return { message: 'OTP sent successfully' };
-  // }
-
-  // async resetPassword(resetDto: ResetPasswordDto) {
-  //   const isValid = await this.otpService.verifyOtp(resetDto.email, resetDto.otp);
-
-  //   if (!isValid) {
-  //     throw new BadRequestException('Invalid or expired OTP');
-  //   }
-
-  //   const account = await this.userService.findByEmail(resetDto.email);
-  //   account.passwordHash = await argon2.hash(resetDto.newPassword);
-
-  //   // Saving account (requires public accessor for accountRepository or a dedicated update password func in userService)
-  //   await this.userService['accountRepository'].save(account);
-
-  //   await this.userDeviceRepository.update({ accountId: account.id }, { refreshToken: '' }); // null to empty string or remove type error
-
-  //   await this.otpService.clearOtp(resetDto.email);
-
-  //   return { message: 'Password reset successfully' };
-  // }
+  async forgotPassword({email}: ForgotPasswordDto) {
+    const account = await this.userService.findByEmail(email);
+    await this.mailService.generateAndSendTokenUrl(account.email, account.id);
+    return { message: 'TokenURL sent successfully' };
+  }
 
 
-  
+
+  async resetPassword({ newPassword, confirmPassword,tokenUrl }: ResetPasswordDto, ) {
+
+    if (newPassword !== confirmPassword) throw new BadRequestException('Passwords do not match');
+    const userId = await this.mailService.getRedisByKey(`reset:${tokenUrl}`);
+    if(!userId) throw new BadRequestException('Invailed or expired token');
+    const hashPassword = await argon2.hash(newPassword);
+    const existUser = await this.userService.update(userId!,{passwordHash:newPassword})
+
+
+    await this.userDeviceRepository.update({ accountId:userId}, { refreshToken: '' }); // null to empty string or remove type error
+
+    await this.mailService.clearByKey(`reset:${tokenUrl}`);
+
+    return { message: 'Password reset successfully' };
+  }
+
+
+
 }
 

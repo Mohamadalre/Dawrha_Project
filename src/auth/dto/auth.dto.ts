@@ -1,4 +1,6 @@
-import {  IsNotEmpty, IsOptional, IsPhoneNumber, IsString, MinLength } from 'class-validator';
+import { DeviceType } from '@src/user/enums/deviec-type.enum';
+import { Role } from '@src/user/enums/role.enum';
+import {  IsEnum, IsNotEmpty, IsOptional, IsPhoneNumber, IsString, MinLength } from 'class-validator';
 
 
 export class RefreshTokenDto {
@@ -11,26 +13,9 @@ export class RefreshTokenDto {
   deviceId?: string;
 }
 
-export class ForgotPasswordDto {
-  @IsNotEmpty()
-  @IsString()
-  email: string;
-}
 
-export class ResetPasswordDto {
-  @IsNotEmpty()
-  @IsString()
-  email:string;
 
-  @IsNotEmpty()
-  @IsString()
-  otp: string;
 
-  @IsNotEmpty()
-  @IsString()
-  @MinLength(6)
-  newPassword: string;
-}
 
 
 export class DeviceDto {
@@ -39,8 +24,8 @@ export class DeviceDto {
   deviceId?: string;
 
   @IsOptional()
-  @IsString()
-  deviceType?: string;
+  @IsEnum(DeviceType)
+  deviceType?:DeviceType ;
   
   @IsOptional()
   @IsString()

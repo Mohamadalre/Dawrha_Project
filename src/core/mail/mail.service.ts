@@ -4,13 +4,15 @@ import * as crypto from 'crypto';
 
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
-export class OtpService {
-  private readonly logger = new Logger(OtpService.name)
+export class MailService {
+  private readonly logger = new Logger(MailService.name)
   constructor(
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
-    @InjectQueue('mail-queue') private mailQueue: Queue
+    @InjectQueue('mail-queue') private mailQueue: Queue,
+    private readonly configService: ConfigService,
   ) { }
 
   private hash(code: string): string {
@@ -23,7 +25,7 @@ export class OtpService {
     const redisKey = `otp:${email}`;
 
     try {
-      await this.redis.set(redisKey, hashed, 'EX', 300);
+      await this.redis.set(redisKey, hashed, 'EX', 600);
       await this.mailQueue.add('send-otp', {
         email,
         otp
@@ -31,7 +33,7 @@ export class OtpService {
         attempts: 3,
         backoff: 5000,
         removeOnComplete: true,
-  
+
       })
       this.logger.log(`OTP generated and queue task added for :${email}`)
 
@@ -39,7 +41,34 @@ export class OtpService {
       this.logger.log(`Failed to generate of queue OTP : ${error.message}`)
 
       await this.redis.del(redisKey);
-       throw error;
+      throw error;
+    }
+  }
+
+  async generateAndSendTokenUrl(email: string, userId: string) {
+    const tokenUrl = crypto.randomBytes(32).toString('hex')
+    const redisKey = `reset:${tokenUrl}`;
+    
+    const link = `${this.configService.get<string>('SEVER_HOST')}:${this.configService.get<number>('PORT')}/v1/auth/reset-password?token=${tokenUrl}`
+
+    try {
+      await this.redis.set(redisKey, userId, 'EX', 600);
+      await this.mailQueue.add('send-reset-link', {
+        email,
+        link
+      }, {
+        attempts: 3,
+        backoff: 5000,
+        removeOnComplete: true,
+
+      })
+      this.logger.log(`TokenURL generated and queue task added for :${email}`)
+
+    } catch (error) {
+      this.logger.log(`Failed to generate of queue TokenURL : ${error.message}`)
+
+      await this.redis.del(redisKey);
+      throw error;
     }
   }
 
@@ -55,5 +84,13 @@ export class OtpService {
 
   async clearOtp(email: string): Promise<void> {
     await this.redis.del(`otp:${email}`);
+  }
+
+  async getRedisByKey(key:string): Promise<string | null> {
+    return await this.redis.get(key);
+  }
+
+  async clearByKey(key: string): Promise<void> {
+    await this.redis.del(key);
   }
 }
