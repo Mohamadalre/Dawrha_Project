@@ -9,14 +9,14 @@ import { winstonConfig } from './core/logger-config/logger.config';
 import { LoggerExceptionsFilter } from './common/filters/logger-exception.filter';
 
 async function bootstrap() {
-  const logger = WinstonModule.createLogger(winstonConfig);
+    const logger = WinstonModule.createLogger(winstonConfig);
   dotenv.config();
   const port = process.env.PORT || 3000;
   try {
     const app = await NestFactory.create(AppModule, { logger
       ,bufferLogs:true
      });
-       //app.useLogger(logger);
+      //  app.useLogger(logger);
 
 
 

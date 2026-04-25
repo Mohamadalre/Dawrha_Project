@@ -20,9 +20,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   async validate(payload: any) {
     const account = await this.userService.findById(payload.sub || payload.id);
-    if (!account || account.accountStatus === AccountStatus.INACTIVE) {
+    if (!account) {
       throw new UnauthorizedException('Account is disabled or not found');
     }
-    return { id: account.id, role: payload.role };
+    return { id: account.id, role: payload.role,email :account.email };
   }
 }

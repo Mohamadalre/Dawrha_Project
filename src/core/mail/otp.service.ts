@@ -1,5 +1,4 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { InternalServerErrorException } from '@nestjs/common';
 import Redis from 'ioredis';
 import * as crypto from 'crypto';
 
