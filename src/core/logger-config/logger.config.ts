@@ -23,9 +23,14 @@ export const winstonConfig = {
   transports: [
 
     new winston.transports.Console({
-      level:'debug',
+      level:'silly',
       format: consoleFormat,
     }),
+      // new winston.transports.File({
+      //     filename: 'logs/app.log',
+      //     level:'info',
+        
+      //   }),
 
   
     new winston.transports.DailyRotateFile({
@@ -59,13 +64,9 @@ export const winstonConfig = {
       level: 'debug', 
       format: winston.format.combine(
         winston.format((info) => {
-          // if (info.context !== 'JOBS') {
-           
-            
-            
-            return info;
+           if (info.context !== 'JOBS')  return info;
        
-       //    return false;
+           return false;
         })(),
         fileFormat
       ),

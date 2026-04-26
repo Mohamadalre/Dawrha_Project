@@ -13,19 +13,23 @@ export class Notification {
     @PrimaryGeneratedColumn("uuid")
     id: string;
 
+  @ManyToOne(() => Account, {
+    onDelete: 'CASCADE',
+  })
+  user: Account;
 
-    @ManyToOne(() => Account, (user) => user.id, {
-        onDelete: "CASCADE",
-    })
-    user: Account;
+  @Column()
+  title: string;
 
-    @Column()
-    title: string;
+  @Column()
+  body: string;
 
-    @Column()
-    message: string;
+  @Column({ type: 'json', nullable: true })
+  data: Record<string, any>;
 
+  @Column({ default: false })
+  isRead: boolean;
 
-    @CreateDateColumn()
-    createdAt: Date;
+  @CreateDateColumn()
+  createdAt: Date;
 }

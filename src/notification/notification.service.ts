@@ -20,23 +20,21 @@ export class NotificationService {
         userId: string,
         title: string,
         body: string,
-        data?: Record<string, string>
+        data?: Record<string, string>,
     ) {
-        const devices = await this.userDerviceRep.find({ where: { accountId: userId } });
-        const tokens = devices
-            .map(d => d.fcmToken)
-            .filter(Boolean)
+        const devices = await this.userDerviceRep.find({
+            where: { accountId: userId },
+        });
+
+        const tokens = devices.map(d => d.fcmToken).filter(Boolean);
+
         if (!tokens.length) return;
-        const message: admin.messaging.MulticastMessage = {
+
+        return this.firebaseApp.messaging().sendEachForMulticast({
             tokens,
             notification: { title, body },
-            data: data || {}
-        };
-        const response = await this.firebaseApp.messaging().sendEachForMulticast(message);
-        return {
-            successCount: response.successCount,
-            failureCount: response.failureCount
-        };
+            data: data || {},
+        });
     }
 
     async sendToDevice(
@@ -62,10 +60,19 @@ export class NotificationService {
         }
     }
 
-    getUserNotifications(userId: string) {
-    return this.notificationrep.find({
-      where: { user:{id:userId} },
-      order: { createdAt: "DESC" },
-    });
-  }
+    create(data: Partial<Notification>) {
+        return this.notificationrep.save(this.notificationrep.create(data));
+    }
+
+    findUserNotifications(userId: string) {
+        return this.notificationrep.find({
+            where: { user: { id: userId } },
+            order: { createdAt: 'DESC' },
+        });
+    }
+
+    async markAsRead(id: string) {
+        await this.notificationrep.update(id, { isRead: true });
+        return { message: 'Marked as read' };
+    }
 }

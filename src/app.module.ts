@@ -6,9 +6,11 @@ import { UserModule } from './user/user.module';
 import { AuthModule } from './auth/auth.module';
 import { PermissionsModule } from './permission/permissions.module';
 import { NotificationModule } from './notification/notification.module';
+import {EventEmitterModule} from '@nestjs/event-emitter'
 
 @Module({
   imports: [
+    EventEmitterModule.forRoot(), 
     CoreModule,
     UserModule,
     AuthModule,

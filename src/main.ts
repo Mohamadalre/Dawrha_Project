@@ -8,6 +8,7 @@ import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './core/logger-config/logger.config';
 import { LoggerExceptionsFilter } from './common/filters/logger-exception.filter';
 
+
 async function bootstrap() {
     const logger = WinstonModule.createLogger(winstonConfig);
   dotenv.config();
@@ -30,6 +31,7 @@ async function bootstrap() {
 
   
     await app.listen(port);
+
 
 
     logger.log(`Server is running on port ${port}`, 'SYSTEM')

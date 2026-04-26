@@ -24,7 +24,6 @@ export class UserService {
   async findById(id: string): Promise<Account> {
     const account = await this.accountRepository.findOne({
       where: { id },
-      relations: ['collectorProfile', 'factoryProfile', 'citizenProfile'],
     });
     if (!account) {
       throw new NotFoundException(`Account with ID ${id} not found`);

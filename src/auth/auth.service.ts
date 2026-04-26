@@ -15,6 +15,7 @@ import { Role } from '@src/user/enums/role.enum';
 import { Account } from '@src/user/entities/account.entity';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { DeviceType } from '@src/user/enums/deviec-type.enum';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
 
 
 
@@ -68,7 +69,7 @@ export class AuthService {
       await this.mailService.generateAndSendOtp(saveAccount.email);
 
     }
-    return await this.generateTokens(account.id, account.role, account.accountStatus,deviceId,deviceType, fcmToken);
+    return await this.generateTokens(account.id, account.role, account.accountStatus, deviceId, deviceType, fcmToken);
   }
 
   // async login(loginDto: LoginDto) {
@@ -89,6 +90,12 @@ export class AuthService {
   //   return await this.generateTokens(account.id, account.role, loginDto.deviceType, loginDto.fcmToken);
   // }
 
+  async verifyOtp(otpCode:string, userId: string) {
+    const account = await this.userService.findById(userId);
+    const existVerify = await this.mailService.verifyOtp(account.email,otpCode)
+    if(!existVerify){}
+    return { message: 'TokenURL sent successfully' };
+  }
   private async generateTokens(accountId: string, role: Role, accountStatus: AccountStatus, deviceId?: string, deviceType?: DeviceType, fcmToken?: string) {
     const payload = { id: accountId, role: role, accountStatus };
 
@@ -154,7 +161,7 @@ export class AuthService {
   //   }
   // }
 
-  async forgotPassword({email}: ForgotPasswordDto) {
+  async forgotPassword({ email }: ForgotPasswordDto) {
     const account = await this.userService.findByEmail(email);
     await this.mailService.generateAndSendTokenUrl(account.email, account.id);
     return { message: 'TokenURL sent successfully' };
@@ -162,16 +169,16 @@ export class AuthService {
 
 
 
-  async resetPassword({ newPassword, confirmPassword,tokenUrl }: ResetPasswordDto, ) {
+  async resetPassword({ newPassword, confirmPassword, tokenUrl }: ResetPasswordDto,) {
 
     if (newPassword !== confirmPassword) throw new BadRequestException('Passwords do not match');
     const userId = await this.mailService.getRedisByKey(`reset:${tokenUrl}`);
-    if(!userId) throw new BadRequestException('Invailed or expired token');
+    if (!userId) throw new BadRequestException('Invailed or expired token');
     const hashPassword = await argon2.hash(newPassword);
-    const existUser = await this.userService.update(userId!,{passwordHash:newPassword})
+    const existUser = await this.userService.update(userId!, { passwordHash: newPassword })
 
 
-    await this.userDeviceRepository.update({ accountId:userId}, { refreshToken: '' }); // null to empty string or remove type error
+    await this.userDeviceRepository.update({ accountId: userId }, { refreshToken: '' }); // null to empty string or remove type error
 
     await this.mailService.clearByKey(`reset:${tokenUrl}`);
 

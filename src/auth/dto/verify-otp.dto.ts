@@ -1,9 +1,10 @@
-import { IsNotEmpty, IsNumber, Length } from "class-validator";
+import { IsNotEmpty, IsNumber, Max, Min } from "class-validator";
 
-export class VerifyOtpDto{
-    @IsNumber()
+export class VerifyOtpDto {
     @IsNotEmpty()
-    @Length(5,5)
-    otpCode:string
+    @IsNumber()
+    @Min(5)
+    @Max(5)
+    otpCode: number
 
 }
