@@ -206,7 +206,9 @@ export class AuthService {
       }),
     ]);
 
+
     const hashedRefreshToken = await argon2.hash(refreshTokenRaw);
+
 
     let device = await this.userDeviceRepository.findOne({ where: { accountId, deviceId } });
     if (!device) {
@@ -219,12 +221,16 @@ export class AuthService {
     } else {
       device.fcmToken = fcmToken || device.fcmToken;
       device.deviceType = deviceType || device.deviceType;
+
     }
+
 
     device.refreshToken = hashedRefreshToken;
     device.lastLogin = new Date();
     await this.userDeviceRepository.save(device);
-    await this.redisService.setRedisKey({ redisKey: `Device:${device.deviceId}`, redisValue: hashedRefreshToken, date: 1000 });
+   
+    
+    await this.redisService.setRedisKey({ redisKey: `refreshToken:${device.deviceId}`, redisValue: hashedRefreshToken, date: 1000 });
 
     return {
       accessToken,
@@ -274,16 +280,19 @@ export class AuthService {
       const account = await this.userService.findById(payload.id || payload.sub)
       let existRedis: any;
       existRedis = await this.redisService.getRedisByKey(`refreshToken:${deviceId}`);
+      
       if (!existRedis) {
         const device = await this.userDeviceRepository.findOne({
           where: { accountId: account.id, deviceId: deviceId }
         });
+
 
         if (!device || !device.refreshToken) {
           throw new UnauthorizedException('Access denied, invalid token');
         }
         existRedis = await this.redisService.setRedisKey({ redisKey: `refreshToken:${device.deviceId}`, redisValue: device.refreshToken, date: 1000 });
       }
+
 
       const isRefreshTokenValid = await argon2.verify(existRedis, token);
       if (!isRefreshTokenValid) {
