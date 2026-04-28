@@ -8,27 +8,31 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Account } from '../account.entity';
-import { Location } from '@src/common/entities/location.entity';
-import { ProfileStatus } from './profile-status.entity';
+import { Location } from '@src/user/entities/location/location.entity';
+
 
 @Entity('factory_profiles')
-export class FactoryProfile extends Location{
+export class FactoryProfile {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Column()
   factoryManager: string;
 
-  @Column({ unique: true , nullable:false })
+  @Column({ unique: true, nullable: false })
   commercialRegister: string;
 
-  @Column({ unique: true , nullable:false })
+  @Column({ unique: true, nullable: false })
   factoryRegister: string;
 
-  @Column(()=>ProfileStatus)
-  profile:ProfileStatus
 
-  @Column({unique:true,nullable:false})
+  @OneToOne(() => Location, {
+    cascade: true, 
+    eager: true,   
+  })
+  @JoinColumn()
+  location: Location;
+  @Column({ unique: true, nullable: false })
   factoryPhone: string;
 
   @OneToOne(() => Account, (account) => account.factoryProfile, { onDelete: 'CASCADE' })

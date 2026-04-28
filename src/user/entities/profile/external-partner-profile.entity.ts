@@ -8,11 +8,11 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Account } from '../account.entity';
-import { Location } from '@src/common/entities/location.entity';
-import { ProfileStatus } from './profile-status.entity';
+import { Location } from '@src/user/entities/location/location.entity';
+
 
 @Entity('external_partner_profiles')
-export class ExternalPartnerProfile extends Location {
+export class ExternalPartnerProfile {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -20,14 +20,18 @@ export class ExternalPartnerProfile extends Location {
   @Column()
   externalPartnerManager: string;
 
-  @Column({unique:true,nullable:false})
+  @Column({ unique: true, nullable: false })
   externalPartnerPhone: string;
 
-  @Column({ unique: true , nullable:false })
+  @Column({ unique: true, nullable: false })
   commercialRegister: string;
 
-  @Column(()=>ProfileStatus)
-  profile:ProfileStatus
+  @OneToOne(() => Location, {
+    cascade: true, 
+    eager: true,   
+  })
+  @JoinColumn()
+  location: Location;
 
 
   @OneToOne(() => Account, (account) => account.externalPartnerProfile, { onDelete: 'CASCADE' })

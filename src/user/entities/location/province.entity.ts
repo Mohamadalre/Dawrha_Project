@@ -6,7 +6,6 @@ import {
     UpdateDateColumn,
     OneToMany
 }from 'typeorm';
-import { City } from './city.entity';
 
 @Entity('provinces')
 export class Province{
@@ -18,14 +17,6 @@ export class Province{
 
     @Column({unique:true})
     name_ar:string;
-
-    //todo
-    // @Column()
-    // code:string;
-  @OneToMany(()=>City,(city)=>city.province)
-  cities:City[]
-
-  
 
   @CreateDateColumn()
   createdAt: Date;

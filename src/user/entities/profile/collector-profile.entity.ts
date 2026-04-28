@@ -8,11 +8,11 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Account } from '../account.entity';
-import { Location } from '@src/common/entities/location.entity';
-import { ProfileStatus } from './profile-status.entity';
+import { Location } from '@src/user/entities/location/location.entity';
+
 
 @Entity('collector_profiles')
-export class CollectorProfile extends Location {
+export class CollectorProfile {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -20,11 +20,15 @@ export class CollectorProfile extends Location {
   @Column({ nullable: false })
   drivingCretificatePhoto: string;
 
-  @Column({nullable:false})
-  birthDate:Date
+  @Column({ nullable: false })
+  birthDate: Date
 
-  @Column(()=>ProfileStatus)
-  profile:ProfileStatus
+  @OneToOne(() => Location, {
+    cascade: true, 
+    eager: true,   
+  })
+  @JoinColumn()
+  location: Location;
 
   @OneToOne(() => Account, (account) => account.CollectorProfile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'account_id' })

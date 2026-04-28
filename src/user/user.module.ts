@@ -5,10 +5,11 @@ import { CollectorProfile } from './entities/profile/collector-profile.entity';
 import { FactoryProfile } from './entities/profile/factory-profile.entity';
 import { CitizenProfile } from './entities/profile/citizen-profile.entity';
 import { Province } from './entities/location/province.entity';
-import { City } from './entities/location/city.entity';
+
 import { InstitutionProfile } from './entities/profile/institution-profile.entity';
 import { ExternalPartnerProfile } from './entities/profile/external-partner-profile.entity';
 import { UserService } from './user.service';
+import { Location } from './entities/location/location.entity';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { UserService } from './user.service';
       FactoryProfile,
       CitizenProfile,
       Province,
-      City,
+      Location,
       InstitutionProfile,
       ExternalPartnerProfile,
     ]),

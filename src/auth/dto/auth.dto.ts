@@ -1,27 +1,23 @@
 import { DeviceType } from '@src/user/enums/deviec-type.enum';
-import { Role } from '@src/user/enums/role.enum';
 import {  IsEnum, IsNotEmpty, IsOptional, IsPhoneNumber, IsString, MinLength } from 'class-validator';
 
 
 export class RefreshTokenDto {
-  @IsNotEmpty()
   @IsString()
-  refreshToken: string;
-
-  @IsOptional()
-  @IsString()
-  deviceId?: string;
+  @IsNotEmpty({message:'The Device ID is required'})
+  deviceId: string;
 }
 
-
-
-
-
+export class RefreshTokenTemporayDto {
+@IsString()
+token:string
+}
 
 export class DeviceDto {
-  @IsOptional()
+
   @IsString()
-  deviceId?: string;
+  @IsNotEmpty({message:'The Device ID is required'})
+  deviceId: string;
 
   @IsOptional()
   @IsEnum(DeviceType)

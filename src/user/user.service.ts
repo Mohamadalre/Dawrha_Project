@@ -26,7 +26,7 @@ export class UserService {
       where: { id },
     });
     if (!account) {
-      throw new NotFoundException(`Account with ID ${id} not found`);
+      throw new NotFoundException(`Account not found`);
     }
     return account;
   }
@@ -34,7 +34,7 @@ export class UserService {
   async update(id: string, data: object): Promise<Boolean> {
     const account = await this.accountRepository.update(id,data);
     if (!account) {
-      throw new NotFoundException(`Account with ID ${id} not found`);
+      throw new NotFoundException(`Account not found`);
     }
     return true;
   }

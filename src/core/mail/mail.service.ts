@@ -26,6 +26,7 @@ export class MailService {
 
     try {
       await this.redis.set(redisKey, hashed, 'EX', 600);
+      await this.redis.set(`otp:cooldown:${email}`,'locked','EX',60)
       await this.mailQueue.add('send-otp', {
         email,
         otp
@@ -63,7 +64,6 @@ export class MailService {
 
       })
       this.logger.log(`TokenURL generated and queue task added for :${email}`)
-
     } catch (error) {
       this.logger.log(`Failed to generate of queue TokenURL : ${error.message}`)
 
@@ -75,7 +75,8 @@ export class MailService {
   async verifyOtp(email: string, inputOtp: string): Promise<boolean> {
     const storedOtp = await this.redis.get(`otp:${email}`);
     if (!storedOtp) return false;
-    if (this.hash(inputOtp) === storedOtp) {
+    const hashedInput = this.hash(inputOtp)
+    if (hashedInput === storedOtp) {
       await this.clearOtp(email);
       return true;
     }

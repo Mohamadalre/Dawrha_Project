@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToOne,
+  OneToMany,
 } from 'typeorm';
 import { Exclude } from 'class-transformer';
 import { Role } from '../enums/role.enum';
@@ -15,6 +16,7 @@ import { FactoryProfile } from './profile/factory-profile.entity';
 import { CitizenProfile } from './profile/citizen-profile.entity';
 import { InstitutionProfile } from './profile/institution-profile.entity';
 import { ExternalPartnerProfile } from './profile/external-partner-profile.entity';
+import { UserDevice } from '@src/auth/entities/user-device.entity';
 
 @Entity('accounts')
 export class Account {
@@ -22,7 +24,7 @@ export class Account {
   id: string;
 
   @Column()
-  name:string;
+  name: string;
 
   @Column({ unique: true })
   email: string;
@@ -63,7 +65,8 @@ export class Account {
     default: AuthProvider.LOCAL
   })
   provider: AuthProvider;
-
+  @OneToMany(() => UserDevice, (device) => device.account)
+  devices: UserDevice[];
   @OneToOne(() => CollectorProfile, (profile) => profile.account, { cascade: true, nullable: true })
   CollectorProfile: CollectorProfile;
 

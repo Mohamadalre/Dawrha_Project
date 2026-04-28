@@ -8,20 +8,26 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Account } from '../account.entity';
-import { Location } from '@src/common/entities/location.entity';
-import { ProfileStatus } from './profile-status.entity';
+import { Location } from '@src/user/entities/location/location.entity';
+
 
 @Entity('citizen_profiles')
-export class CitizenProfile extends Location {
+export class CitizenProfile  {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column(()=>ProfileStatus)
-  profile:ProfileStatus
 
   @OneToOne(() => Account, (account) => account.citizenProfile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'account_id' })
   account: Account;
+
+
+  @OneToOne(() => Location, {
+    cascade: true, 
+    eager: true,   
+  })
+  @JoinColumn()
+  location: Location;
 
   @CreateDateColumn()
   createdAt: Date;
