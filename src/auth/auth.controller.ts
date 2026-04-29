@@ -157,8 +157,9 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
   @Post('logout')
-  async logout(@CurrentUser() user: any, { deviceId }: DeviceDto) {
+  async logout(@CurrentUser() user: any, @Body(){deviceId}:DeviceDto) {
     const data = await this.authService.logoutServ(user.id, deviceId)
   }
 

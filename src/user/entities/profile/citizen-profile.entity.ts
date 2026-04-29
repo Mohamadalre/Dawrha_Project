@@ -6,6 +6,7 @@ import {
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToMany,
 } from 'typeorm';
 import { Account } from '../account.entity';
 import { Location } from '@src/user/entities/location/location.entity';
@@ -22,12 +23,8 @@ export class CitizenProfile  {
   account: Account;
 
 
-  @OneToOne(() => Location, {
-    cascade: true, 
-    eager: true,   
-  })
-  @JoinColumn()
-  location: Location;
+  @OneToMany(() => Location,(loc)=>loc.cititzenProfile)
+  locations: Location[];
 
   @CreateDateColumn()
   createdAt: Date;

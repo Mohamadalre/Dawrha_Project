@@ -50,7 +50,7 @@ export class TransformInterceptor<T>
         return {
           success: true,
           message,
-          data: finalData ?? null,
+          data: finalData ?? '',
           statusCode,
           timestamp: new Date().toISOString(),
         };

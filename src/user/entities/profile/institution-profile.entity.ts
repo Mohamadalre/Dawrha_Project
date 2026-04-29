@@ -8,12 +8,14 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Account } from '../account.entity';
-import { Location } from '@src/user/entities/location/location.entity';
+import { LocationBase } from '@src/common/entities/location-base.entity';
+import { CollectionFrequeny } from '@src/user/enums/collectionFrequeny.enum';
+
 
 
 
 @Entity('institution_profiles')
-export class InstitutionProfile {
+export class InstitutionProfile extends LocationBase {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -24,8 +26,6 @@ export class InstitutionProfile {
   @Column()
   institutionName: string;
 
-  @Column()
-  institutionManager: string;
 
   @Column({ unique: true, nullable: false })
   institutionPhone: string;
@@ -34,33 +34,29 @@ export class InstitutionProfile {
   institutionType: string;
 
   @Column({ unique: true, nullable: false })
-  CommercialRegistrationNumber: string;
+  licenseNumber: string;
 
   @Column({ nullable: true })
   taxNumber?: string;
 
   @Column()
-  institutionSlogan: string;
+  institutionSlogo: string;
 
-  @Column({ nullable: true })
-  CommercialRegistrationImage: string;
 
-  @OneToOne(() => Location, {
-    cascade: true,
-    eager: true,
-  })
-  @JoinColumn()
-  location: Location;
-  
+
   @Column()
   wasteType: string;
 
   @Column()
-  averageProduct: string;
+  estimatedWasteQuantity: string;
+  @Column({
+    type: 'enum',
+    enum: CollectionFrequeny,
+  })
+  collectionFrequney: CollectionFrequeny;
 
-  @Column()
-  collectOperationNum: string;
-
+  @Column('text', { array: true })
+  preferredCollectionTime: string;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -5,7 +5,7 @@ import {
   IsString,
   IsOptional,
   IsNotEmpty,
-  IsIn,
+  //IsIn,
 } from 'class-validator';
 
 export class LocationDto {
@@ -14,9 +14,9 @@ export class LocationDto {
   @ArrayMaxSize(2)
   coordinates: number[]; 
 
-  @IsString()
-  @IsIn(['Point'])
-  type: 'Point';
+  // @IsString()
+  // @IsIn(['Point'])
+  // type: 'Point';
 
   @IsString()
   @IsNotEmpty()

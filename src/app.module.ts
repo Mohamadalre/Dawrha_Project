@@ -7,8 +7,8 @@ import { AuthModule } from './auth/auth.module';
 import { PermissionsModule } from './permission/permissions.module';
 import { NotificationModule } from './notification/notification.module';
 import {EventEmitterModule} from '@nestjs/event-emitter'
-;
 import { OnboardingModule } from './onboarding/onboarding.module';
+import { MediaModule } from './media/media.module';
 
 
 @Module({
@@ -19,7 +19,8 @@ import { OnboardingModule } from './onboarding/onboarding.module';
     AuthModule,
     PermissionsModule,
     NotificationModule,
-    OnboardingModule
+    OnboardingModule,
+    MediaModule
   ],
   controllers: [AppController],
   providers: [AppService],

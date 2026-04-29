@@ -1,25 +1,17 @@
-import { Column, JoinColumn, ManyToOne, Entity, PrimaryGeneratedColumn } from "typeorm";
+import { Column, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 import { Province } from "@src/user/entities/location/province.entity";
-import { CitizenProfile } from "../profile/citizen-profile.entity";
 
 
 
 
-@Entity('locations')
-export class Location {
 
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
+export  class LocationBase {
+
+
 
   @ManyToOne(() => Province,)
   @JoinColumn({ name: 'province_id' })
   province: Province;
-
-  @ManyToOne(() => CitizenProfile, (p) => p.locations, {
-    nullable: true,
-    onDelete: 'CASCADE'
-  })
-  cititzenProfile: CitizenProfile
   
   @Column({ nullable: true })
   DesscriptLocation?: string;

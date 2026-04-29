@@ -8,32 +8,29 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Account } from '../account.entity';
-import { Location } from '@src/user/entities/location/location.entity';
+import { LocationBase } from '@src/common/entities/location-base.entity';
+
 
 
 @Entity('external_partner_profiles')
-export class ExternalPartnerProfile {
+export class ExternalPartnerProfile extends LocationBase{
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
 
   @Column()
-  externalPartnerManager: string;
+  externalPartnerName: string;
 
   @Column({ unique: true, nullable: false })
   externalPartnerPhone: string;
 
-  @Column({ unique: true, nullable: false })
-  commercialRegister: string;
+  @Column()
+ externalPartnerSlogo: string;
 
-  @OneToOne(() => Location, {
-    cascade: true, 
-    eager: true,   
-  })
-  @JoinColumn()
-  location: Location;
-
-
+  @Column()
+  wasteType: string;
+  @Column()
+  demandEstimate: string;
   @OneToOne(() => Account, (account) => account.externalPartnerProfile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'account_id' })
   account: Account;

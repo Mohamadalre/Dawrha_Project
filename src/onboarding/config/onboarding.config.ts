@@ -1,8 +1,8 @@
 export const ONBOARDING_STEPS = {
-    FACTORY: ['information','documents', 'location', 'materials'],
-    COLLECTOR: ['documents', 'location'],
-    INSITUTIONS: ['documents', 'location', 'materials'],
-    EXTERNAL_PARTNER:['location', 'materials'],
+    FACTORY: ['information','location', 'documents', 'materials'],
+    COLLECTOR: ['information', 'location'],
+    INSITUTIONS: ['information', 'location' ,'materials','documents'],
+    EXTERNAL_PARTNER:['information','location', 'materials'],
     CITIZEN: [],
 };
 

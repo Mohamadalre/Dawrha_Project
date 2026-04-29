@@ -8,27 +8,13 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Account } from '../account.entity';
-import { Location } from '@src/user/entities/location/location.entity';
+import { LocationBase } from '@src/common/entities/location-base.entity';
 
 
 @Entity('collector_profiles')
-export class CollectorProfile {
+export class CollectorProfile extends LocationBase  {
   @PrimaryGeneratedColumn('uuid')
   id: string;
-
-
-  @Column({ nullable: false })
-  drivingCretificatePhoto: string;
-
-  @Column({ nullable: false })
-  birthDate: Date
-
-  @OneToOne(() => Location, {
-    cascade: true, 
-    eager: true,   
-  })
-  @JoinColumn()
-  location: Location;
 
   @OneToOne(() => Account, (account) => account.CollectorProfile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'account_id' })

@@ -10,6 +10,7 @@ import { InstitutionProfile } from './entities/profile/institution-profile.entit
 import { ExternalPartnerProfile } from './entities/profile/external-partner-profile.entity';
 import { UserService } from './user.service';
 import { Location } from './entities/location/location.entity';
+import { ProfileResolver } from './providers/profile-resolver.privder';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { Location } from './entities/location/location.entity';
       ExternalPartnerProfile,
     ]),
   ],
-  providers: [UserService],
-  exports: [UserService],
+  providers: [UserService,ProfileResolver],
+  exports: [UserService,ProfileResolver],
 })
 export class UserModule { }

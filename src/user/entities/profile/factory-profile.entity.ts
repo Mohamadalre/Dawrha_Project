@@ -8,16 +8,17 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Account } from '../account.entity';
-import { Location } from '@src/user/entities/location/location.entity';
+import { LocationBase } from '@src/common/entities/location-base.entity';
+;
 
 
 @Entity('factory_profiles')
-export class FactoryProfile {
+export class FactoryProfile extends LocationBase {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Column()
-  factoryManager: string;
+  factoryName: string;
 
   @Column({ unique: true, nullable: false })
   commercialRegister: string;
@@ -25,13 +26,15 @@ export class FactoryProfile {
   @Column({ unique: true, nullable: false })
   factoryRegister: string;
 
+  @Column({ nullable: true })
+  taxNumber?: string;
+  @Column()
+  factorySlogo: string;
 
-  @OneToOne(() => Location, {
-    cascade: true, 
-    eager: true,   
-  })
-  @JoinColumn()
-  location: Location;
+  @Column()
+  wasteType: string;
+  @Column()
+  demandEstimate: string;
   @Column({ unique: true, nullable: false })
   factoryPhone: string;
 

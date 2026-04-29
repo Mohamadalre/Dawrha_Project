@@ -17,7 +17,7 @@ export class PendingProfileHandler implements LoginHandler {
 
     ) { }
     async handle(account: Account, dto: DeviceDto) {
-         const step = await this.onboardingService.getCurrentStep(account,account.id);
+         const step = await this.onboardingService.getCurrentStep(account);
         const token = await this.authService.generateTokens(
             account.id,
             account.role,

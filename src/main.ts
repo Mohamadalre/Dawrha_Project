@@ -7,6 +7,8 @@ import { ClassSerializerInterceptor, ValidationPipe, VersioningType } from '@nes
 import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './core/logger-config/logger.config';
 import { LoggerExceptionsFilter } from './common/filters/logger-exception.filter';
+import { join } from 'path';
+import { NestExpressApplication } from '@nestjs/platform-express';
 
 
 
@@ -16,7 +18,7 @@ async function bootstrap() {
   dotenv.config();
   const port = process.env.PORT || 3000;
   try {
-    const app = await NestFactory.create(AppModule, {
+    const app = await NestFactory.create<NestExpressApplication>(AppModule, {
       logger
       , bufferLogs: true
     });
@@ -31,6 +33,7 @@ async function bootstrap() {
     app.useGlobalInterceptors(new TransformInterceptor());
     app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
     app.useGlobalFilters(new AllExceptionsFilter());
+   app.useStaticAssets(join(__dirname, '..', 'image/uploads'));
 
 
     await app.listen(port);

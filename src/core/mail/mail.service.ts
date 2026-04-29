@@ -51,6 +51,7 @@ export class MailService {
     const redisKey = `reset:${tokenUrl}`;
     
     const link = `${this.configService.get<string>('SEVER_HOST')}:${this.configService.get<number>('PORT')}/v1/auth/reset-password?token=${tokenUrl}`
+console.log(tokenUrl);
 
     try {
       await this.redis.set(redisKey, userId, 'EX', 600);

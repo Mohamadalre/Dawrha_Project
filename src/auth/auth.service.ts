@@ -174,6 +174,8 @@ export class AuthService {
     await this.userDeviceRepository.update({ accountId: userId }, { refreshToken: '' }); // null to empty string or remove type error
 
     await this.mailService.clearByKey(`reset:${tokenUrl}`);
+    
+
 
     return { message: 'Password reset successfully' };
   }
@@ -185,6 +187,8 @@ export class AuthService {
     if (!device) {
       throw new UnauthorizedException('Access denied');
     }
+
+    
     await this.userDeviceRepository.update(device.id, { fcmToken: '', refreshToken: '' })
     await this.redisService.clearByKey(`refreshToken:${device.deviceId}`)
 
