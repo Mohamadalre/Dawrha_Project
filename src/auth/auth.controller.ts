@@ -42,9 +42,16 @@ export class AuthController {
     return { message: 'Registration successful', result: tokens };
   }
 
+  @Post('login/admin')
+  @HttpCode(200)
+  async loginAdmin(@Body() loginDto: LoginDto) {
+    const tokens = await this.authService.login(loginDto, Role.ADMIN);
+    return { message: 'Login successful', result: tokens };
+  }
+
   @Post('login/citizen')
   @HttpCode(200)
-  async login(@Body() loginDto: LoginDto) {
+  async loginCitizen(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.CITIZEN);
     return { message: 'Login successful', result: tokens };
   }
@@ -143,8 +150,8 @@ export class AuthController {
 
   @UseGuards(RefreshTokenGuarud)
   @Post('refresh-token')
-  async gereateRefreshTokens(@Req() req :any, @Body() refreshTokenDto: RefreshTokenDto) {
-    const tokens = await this.authService.refreshTokens(refreshTokenDto,req.user,req.id);
+  async gereateRefreshTokens(@Req() req: any, @Body() refreshTokenDto: RefreshTokenDto) {
+    const tokens = await this.authService.refreshTokens(refreshTokenDto, req.user, req.id);
     return { message: 'Tokens refreshed successfully', result: tokens };
   }
 
@@ -160,7 +167,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @HttpCode(200)
   @Post('logout')
-  async logout(@CurrentUser() user: any, @Body(){deviceId}:DeviceDto) {
+  async logout(@CurrentUser() user: any, @Body() { deviceId }: DeviceDto) {
     const data = await this.authService.logoutServ(user.id, deviceId)
   }
 
