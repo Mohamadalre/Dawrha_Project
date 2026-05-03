@@ -1,25 +1,12 @@
-
 import { CollectionFrequeny } from "@src/user/enums/collectionFrequeny.enum";
 import { DeliverySchedule } from "@src/user/enums/delivery-schedule.enum";
 import { IsNotEmpty, IsString, IsOptional, Matches, IsArray, ArrayNotEmpty, IsEnum, IsBoolean } from "class-validator";
 
-
-export class InformationFactorynDTo {
+export class InformationExternalPartnerDTo {
     @IsNotEmpty()
     @IsString()
-    factoryName: string;
+    externalPartnerName: string;
 
-    @IsString()
-    @IsNotEmpty()
-    commercialRecord: string;
-
-    @IsString()
-    @IsNotEmpty()
-    industrialRecord: string;
-
-    @IsString()
-    @IsOptional()
-    taxNumber?: string;
 
     @IsString()
     @IsNotEmpty()
@@ -31,7 +18,7 @@ export class InformationFactorynDTo {
 
 
 
-export class WasteFactoryDTo {
+export class WasteExternalPartnerDTo {
     @IsArray()
     @ArrayNotEmpty()
     @IsString({ each: true })

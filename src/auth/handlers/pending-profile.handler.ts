@@ -3,7 +3,7 @@ import { LoginHandler } from "./login.handler";
 import { AuthService } from "../auth.service";
 import { Account } from "@src/user/entities/account.entity";
 import { DeviceDto } from "../dto/auth.dto";
-import { OnboardingService } from "@src/onboarding/onboarding.service";
+import { CommonService } from "@src/common/common.service";
 
 
 
@@ -13,11 +13,11 @@ export class PendingProfileHandler implements LoginHandler {
     constructor(
         @Inject(forwardRef(() => AuthService))
         private readonly authService: AuthService,
-        private readonly onboardingService: OnboardingService
+        private readonly commonService: CommonService
 
     ) { }
     async handle(account: Account, dto: DeviceDto) {
-         const step = await this.onboardingService.getCurrentStep(account);
+         const step = await this.commonService.getCurrentStep(account);
         const token = await this.authService.generateTokens(
             account.id,
             account.role,

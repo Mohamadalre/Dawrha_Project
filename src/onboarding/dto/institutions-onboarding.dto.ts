@@ -8,7 +8,7 @@ export class InformationInstitutionDTo {
 
     @IsNotEmpty()
     @IsString()
-    institutionType: string;
+    institutionTypeId: string;
 
     @IsString()
     @IsNotEmpty()
@@ -27,10 +27,12 @@ export class InformationInstitutionDTo {
 }
 
 
-export class  WasteInstitutionDTo {
-    @IsNotEmpty()
-    @IsString()
-    wasteType: string;
+export class WasteInstitutionDTo {
+    @IsArray()
+    @ArrayNotEmpty()
+    @IsString({ each: true })
+    wasteCategoryId: string[];
+
 
     @IsNotEmpty()
     @IsString()
@@ -43,8 +45,8 @@ export class  WasteInstitutionDTo {
 
     @IsArray()
     @ArrayNotEmpty()
-    @IsString({each:true})
+    @IsString({ each: true })
     preferredCollectionTime?: string[];
 
-   
+
 }

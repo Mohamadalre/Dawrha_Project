@@ -1,4 +1,4 @@
-import { normalizeSyrianPhoneNumber } from '@src/common/utils/phone-normalization.util';
+import { normalizeSyrianPhoneNumber } from '@src/common/utils/phone-normalization.provider';
 import { Transform } from 'class-transformer';
 import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsPhoneNumber, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 

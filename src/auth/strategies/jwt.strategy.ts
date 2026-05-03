@@ -28,6 +28,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!account ||account.accountStatus ! == AccountStatus.INACTIVE|| !account.isEmailVerified) {
       throw new UnauthorizedException('Account is disabled or not found');
     }
-    return { id: account.id, role: payload.role,email:account.email };
+    return { id: account.id, role: payload.role,email:account.email,accountStatus:account.accountStatus };
   }
 }

@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
+import { UserService } from "@src/user/user.service";
 import { Request } from "express";
 
 
@@ -8,15 +9,26 @@ import { Request } from "express";
 export class RefreshTokenGuarud implements CanActivate {
     constructor(
         private readonly jwtService: JwtService,
-        private readonly configService: ConfigService
+        private readonly configService: ConfigService,
+        private readonly userService:UserService
     ) { }
 
     async canActivate(context: ExecutionContext) {
         const request: Request = context.switchToHttp().getRequest();
         const [type, token] = request.headers.authorization?.split(" ") ?? [];
         if (token && type == "Bearer") {
-            request['user'] = token;
-
+            try {
+                const payload = await this.jwtService.verifyAsync(
+                    token, {
+                    secret: this.configService.get<string>("JWT_REFRESH_SECRET")
+                })
+                const account = await this.userService.findById(payload.id || payload.sub)
+    
+                request['user'] = token;
+                request['id'] = account.id
+            } catch (error) {
+                throw new UnauthorizedException("invalid token")
+            }
         } else {
             throw new UnauthorizedException("access denied, invalid token")
         }

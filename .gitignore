@@ -1,5 +1,6 @@
 node_modules/
 dist/
+image/
 .env
 .npm
 npm-debug.log*

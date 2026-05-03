@@ -6,10 +6,13 @@ import {
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToMany
 } from 'typeorm';
 import { Account } from '../account.entity';
 import { LocationBase } from '@src/common/entities/location-base.entity';
 import { CollectionFrequeny } from '@src/user/enums/collectionFrequeny.enum';
+import { InstitutionWasteCategory } from '@src/waste-management/entities/institution-waste-category.entity';
+import { InstitutionType } from '@src/institution/entities/institution-type.entity';
 
 
 
@@ -23,6 +26,14 @@ export class InstitutionProfile extends LocationBase {
   @JoinColumn({ name: 'account_id' })
   account: Account;
 
+  @OneToOne(() => InstitutionType, (institutionType) => institutionType.institutionProfile, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'institutionType' })
+  institutionType: InstitutionType;
+
+
+  @OneToMany(() => InstitutionWasteCategory, (iwt) => iwt.institution)
+  wasteTypes: InstitutionWasteCategory[];
+
   @Column()
   institutionName: string;
 
@@ -30,22 +41,14 @@ export class InstitutionProfile extends LocationBase {
   @Column({ unique: true, nullable: false })
   institutionPhone: string;
 
-  @Column()
-  institutionType: string;
-
   @Column({ unique: true, nullable: false })
   licenseNumber: string;
 
   @Column({ nullable: true })
   taxNumber?: string;
 
-  @Column()
-  institutionSlogo: string;
-
-
-
-  @Column()
-  wasteType: string;
+  @Column({nullable:true})
+  institutionSlogo?: string;
 
   @Column()
   estimatedWasteQuantity: string;

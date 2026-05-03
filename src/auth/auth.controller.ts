@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Get, HttpCode, Put, Req, UnauthorizedException } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Get, HttpCode, Put, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { DeviceDto, RefreshTokenDto, RefreshTokenTemporayDto } from './dto/auth.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -13,6 +13,7 @@ import { RefreshTokenGuarud } from './guards/refresh-token.guard';
 import { JwtTemporaryGuard } from './guards/jwt-temporary.guard';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { LoginGoogleDto } from './dto/logoin-google.dto';
+
 
 
 @Controller({
@@ -142,8 +143,8 @@ export class AuthController {
 
   @UseGuards(RefreshTokenGuarud)
   @Post('refresh-token')
-  async gereateRefreshTokens(@CurrentUser() user: string, @Body() refreshTokenDto: RefreshTokenDto) {
-    const tokens = await this.authService.refreshTokens(refreshTokenDto, user);
+  async gereateRefreshTokens(@Req() req :any, @Body() refreshTokenDto: RefreshTokenDto) {
+    const tokens = await this.authService.refreshTokens(refreshTokenDto,req.user,req.id);
     return { message: 'Tokens refreshed successfully', result: tokens };
   }
 

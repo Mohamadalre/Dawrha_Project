@@ -28,6 +28,7 @@ export class Location {
     type: 'geography',
     spatialFeatureType: 'Point',
     srid: 4326,
+    nullable:true
   })
   coordinates: {
     type: 'Point';

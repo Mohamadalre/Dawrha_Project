@@ -1,0 +1,7 @@
+export enum DeliverySchedule {
+MORNING='MORNING',
+AFTERNOON='AFTERNOON',
+EVENING='EVENING',
+FLEXIBLE='FLEXIBLE'
+}
+

@@ -174,7 +174,7 @@ export class AuthService {
     await this.userDeviceRepository.update({ accountId: userId }, { refreshToken: '' }); // null to empty string or remove type error
 
     await this.mailService.clearByKey(`reset:${tokenUrl}`);
-    
+
 
 
     return { message: 'Password reset successfully' };
@@ -188,7 +188,7 @@ export class AuthService {
       throw new UnauthorizedException('Access denied');
     }
 
-    
+
     await this.userDeviceRepository.update(device.id, { fcmToken: '', refreshToken: '' })
     await this.redisService.clearByKey(`refreshToken:${device.deviceId}`)
 
@@ -232,8 +232,8 @@ export class AuthService {
     device.refreshToken = hashedRefreshToken;
     device.lastLogin = new Date();
     await this.userDeviceRepository.save(device);
-   
-    
+
+
     await this.redisService.setRedisKey({ redisKey: `refreshToken:${device.deviceId}`, redisValue: hashedRefreshToken, date: 1000 });
 
     return {
@@ -274,17 +274,13 @@ export class AuthService {
     return { Token: TemporaryToken };
   }
 
-  async refreshTokens({ deviceId }: RefreshTokenDto, token: string) {
+  async refreshTokens({ deviceId }: RefreshTokenDto, token: string,accountId:string) {
     try {
-      const payload = await this.jwtService.verifyAsync(
-        token, {
-        secret: this.configService.get<string>("JWT_REFRESH_SECRET")
-      }
-      );
-      const account = await this.userService.findById(payload.id || payload.sub)
+
+      const account = await this.userService.findById(accountId);
       let existRedis: any;
       existRedis = await this.redisService.getRedisByKey(`refreshToken:${deviceId}`);
-      
+
       if (!existRedis) {
         const device = await this.userDeviceRepository.findOne({
           where: { accountId: account.id, deviceId: deviceId }

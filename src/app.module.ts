@@ -9,6 +9,8 @@ import { NotificationModule } from './notification/notification.module';
 import {EventEmitterModule} from '@nestjs/event-emitter'
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { MediaModule } from './media/media.module';
+import { WasteManagementModule } from './waste-management/waste-management.module';
+import { InstitutionModule } from './institution/institution.module';
 
 
 @Module({
@@ -20,7 +22,9 @@ import { MediaModule } from './media/media.module';
     PermissionsModule,
     NotificationModule,
     OnboardingModule,
-    MediaModule
+    MediaModule,
+    WasteManagementModule,
+    InstitutionModule
   ],
   controllers: [AppController],
   providers: [AppService],
