@@ -23,6 +23,7 @@ export class MailService {
     const otp = Math.floor(10000 + Math.random() * 90000).toString();
     const hashed = this.hash(otp);
     const redisKey = `otp:${email}`;
+console.log(otp);
 
     try {
       await this.redis.set(redisKey, hashed, 'EX', 600);

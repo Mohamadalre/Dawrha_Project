@@ -95,33 +95,42 @@ export class OnboardingService {
     return { status: 'Please enter the information in the following stage', }
   }
 
-  async completeStep(account: Account, stepInp: string) {
-    const steps = ONBOARDING_STEPS[account.role] || [];
+async completeStep(account: Account, stepInp: string) {
+  const steps = ONBOARDING_STEPS[account.role] || [];
 
-    let progress = await this.progressRepo.findOne({
-      where: { accountId: account.id },
+  let progress = await this.progressRepo.findOne({
+    where: { accountId: account.id },
+  });
+
+  if (!progress) {
+    let newprog = this.progressRepo.create({
+      account: account,
+      accountId: account.id,
+      completedSteps: []
     });
 
-
-    if (!progress) {
-      let newprog = this.progressRepo.create({
-        account: account,
-        accountId: account.id
-      })
-
-      stepInp === steps[0] ? newprog.completedSteps.push[stepInp] : newprog.completedSteps = [];
-      await this.progressRepo.save(newprog);
-      return steps[0];
+    if (stepInp === steps[0]) {
+      newprog.completedSteps.push(stepInp);
     }
 
-    const nextStep = steps.find(
-      (step) => !progress.completedSteps.includes(step),
-    );
-    nextStep === stepInp ? progress.completedSteps.push(stepInp) : nextStep
-    await this.progressRepo.save(progress)
-
-    return nextStep;
+    await this.progressRepo.save(newprog);
+    return steps[0];
   }
+
+  progress.completedSteps = progress.completedSteps || [];
+
+  const nextStep = steps.find(
+    (step) => !progress.completedSteps.includes(step),
+  );
+
+  if (nextStep === stepInp) {
+    progress.completedSteps.push(stepInp);
+  }
+
+  await this.progressRepo.save(progress);
+
+  return nextStep;
+}
 
 
   async getStep(account: Account, stepInp: string) {
@@ -225,7 +234,7 @@ export class OnboardingService {
     await this.completeStep(account!, 'information')
     const getnextStep = await this.commonService.getCurrentStep(account!)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.acccountRepo.update({id:account!.id}, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
     return { status: 'Please enter the information in the following stage', }

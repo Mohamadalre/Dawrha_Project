@@ -35,7 +35,7 @@ export class Location {
     coordinates: number[];
   };
 
-  @Column()
+  @Column({nullable:true})
   address: string;
 
 

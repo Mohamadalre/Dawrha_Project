@@ -176,7 +176,7 @@ export class OnboardingController {
     @Body() dto: InformationCollectorDTo,
     @Req() req,
   ) {
-    const data = await this.onboardingService.addInformationCollectorSer(dto, req.user)
+    const data = await this.onboardingService.addInformationCollectorSer(dto, req.user.id)
     return { message: "add information collector successfully", status: data }
   }
 

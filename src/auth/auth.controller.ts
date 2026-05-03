@@ -169,6 +169,7 @@ export class AuthController {
   @Post('logout')
   async logout(@CurrentUser() user: any, @Body() { deviceId }: DeviceDto) {
     const data = await this.authService.logoutServ(user.id, deviceId)
+    return {messge:'logout successfully'}
   }
 
 

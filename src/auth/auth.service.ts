@@ -216,6 +216,8 @@ export class AuthService {
 
     let device = await this.userDeviceRepository.findOne({ where: { accountId, deviceId } });
     if (!device) {
+      const exist = await this.userDeviceRepository.findOne({where:{deviceId:deviceId}})
+      if(exist){ throw new BadRequestException('deviceId is invalid')}
       device = this.userDeviceRepository.create({
         accountId,
         deviceType,

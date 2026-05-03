@@ -10,8 +10,9 @@ export  class LocationBase {
 
 
   @ManyToOne(() => Province,)
-  @JoinColumn({ name: 'province_id' })
+  @JoinColumn({ name: 'province_id', })
   province: Province;
+
   
   @Column({ nullable: true })
   DesscriptLocation?: string;
@@ -20,13 +21,14 @@ export  class LocationBase {
     type: 'geography',
     spatialFeatureType: 'Point',
     srid: 4326,
+    nullable:true
   })
   coordinates: {
     type: 'Point';
     coordinates: number[];
   };
 
-  @Column()
+  @Column({nullable:true})
   address: string;
 
 
