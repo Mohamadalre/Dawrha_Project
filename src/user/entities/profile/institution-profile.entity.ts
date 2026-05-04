@@ -6,7 +6,8 @@ import {
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
-  OneToMany
+  OneToMany,
+  ManyToOne
 } from 'typeorm';
 import { Account } from '../account.entity';
 import { LocationBase } from '@src/common/entities/location-base.entity';
@@ -30,8 +31,16 @@ export class InstitutionProfile extends LocationBase {
   @JoinColumn({ name: 'institutionType' })
   institutionType: InstitutionType;
 
+  @ManyToOne(() => InstitutionType, { nullable: true })
+  @JoinColumn({ name: 'type_id' })
+  type: InstitutionType;
 
-  @OneToMany(() => InstitutionWasteCategory, (iwt) => iwt.institution)
+  @Column({ nullable: true })
+  otherInstitutionType: string;
+  
+  @OneToMany(() => InstitutionWasteCategory, (iwt) => iwt.institution, {
+    cascade: true
+  })
   wasteTypes: InstitutionWasteCategory[];
 
   @Column()
@@ -47,7 +56,7 @@ export class InstitutionProfile extends LocationBase {
   @Column({ nullable: true })
   taxNumber?: string;
 
-  @Column({nullable:true})
+  @Column({ nullable: true })
   institutionSlogo?: string;
 
   @Column()

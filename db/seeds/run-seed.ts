@@ -1,5 +1,6 @@
 import { AppDataSource } from '../data-source';
 import { seedAdmin } from './admin-seed';
+import { seedProvince } from './province-seed';
 import { seed } from './seed';
 import { logger } from '@src/common/logger/winston.logger';
 
@@ -11,7 +12,7 @@ async function run() {
 
     await seed(AppDataSource);
     await seedAdmin(AppDataSource);
-
+    await seedProvince(AppDataSource);
     logger.info('Seed Completed Successfully');
 
     await AppDataSource.destroy();

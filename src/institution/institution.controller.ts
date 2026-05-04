@@ -1,4 +1,4 @@
-import { Controller,Post,Body,Get,UseGuards } from '@nestjs/common';
+import { Controller,Post,Body,Get,UseGuards,Query, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
 import { InstitutionService } from './institution.service';
 import { CreateInstitutionTypeDto } from './dto/Institution-type.dto';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
@@ -19,11 +19,11 @@ export class InstitutionController {
       const data = await this.institutionService.create(dto)
       return { message: 'Add institution type successfully', result: { id: data.id, name: data.name, createdAt: data.createdAt } }
     }
-    
+
   @Roles(Role.ADMIN,Role.INSITUTIONS)
     @Get('institution-type')
-    async findAll() {
-      const result = await this.institutionService.findAll();
+    async findAll(@Query('page',new DefaultValuePipe(1),ParseIntPipe) page:number ){
+      const result = await this.institutionService.findAll(page);
       return { message: 'Fetch institution type  successfully',result };
     }
 }

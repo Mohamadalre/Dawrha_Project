@@ -23,11 +23,11 @@ export class MailService {
     const otp = Math.floor(10000 + Math.random() * 90000).toString();
     const hashed = this.hash(otp);
     const redisKey = `otp:${email}`;
-console.log(otp);
+    console.log(otp);
 
     try {
       await this.redis.set(redisKey, hashed, 'EX', 600);
-      await this.redis.set(`otp:cooldown:${email}`,'locked','EX',60)
+      await this.redis.set(`otp:cooldown:${email}`, 'locked', 'EX', 60)
       await this.mailQueue.add('send-otp', {
         email,
         otp
@@ -50,12 +50,13 @@ console.log(otp);
   async generateAndSendTokenUrl(email: string, userId: string) {
     const tokenUrl = crypto.randomBytes(32).toString('hex')
     const redisKey = `reset:${tokenUrl}`;
-    
+
     const link = `${this.configService.get<string>('SEVER_HOST')}:${this.configService.get<number>('PORT')}/v1/auth/reset-password?token=${tokenUrl}`
-console.log(tokenUrl);
+    console.log(tokenUrl);
 
     try {
       await this.redis.set(redisKey, userId, 'EX', 600);
+      await this.redis.set(`tokenUrl:cooldown:${email}`, 'locked', 'EX', 60)
       await this.mailQueue.add('send-reset-link', {
         email,
         link
@@ -89,7 +90,7 @@ console.log(tokenUrl);
     await this.redis.del(`otp:${email}`);
   }
 
-  async getRedisByKey(key:string): Promise<string | null> {
+  async getRedisByKey(key: string): Promise<string | null> {
     return await this.redis.get(key);
   }
 

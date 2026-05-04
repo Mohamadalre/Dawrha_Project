@@ -4,7 +4,8 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn ,UpdateDateCol
 export enum MediaType {
     INDUSTRIAL_REG = 'INDUSTRIAL_REG',
     LICENSE = 'LICENSE',
-    ID_CARD = 'ID_CARD',
+    ID_CARD_FRONT = 'ID_CARD_FRONT',
+    ID_CARD_BACK = 'ID_CARD_BACK'
 }
 
 export enum OwnerType {

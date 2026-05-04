@@ -13,7 +13,7 @@ export class InstitutionService {
     ) { }
     async create(dto: CreateInstitutionTypeDto) {
         const exist = await this.repo.findOne({ where: { name: dto.name } });
-        if (!exist) throw new BadRequestException('Institution type already exists');
+        if (exist) throw new BadRequestException('Institution type already exists');
         const type = this.repo.create(dto);
         return await this.repo.save(type);
 

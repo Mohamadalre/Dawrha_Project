@@ -19,7 +19,9 @@ export class ExternalPartnerProfile extends LocationBase {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @OneToMany(() => ExternalPartnerWasteCategory, (ept) => ept)
+  @OneToMany(() => ExternalPartnerWasteCategory, (ept) => ept,{
+    cascade:true
+  })
   wasteTypes: ExternalPartnerWasteCategory[];
 
   @Column()

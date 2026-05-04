@@ -16,3 +16,19 @@ export class InformationCollectorDTo {
 
 }
 
+
+export class LocationCollectorDto {
+
+  @IsString()
+  @IsNotEmpty()
+  address: string;
+
+  @IsString()
+  @IsOptional()
+  descriptionAddress?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  provinceId: string;
+}
+

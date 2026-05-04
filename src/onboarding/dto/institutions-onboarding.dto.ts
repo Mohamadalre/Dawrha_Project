@@ -6,9 +6,13 @@ export class InformationInstitutionDTo {
     @IsString()
     institutionName: string;
 
-    @IsNotEmpty()
+    @IsOptional()
     @IsString()
     institutionTypeId: string;
+
+    @IsOptional()
+    @IsString()
+    otherInstitutionType?: string;
 
     @IsString()
     @IsNotEmpty()
@@ -29,7 +33,7 @@ export class InformationInstitutionDTo {
 
 export class WasteInstitutionDTo {
     @IsArray()
-    @ArrayNotEmpty()
+    @IsOptional()
     @IsString({ each: true })
     wasteCategoryId: string[];
 

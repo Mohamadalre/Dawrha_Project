@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { AccountProgress } from './entities/account-progress.entity';
 import { Account } from '@src/user/entities/account.entity';
 import { ONBOARDING_STEPS } from './config/onboarding.config';
@@ -21,6 +21,9 @@ import { InformationFactorynDTo, WasteFactoryDTo } from './dto/factory-onboardin
 import { FactoryProfile } from '@src/user/entities/profile/factory-profile.entity';
 import { InformationExternalPartnerDTo, WasteExternalPartnerDTo } from './dto/external-partner-onboarding.dto';
 import { ExternalPartnerProfile } from '@src/user/entities/profile/external-partner-profile.entity';
+import { ExternalPartnerWasteCategory } from '@src/waste-management/entities/external-partner-waste-category.entity';
+import { FactoryWasteCategory } from '@src/waste-management/entities/factory-waste-category.entity';
+import { InstitutionWasteCategory } from '@src/waste-management/entities/institution-waste-category.entity';
 
 
 @Injectable()
@@ -48,89 +51,43 @@ export class OnboardingService {
     private readonly commonService: CommonService
   ) { }
 
-  // async getCurrentStep(account: Account) {
-  //   const steps = ONBOARDING_STEPS[account.role] || [];
+  async findAll(page = 1, limit = 10) {
+    return await this.provinceRepo.find({
+      skip: (page - 1) * limit,
+      take: limit,
+      select: {
+        id: true,
+        name_ar: true,
+        name_en: true
+      }
+    });
+  }
 
-
-  //   if (!steps.length) return null;
-
-  //   const progress = await this.progressRepo.findOne({
-  //     where: { accountId: account.id },
-  //   });
-
-
-  //   if (!progress) {
-  //     return steps[0] || null;
-  //   }
-
-  //   const nextStep = steps.find(
-  //     (step) => !progress.completedSteps.includes(step),
-  //   );
-
-  //   return nextStep || null;
-  // }
-
-  async addLocation(dto: LocationDto, profile: any, role: Role, account: any) {
+  async addLocation(dto: any, role: Role, profile: any, userId: string) {
+    const account = await this.acccountRepo.findOne({ where: { id: userId } })
     const step = await this.commonService.getCurrentStep(account!)
     if (step !== 'location') {
       throw new ForbiddenException('You cannot add location data,you must add data from the previous');
     }
-    const [lng, lat] = dto.coordinates;
+
+    const [lng, lat] = dto?.coordinates || [0, 0];
     const province = await this.provinceRepo.findOne({ where: { id: dto.provinceId } })
     if (!province) {
       throw new BadRequestException('province invalid')
     }
-
     profile.coordinates = { type: 'Point', coordinates: [lng, lat] };
     profile.address = dto.address;
     profile.DesscriptLocation = dto.descriptionAddress;
     profile.province = province;
     await this.resolver.getRepo(role).save(profile);
-    await this.completeStep(account, 'location')
-    const getnextStep = await this.commonService.getCurrentStep(account)
+    await this.commonService.completeStep(account!, 'location')
+    const getnextStep = await this.commonService.getCurrentStep(account!)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
     return { status: 'Please enter the information in the following stage', }
   }
-
-async completeStep(account: Account, stepInp: string) {
-  const steps = ONBOARDING_STEPS[account.role] || [];
-
-  let progress = await this.progressRepo.findOne({
-    where: { accountId: account.id },
-  });
-
-  if (!progress) {
-    let newprog = this.progressRepo.create({
-      account: account,
-      accountId: account.id,
-      completedSteps: []
-    });
-
-    if (stepInp === steps[0]) {
-      newprog.completedSteps.push(stepInp);
-    }
-
-    await this.progressRepo.save(newprog);
-    return steps[0];
-  }
-
-  progress.completedSteps = progress.completedSteps || [];
-
-  const nextStep = steps.find(
-    (step) => !progress.completedSteps.includes(step),
-  );
-
-  if (nextStep === stepInp) {
-    progress.completedSteps.push(stepInp);
-  }
-
-  await this.progressRepo.save(progress);
-
-  return nextStep;
-}
 
 
   async getStep(account: Account, stepInp: string) {
@@ -171,41 +128,63 @@ async completeStep(account: Account, stepInp: string) {
     if (exist) {
       throw new ForbiddenException('You cannot add the information again,please move to the next stage');
     }
-    const isntitutionType = await this.institutionTypeRepo.findOne({ where: { id: dto.institutionTypeId } })
-    if (!isntitutionType) throw new BadRequestException('Institution type is invalid');
+    if (!dto.institutionTypeId && !dto.otherInstitutionType) {
+      throw new BadRequestException(
+        'Either institutionTypeId or otherInstitutionType is required',
+      );
+    }
 
-    const information = this.institutionRepo.create({
+    let information = this.institutionRepo.create({
       institutionName: dto.institutionName,
       institutionPhone: dto.landlinePhone,
-      institutionType: isntitutionType,
-      institutionSlogo: `image/uploads/logos/${file?.filename}` || ``,
+      institutionSlogo: `image/uploads/${file?.filename}` || ``,
       taxNumber: dto.taxNumber,
       licenseNumber: dto.licenseNumber,
       account: account!
     })
-    await this.institutionRepo.save(information);
-    await this.completeStep(account!, 'information')
+
+    if (dto.institutionTypeId) {
+      const isntitutionType = await this.institutionTypeRepo.findOne({ where: { id: dto.institutionTypeId } })
+      if (!isntitutionType) throw new BadRequestException('Institution type is invalid');
+      information.institutionType = isntitutionType
+    }
+
+    if (dto.otherInstitutionType) {
+    
+      information.otherInstitutionType = dto.otherInstitutionType;
+    }
+    const profile = await this.institutionRepo.save(information);
+    await this.commonService.completeStep(account!, 'information')
     const getnextStep = await this.commonService.getCurrentStep(account!)
     if (getnextStep === null) {
       await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
-      return { status: 'Your request has been sent,wait for it to be approved' }
+      return { status: 'Your request has been sent,wait for it to be approved', id: profile.id }
     }
     return { status: 'Please enter the information in the following stage', }
   }
 
-  async addMaterialInstitutionSer(dto: WasteInstitutionDTo, profile: any, account: any) {
-    const step = await this.commonService.getCurrentStep(account)
+  async addMaterialInstitutionSer(dto: WasteInstitutionDTo, profile: any, userId: string) {
+    const account = await this.acccountRepo.findOne({ where: { id: userId } })
+    const step = await this.commonService.getCurrentStep(account!)
     if (step !== 'materials') {
       throw new ForbiddenException('You cannot add materials data,you must add data from the previous');
     }
-    const wasteType = await this.checkWasteType(dto.wasteCategoryId);
-    profile.wasteTypes = wasteType;
+    const wasteTypesEntities = await this.checkWasteType(dto.wasteCategoryId);
+
+    const wasteTypes = wasteTypesEntities.map((wt) => {
+      const pivot = new InstitutionWasteCategory();
+      pivot.wasteType = wt;
+      pivot.institution = profile;
+      return pivot;
+    });
+
+    profile.wasteTypes = wasteTypes;
     profile.preferredCollectionTime = dto.preferredCollectionTime;
     profile.estimatedWasteQuantity = dto.estimatedWasteQuantity;
     profile.collectionFrequney = dto.collectionFrequney;
     await this.resolver.getRepo('INSITUTIONS').save(profile)
-    await this.completeStep(account, 'materials')
-    const getnextStep = await this.commonService.getCurrentStep(account)
+    await this.commonService.completeStep(account!, 'materials')
+    const getnextStep = await this.commonService.getCurrentStep(account!)
     if (getnextStep === null) {
       await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
@@ -230,14 +209,14 @@ async completeStep(account: Account, stepInp: string) {
       account: account!
 
     })
-    await this.collectorRepo.save(information);
-    await this.completeStep(account!, 'information')
+    const profile = await this.collectorRepo.save(information);
+    await this.commonService.completeStep(account!, 'information')
     const getnextStep = await this.commonService.getCurrentStep(account!)
     if (getnextStep === null) {
-      await this.acccountRepo.update({id:account!.id}, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.acccountRepo.update({ id: account!.id }, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
-    return { status: 'Please enter the information in the following stage', }
+    return { status: 'Please enter the information in the following stage', id: profile.id }
   }
 
   //api factory
@@ -257,38 +236,46 @@ async completeStep(account: Account, stepInp: string) {
     const information = this.factoryRepo.create({
       factoryName: dto.factoryName,
       factoryPhone: dto.landlinePhone,
-      factorySlogo: `image/uploads/logos/${file?.filename}` || ``,
+      factorySlogo: `image/uploads/${file?.filename}` || ``,
       taxNumber: dto.taxNumber,
       commercialRecord: dto.commercialRecord,
       industrialRecord: dto.industrialRecord,
       account: account!
     })
-    await this.factoryRepo.save(information);
-    await this.completeStep(account!, 'information')
+    const profile = await this.factoryRepo.save(information);
+    await this.commonService.completeStep(account!, 'information')
     const getnextStep = await this.commonService.getCurrentStep(account!)
     if (getnextStep === null) {
       await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
-    return { status: 'Please enter the information in the following stage', }
+    return { status: 'Please enter the information in the following stage', id: profile.id }
   }
 
 
-  async addMaterialFactorySer(dto: WasteFactoryDTo, profile: any, account: any) {
-    const step = await this.commonService.getCurrentStep(account)
+  async addMaterialFactorySer(dto: WasteFactoryDTo, profile: any, userId: string) {
+    const account = await this.acccountRepo.findOne({ where: { id: userId } })
+    const step = await this.commonService.getCurrentStep(account!)
     if (step !== 'materials') {
       throw new ForbiddenException('You cannot add materials data,you must add data from the previous');
     }
-    const wasteType = await this.checkWasteType(dto.wasteCategoryId);
-  
-    profile.wasteTypes = wasteType;
+    const wasteTypesEntities = await this.checkWasteType(dto.wasteCategoryId);
+    const wasteTypes = wasteTypesEntities.map((wt) => {
+      const pivot = new FactoryWasteCategory();
+      pivot.wasteType = wt;
+      pivot.factory = profile;
+      return pivot;
+    });
+
+
+    profile.wasteTypes = wasteTypes;
     profile.averageOrderQuantity = dto.averageOrderQuantity;
     profile.estimationOrderSchedule = dto.estimationOrderSchedule;
     profile.deliveryPreference = dto.deliveryPreference;
     profile.perferredDeliverySchedule = dto.perferredDeliverySchedule
     await this.resolver.getRepo('FACTORY').save(profile)
-    await this.completeStep(account, 'materials')
-    const getnextStep = await this.commonService.getCurrentStep(account)
+    await this.commonService.completeStep(account!, 'materials')
+    const getnextStep = await this.commonService.getCurrentStep(account!)
     if (getnextStep === null) {
       await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
@@ -314,11 +301,44 @@ async completeStep(account: Account, stepInp: string) {
     const information = this.externalPartnerRepo.create({
       externalPartnerName: dto.externalPartnerName,
       externalPartnerPhone: dto.landlinePhone,
-      externalPartnerSlogo: `image/uploads/logos/${file?.filename}` || '',
+      externalPartnerSlogo: `image/uploads/${file?.filename}` || '',
       account: account!
     })
-    await this.externalPartnerRepo.save(information);
-    await this.completeStep(account!, 'information')
+    const profile = await this.externalPartnerRepo.save(information);
+    await this.commonService.completeStep(account!, 'information')
+    const getnextStep = await this.commonService.getCurrentStep(account!)
+    if (getnextStep === null) {
+      await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      return { status: 'Your request has been sent,wait for it to be approved' }
+    }
+    return { status: 'Please enter the information in the following stage', id: profile.id }
+  }
+
+
+  async addMaterialExternalPartnerSer(dto: WasteExternalPartnerDTo, profile: any, userId: string) {
+    const account = await this.acccountRepo.findOne({ where: { id: userId } })
+    const step = await this.commonService.getCurrentStep(account!)
+    if (step !== 'materials') {
+      throw new ForbiddenException('You cannot add materials data,you must add data from the previous');
+    }
+
+    const wasteTypesEntities = await this.checkWasteType(dto.wasteCategoryId);
+
+
+    const wasteTypes = wasteTypesEntities.map((wt) => {
+      const pivot = new ExternalPartnerWasteCategory();
+      pivot.wasteType = wt;
+      pivot.externalPartner = profile;
+      return pivot;
+    });
+
+    profile.wasteTypes = wasteTypes;
+    profile.averageOrderQuantity = dto.averageOrderQuantity;
+    profile.estimationOrderSchedule = dto.estimationOrderSchedule;
+    profile.deliveryPreference = dto.deliveryPreference;
+    profile.perferredDeliverySchedule = dto.perferredDeliverySchedule
+    await this.resolver.getRepo('EXTERNAL_PARTNER').save(profile)
+    await this.commonService.completeStep(account!, 'materials')
     const getnextStep = await this.commonService.getCurrentStep(account!)
     if (getnextStep === null) {
       await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
@@ -328,37 +348,23 @@ async completeStep(account: Account, stepInp: string) {
   }
 
 
-  async addMaterialExternalPartnerSer(dto: WasteExternalPartnerDTo, profile: any, account: any) {
-    const step = await this.commonService.getCurrentStep(account)
-    if (step !== 'materials') {
-      throw new ForbiddenException('You cannot add materials data,you must add data from the previous');
+
+  async checkWasteType(ids: string[]) {
+    const uniqueIds = [...new Set(ids)];
+
+    const wasteTypes = await this.wasteCategoryRepo.find({
+      where: {
+        id: In(uniqueIds),
+      },
+    });
+
+    if (wasteTypes.length !== uniqueIds.length) {
+      throw new BadRequestException('Some waste categories are invalid');
     }
-    const wasteType = await this.checkWasteType(dto.wasteCategoryId);
+
+    return wasteTypes;
+  }
+
+
   
-    profile.wasteTypes = wasteType;
-    profile.averageOrderQuantity = dto.averageOrderQuantity;
-    profile.estimationOrderSchedule = dto.estimationOrderSchedule;
-    profile.deliveryPreference = dto.deliveryPreference;
-    profile.perferredDeliverySchedule = dto.perferredDeliverySchedule
-    await this.resolver.getRepo('EXTERNAL_PARTNER').save(profile)
-    await this.completeStep(account, 'materials')
-    const getnextStep = await this.commonService.getCurrentStep(account)
-    if (getnextStep === null) {
-      await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
-      return { status: 'Your request has been sent,wait for it to be approved' }
-    }
-    return { status: 'Please enter the information in the following stage', }
-  }
-
-  private async checkWasteType(wasteCategoryId: string[]) {
-    let id: string;
-    let wasteType: WasteCategory[] = [];
-    for (id in wasteCategoryId) {
-      const exist = await this.wasteCategoryRepo.findOne({ where: { id: id } })
-      if (!exist) throw new BadRequestException('waste Category is invalid')
-      wasteType.push(exist);
-    }
-
-    return wasteType;
-  }
 }

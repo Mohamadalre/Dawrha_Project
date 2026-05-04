@@ -156,6 +156,18 @@ export class AuthService {
 
   async forgotPassword({ email }: ForgotPasswordDto) {
     const account = await this.userService.findByEmail(email);
+    const cooldownKey =`tokenUrl:cooldown:${email}`;
+    const ttl = await this.redis.ttl(cooldownKey);
+    console.log(ttl);
+
+    if (ttl > 0) {
+
+      throw new HttpException({
+        statusCode: HttpStatus.TOO_MANY_REQUESTS,
+        message: 'Please wait before requesting again',
+        remainingSeconds: ttl
+      }, HttpStatus.TOO_MANY_REQUESTS);
+    }
     await this.mailService.generateAndSendTokenUrl(account.email, account.id);
     return { message: 'TokenURL sent successfully' };
   }
@@ -217,7 +229,8 @@ export class AuthService {
     let device = await this.userDeviceRepository.findOne({ where: { accountId, deviceId } });
     if (!device) {
       const exist = await this.userDeviceRepository.findOne({where:{deviceId:deviceId}})
-      if(exist){ throw new BadRequestException('deviceId is invalid')}
+       if (exist) {
+        throw new BadRequestException('Device ID already exists for another user');}
       device = this.userDeviceRepository.create({
         accountId,
         deviceType,

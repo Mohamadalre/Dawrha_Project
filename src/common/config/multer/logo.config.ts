@@ -3,7 +3,7 @@ import { extname } from 'path';
 
 export const logoMulterConfig = {
   storage: diskStorage({
-    destination: './image/uploads/logos',
+    destination: './image/uploads',
     filename: (req, file, cb) => {
       const uniqueName =
         Date.now() + '-' + Math.round(Math.random() * 1e9);

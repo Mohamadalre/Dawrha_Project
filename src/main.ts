@@ -33,7 +33,7 @@ async function bootstrap() {
     app.useGlobalInterceptors(new TransformInterceptor());
     app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
     app.useGlobalFilters(new AllExceptionsFilter());
-   app.useStaticAssets(join(__dirname, '..', 'image/uploads'));
+   app.useStaticAssets(join(__dirname, '../..', 'image/uploads'));
 
 
     await app.listen(port);

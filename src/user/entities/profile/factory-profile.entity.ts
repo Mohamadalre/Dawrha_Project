@@ -22,7 +22,9 @@ export class FactoryProfile extends LocationBase {
   id: string;
 
 
-  @OneToMany(() => FactoryWasteCategory, (fwt) => fwt)
+  @OneToMany(() => FactoryWasteCategory, (fwt) => fwt,{
+    cascade:true
+  })
   wasteTypes: FactoryWasteCategory[];
 
   @Column()

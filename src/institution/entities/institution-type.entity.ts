@@ -11,8 +11,6 @@ export class InstitutionType {
     @Column({ unique: true })
     name: string;
 
-    @Column({ nullable: true })
-    otherText: string;
 
     @CreateDateColumn()
     createdAt: Date;
