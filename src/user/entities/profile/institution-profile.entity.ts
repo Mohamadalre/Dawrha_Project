@@ -6,14 +6,12 @@ import {
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
-  OneToMany,
   ManyToOne
 } from 'typeorm';
 import { Account } from '../account.entity';
 import { LocationBase } from '@src/common/entities/location-base.entity';
-import { CollectionFrequeny } from '@src/user/enums/collectionFrequeny.enum';
-import { InstitutionWasteCategory } from '@src/waste-management/entities/institution-waste-category.entity';
 import { InstitutionType } from '@src/institution/entities/institution-type.entity';
+import { InstitutionMaterial } from '../material/institution-material.entity';
 
 
 
@@ -27,30 +25,28 @@ export class InstitutionProfile extends LocationBase {
   @JoinColumn({ name: 'account_id' })
   account: Account;
 
-  @OneToOne(() => InstitutionType, (institutionType) => institutionType.institutionProfile, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'institutionType' })
-  institutionType: InstitutionType;
+  @OneToOne(() => InstitutionMaterial, (inputs) => inputs.institutionProfile, { cascade: true })
+  @JoinColumn({ name: 'material_id' })
+  materialInputs: InstitutionMaterial;
 
+  
   @ManyToOne(() => InstitutionType, { nullable: true })
   @JoinColumn({ name: 'type_id' })
-  type: InstitutionType;
+  institutionType: InstitutionType;
 
   @Column({ nullable: true })
   otherInstitutionType: string;
-  
-  @OneToMany(() => InstitutionWasteCategory, (iwt) => iwt.institution, {
-    cascade: true
-  })
-  wasteTypes: InstitutionWasteCategory[];
+
+
 
   @Column()
   institutionName: string;
 
 
-  @Column({ unique: true, nullable: false })
+  @Column({  nullable: false ,unique:true })
   institutionPhone: string;
 
-  @Column({ unique: true, nullable: false })
+  @Column({  nullable: false  , unique:true})
   licenseNumber: string;
 
   @Column({ nullable: true })
@@ -58,17 +54,6 @@ export class InstitutionProfile extends LocationBase {
 
   @Column({ nullable: true })
   institutionSlogo?: string;
-
-  @Column()
-  estimatedWasteQuantity: string;
-  @Column({
-    type: 'enum',
-    enum: CollectionFrequeny,
-  })
-  collectionFrequney: CollectionFrequeny;
-
-  @Column('text', { array: true })
-  preferredCollectionTime: string;
 
   @CreateDateColumn()
   createdAt: Date;

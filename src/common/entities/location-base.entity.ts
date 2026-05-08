@@ -1,4 +1,4 @@
-import { Column, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
+import { Column, JoinColumn, ManyToOne } from "typeorm";
 import { Province } from "@src/user/entities/location/province.entity";
 
 
@@ -6,8 +6,6 @@ import { Province } from "@src/user/entities/location/province.entity";
 
 
 export  class LocationBase {
-
-
 
   @ManyToOne(() => Province,)
   @JoinColumn({ name: 'province_id', })

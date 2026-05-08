@@ -1,5 +1,5 @@
 import { CollectionFrequeny } from "@src/user/enums/collectionFrequeny.enum";
-import { IsNotEmpty, IsString, IsOptional, Matches, IsEnum, IsArray, ArrayNotEmpty } from "class-validator";
+import { IsNotEmpty, IsString, IsOptional, Matches, IsEnum,IsUUID, IsArray, ArrayNotEmpty } from "class-validator";
 
 export class InformationInstitutionDTo {
     @IsNotEmpty()
@@ -8,6 +8,7 @@ export class InformationInstitutionDTo {
 
     @IsOptional()
     @IsString()
+    @IsUUID()
     institutionTypeId: string;
 
     @IsOptional()
@@ -24,7 +25,7 @@ export class InformationInstitutionDTo {
 
     @IsString()
     @IsNotEmpty()
-    @Matches(/^011[0-9][0-9]{7}$/, {
+    @Matches(/^011[0-9][0-9]{6}$/, {
         message: 'The phone number must be a Syrian number',
     })
     landlinePhone: string;
@@ -33,7 +34,6 @@ export class InformationInstitutionDTo {
 
 export class WasteInstitutionDTo {
     @IsArray()
-    @IsOptional()
     @IsString({ each: true })
     wasteCategoryId: string[];
 
@@ -45,12 +45,12 @@ export class WasteInstitutionDTo {
     @IsNotEmpty()
     @IsEnum(CollectionFrequeny)
     @IsString()
-    collectionFrequney: string;
+    collectionFrequney: CollectionFrequeny;
 
     @IsArray()
     @ArrayNotEmpty()
     @IsString({ each: true })
-    preferredCollectionTime?: string[];
+    preferredCollectionTime: string[];
 
 
 }

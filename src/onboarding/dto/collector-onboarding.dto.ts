@@ -2,11 +2,13 @@ import { normalizeSyrianPhoneNumber } from "@src/common/utils/phone-normalizatio
 import { CollectionFrequeny } from "@src/user/enums/collectionFrequeny.enum";
 import { Shift } from "@src/user/enums/shift.enum";
 import { Transform } from "class-transformer";
-import { IsNotEmpty, IsString, IsOptional, Matches, IsEnum, IsArray, ArrayNotEmpty } from "class-validator";
+import { IsNotEmpty, IsString, IsOptional, Matches, IsEnum, IsArray, ArrayNotEmpty, IsUUID } from "class-validator";
 
 export class InformationCollectorDTo {
     @IsNotEmpty()
-    @IsString()
+    @Matches(/^\d{11}$/, {
+        message: 'National ID must be exactly 11 digits',
+    })
     NationalID: string;
 
     @IsNotEmpty()
@@ -29,6 +31,7 @@ export class LocationCollectorDto {
 
   @IsString()
   @IsNotEmpty()
+  @IsUUID()
   provinceId: string;
 }
 

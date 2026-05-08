@@ -24,17 +24,19 @@ export class Location {
   @Column({ nullable: true })
   DesscriptLocation?: string;
 
+
   @Column({
     type: 'geography',
     spatialFeatureType: 'Point',
     srid: 4326,
-    nullable:true
+
   })
   coordinates: {
     type: 'Point';
     coordinates: number[];
   };
 
+  
   @Column({nullable:true})
   address: string;
 

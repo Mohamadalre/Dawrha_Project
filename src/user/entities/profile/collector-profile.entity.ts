@@ -18,16 +18,16 @@ export class CollectorProfile extends LocationBase {
   id: string;
 
 
+  @OneToOne(() => Account, (account) => account.CollectorProfile, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'account_id' })
+  account: Account;
+
   @Column({ unique: true, nullable: false })
   NationalID: string;
 
   @Column({ type: 'enum', enum: Shift })
   shift: Shift;
 
-
-  @OneToOne(() => Account, (account) => account.CollectorProfile, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'account_id' })
-  account: Account;
 
   @CreateDateColumn()
   createdAt: Date;

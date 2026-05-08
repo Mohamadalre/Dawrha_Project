@@ -1,7 +1,7 @@
-import { Column, Entity, OneToMany, PrimaryGeneratedColumn, ManyToOne, JoinColumn } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, ManyToOne, JoinColumn } from "typeorm";
 import { WasteCategory } from "./waste-category.entity";
 
-import { ExternalPartnerProfile } from "@src/user/entities/profile/external-partner-profile.entity";
+import { ExternalPartnerMaterial } from "@src/user/entities/material/external-partner-material.entity";
 
 
 @Entity('External_Partner_waste_category')
@@ -9,11 +9,11 @@ export class ExternalPartnerWasteCategory {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
-    @ManyToOne(() => ExternalPartnerProfile, (extpar) => extpar, {
+    @ManyToOne(() => ExternalPartnerMaterial, (material) => material.wasteTypes, {
         onDelete: 'CASCADE',
     })
-    @JoinColumn({ name: 'External_partner_id' })
-    externalPartner: ExternalPartnerProfile;
+    @JoinColumn({ name: 'material_id' })
+    externalPartnerMaterial: ExternalPartnerMaterial;
 
     @ManyToOne(() => WasteCategory, (wt) => wt.institutions, {
         nullable: true,
@@ -21,6 +21,5 @@ export class ExternalPartnerWasteCategory {
     @JoinColumn({ name: 'waste_category_id' })
     wasteType: WasteCategory;
 
-    @Column({ nullable: true })
-    otherText: string;
+
 }

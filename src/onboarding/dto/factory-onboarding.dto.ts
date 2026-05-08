@@ -23,7 +23,7 @@ export class InformationFactorynDTo {
 
     @IsString()
     @IsNotEmpty()
-    @Matches(/^011[0-9][0-9]{7}$/, {
+    @Matches(/^011[0-9][0-9]{6}$/, {
         message: 'The phone number must be a Syrian number',
     })
     landlinePhone: string;
@@ -51,7 +51,7 @@ export class WasteFactoryDTo {
     @IsBoolean()
     deliveryPreference: boolean;
 
-   @IsNotEmpty()
+    @IsOptional()
     @IsEnum(DeliverySchedule)
     @IsString()
     perferredDeliverySchedule: DeliverySchedule;

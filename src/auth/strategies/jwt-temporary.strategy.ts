@@ -25,10 +25,12 @@ export class JwtTemporaryStrategy extends PassportStrategy(Strategy,'jwtTemporar
 
   async validate(payload: any) {
     const account = await this.accountRepository.findOne({where:{id:payload.id || payload.sub}});
-    if (!account ||account.accountStatus !== AccountStatus.INACTIVE) {
+    
+    if (!account || account.accountStatus !== AccountStatus.INACTIVE) {
       throw new UnauthorizedException('Account is disabled or not found');
     }
-    
+  
+  
     return { id: account.id, role: payload.role,email:account.email };
   }
 }

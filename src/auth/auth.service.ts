@@ -121,12 +121,13 @@ export class AuthService {
   async verifyOtpServ({ otpCode, deviceId, deviceType, fcmToken }: VerifyOtpDto, userId: string) {
 
     const account = await this.userService.findById(userId);
+    const { accessToken, refreshToken } = await this.generateTokens(account.id, account.role, account.accountStatus, deviceId, deviceType, fcmToken);
     const existVerify = await this.mailService.verifyOtp(account.email, otpCode)
     if (!existVerify) {
       throw new BadRequestException('The verification code is incorrect or expired')
     }
+
     await this.userService.update(userId, { isEmailVerified: true, accountStatus: account.role == Role.CITIZEN ? AccountStatus.ACTIVE : AccountStatus.PENDING_PROFILE })
-    const { accessToken, refreshToken } = await this.generateTokens(account.id, account.role, account.accountStatus, deviceId, deviceType, fcmToken);
     return { accessToken, refreshToken };
   }
 
@@ -156,7 +157,7 @@ export class AuthService {
 
   async forgotPassword({ email }: ForgotPasswordDto) {
     const account = await this.userService.findByEmail(email);
-    const cooldownKey =`tokenUrl:cooldown:${email}`;
+    const cooldownKey = `tokenUrl:cooldown:${email}`;
     const ttl = await this.redis.ttl(cooldownKey);
     console.log(ttl);
 
@@ -228,9 +229,10 @@ export class AuthService {
 
     let device = await this.userDeviceRepository.findOne({ where: { accountId, deviceId } });
     if (!device) {
-      const exist = await this.userDeviceRepository.findOne({where:{deviceId:deviceId}})
-       if (exist) {
-        throw new BadRequestException('Device ID already exists for another user');}
+      const exist = await this.userDeviceRepository.findOne({ where: { deviceId: deviceId } })
+      if (exist) {
+        throw new BadRequestException('Device ID already exists for another user');
+      }
       device = this.userDeviceRepository.create({
         accountId,
         deviceType,
@@ -289,7 +291,7 @@ export class AuthService {
     return { Token: TemporaryToken };
   }
 
-  async refreshTokens({ deviceId }: RefreshTokenDto, token: string,accountId:string) {
+  async refreshTokens({ deviceId }: RefreshTokenDto, token: string, accountId: string) {
     try {
 
       const account = await this.userService.findById(accountId);
@@ -327,6 +329,11 @@ export class AuthService {
     let account = await this.accountRepository.findOne({
       where: { email: email },
     });
+  
+      const exist = await this.userDeviceRepository.findOne({ where: { deviceId: deviceId } })
+      if (exist?.account.id !== account?.id) {
+        throw new BadRequestException('Device ID already exists for another user');
+      }
 
     if (account) {
       if (account.role !== role) {

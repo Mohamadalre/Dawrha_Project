@@ -1,5 +1,5 @@
-import { Column, Entity, OneToMany, PrimaryGeneratedColumn,ManyToOne,JoinColumn } from "typeorm";
-import { InstitutionProfile } from "@src/user/entities/profile/institution-profile.entity";
+import {  Entity, PrimaryGeneratedColumn,ManyToOne,JoinColumn } from "typeorm";
+import { InstitutionMaterial } from "@src/user/entities/material/institution-material.entity";
 import { WasteCategory } from "./waste-category.entity";
 
 
@@ -8,11 +8,11 @@ export class InstitutionWasteCategory {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => InstitutionProfile, (inst) => inst, {
+  @ManyToOne(() => InstitutionMaterial, (inputs) => inputs.wasteTypes, {
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'institution_id' })
-  institution: InstitutionProfile;
+  @JoinColumn({ name: 'material_inputs_id' })
+  institution: InstitutionMaterial;
 
   @ManyToOne(() => WasteCategory, (wt) => wt.institutions, {
     nullable: true,
@@ -20,6 +20,5 @@ export class InstitutionWasteCategory {
   @JoinColumn({ name: 'waste_category_id' })
   wasteType: WasteCategory;
 
-  @Column({ nullable: true })
-  otherText: string;
+
 }

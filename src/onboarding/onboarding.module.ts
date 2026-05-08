@@ -16,7 +16,11 @@ import { InstitutionType } from '@src/institution/entities/institution-type.enti
 import { ExternalPartnerWasteCategory } from '@src/waste-management/entities/external-partner-waste-category.entity';
 import { FactoryWasteCategory } from '@src/waste-management/entities/factory-waste-category.entity';
 import { FactoryProfile } from '@src/user/entities/profile/factory-profile.entity';
+import { FactoryMaterial } from '@src/user/entities/material/factory-material.entity';
+import { ExternalPartnerMaterial } from '@src/user/entities/material/external-partner-material.entity';
 import { ExternalPartnerProfile } from '@src/user/entities/profile/external-partner-profile.entity';
+import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
+import { InstitutionMaterial } from '@src/user/entities/material/institution-material.entity';
 
 
 
@@ -26,13 +30,18 @@ import { ExternalPartnerProfile } from '@src/user/entities/profile/external-part
        Province, InstitutionProfile,CollectorProfile,
        WasteCategory,InstitutionType,FactoryProfile,
        FactoryWasteCategory,
-       ExternalPartnerProfile
+       ExternalPartnerProfile,
+       ExternalPartnerWasteCategory,
+       InstitutionMaterial,
+       FactoryMaterial,
+       ExternalPartnerMaterial
 
       ]),
     AuthModule,
     UserModule,
     MediaModule,
-    CommonModule
+    CommonModule,
+    CloudinaryModule
   ],
   controllers: [OnboardingController],
   providers: [OnboardingService],

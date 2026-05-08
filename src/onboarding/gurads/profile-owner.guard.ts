@@ -21,8 +21,10 @@ export class ProfileOwnerGuard implements CanActivate {
         const req = context.switchToHttp().getRequest();
 
         const account = req.user;
-        const profileId = req.params.profileId;
-        if(!isUUID(req.params.profileId)){
+        const profilId = req.params.profilId;
+        
+        
+        if(!isUUID(req.params.profilId)){
             throw new BadRequestException('Invalid UUID')
         }
 
@@ -35,7 +37,7 @@ export class ProfileOwnerGuard implements CanActivate {
         
 
         const profile = await repo.findOne({
-            where: { id: profileId },
+            where: { id: profilId },
             relations:['account']
         });
         if (!profile) {

@@ -11,6 +11,7 @@ import { OnboardingModule } from './onboarding/onboarding.module';
 import { MediaModule } from './media/media.module';
 import { WasteManagementModule } from './waste-management/waste-management.module';
 import { InstitutionModule } from './institution/institution.module';
+import { CloudinaryModule } from './core/cloudinary/cloudinary.module';
 
 
 @Module({
@@ -24,7 +25,8 @@ import { InstitutionModule } from './institution/institution.module';
     OnboardingModule,
     MediaModule,
     WasteManagementModule,
-    InstitutionModule
+    InstitutionModule,
+    CloudinaryModule
   ],
   controllers: [AppController],
   providers: [AppService],

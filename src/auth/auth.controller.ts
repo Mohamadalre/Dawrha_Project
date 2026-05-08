@@ -42,76 +42,76 @@ export class AuthController {
     return { message: 'Registration successful', result: tokens };
   }
 
-  @Post('login/admin')
+  @Post('admin/login')
   @HttpCode(200)
   async loginAdmin(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.ADMIN);
     return { message: 'Login successful', result: tokens };
   }
 
-  @Post('login/citizen')
+  @Post('citizen/login')
   @HttpCode(200)
   async loginCitizen(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.CITIZEN);
     return { message: 'Login successful', result: tokens };
   }
 
-  @Post('login/collector')
+  @Post('collector/login')
   @HttpCode(200)
   async logincollector(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.COLLECTOR);
     return { message: 'Login successful', result: tokens };
   }
 
-  @Post('login/externalPartner')
+  @Post('externalPartner/login')
   @HttpCode(200)
   async loginExternalPartner(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.EXTERNAL_PARTNER);
     return { message: 'Login successful', result: tokens };
   }
 
-  @Post('login/factory')
+  @Post('factory/login')
   @HttpCode(200)
   async loginfactory(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.FACTORY);
     return { message: 'Login successful', result: tokens };
   }
-  @Post('login/insitutions')
+  @Post('insitution/login')
   @HttpCode(200)
   async logininsitution(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.INSITUTIONS);
     return { message: 'Login successful', result: tokens };
   }
 
-  @Post('google/citizen/login')
+  @Post('citizen/login-google')
   @HttpCode(200)
   async googleLogin(@Body() dto: LoginGoogleDto) {
     const tokens = await this.authService.googleLogin(dto, Role.CITIZEN)
     return { message: 'Login with Google successful', result: tokens };
   }
 
-  @Post('google/collector/login')
+  @Post('collector/login-google')
   @HttpCode(200)
   async googleLoginCollector(@Body() dto: LoginGoogleDto) {
     const tokens = await this.authService.googleLogin(dto, Role.COLLECTOR)
     return { message: 'Login with Google successful', result: tokens };
   }
 
-  @Post('google/external-partiner/login')
+  @Post('external-partiner/login-google')
   @HttpCode(200)
   async googleLoginexternal(@Body() dto: LoginGoogleDto) {
     const tokens = await this.authService.googleLogin(dto, Role.EXTERNAL_PARTNER)
     return { message: 'Login with Google successful', result: tokens };
   }
 
-  @Post('google/factory/login')
+  @Post('factory/login-google')
   @HttpCode(200)
   async googleLoginfactory(@Body() dto: LoginGoogleDto) {
     const tokens = await this.authService.googleLogin(dto, Role.FACTORY)
     return { message: 'Login with Google successful', result: tokens };
   }
 
-  @Post('google/insitutions/login')
+  @Post('insitution/login-google')
   @HttpCode(200)
   async googleLogininstution(@Body() dto: LoginGoogleDto) {
     const tokens = await this.authService.googleLogin(dto, Role.INSITUTIONS)

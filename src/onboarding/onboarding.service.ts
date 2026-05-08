@@ -1,29 +1,33 @@
+/* eslint-disable @typescript-eslint/no-unused-expressions */
 import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { In, Repository } from 'typeorm';
 import { AccountProgress } from './entities/account-progress.entity';
 import { Account } from '@src/user/entities/account.entity';
 import { ONBOARDING_STEPS } from './config/onboarding.config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LocationDto } from './dto/location.dto';
 import { Province } from '@src/user/entities/location/province.entity';
 import { ProfileResolver } from '@src/user/providers/profile-resolver.privder';
 import { Role } from '@src/user/enums/role.enum';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
-import { AuthService } from '@src/auth/auth.service';
+// import { AuthService } from '@src/auth/auth.service';
 import { InformationInstitutionDTo, WasteInstitutionDTo } from './dto/institutions-onboarding.dto';
 import { CommonService } from '@src/common/common.service';
 import { InformationCollectorDTo } from './dto/collector-onboarding.dto';
 import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
 import { InstitutionProfile } from '@src/user/entities/profile/institution-profile.entity';
+import { InstitutionMaterial } from '@src/user/entities/material/institution-material.entity';
 import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
 import { InstitutionType } from '@src/institution/entities/institution-type.entity';
 import { InformationFactorynDTo, WasteFactoryDTo } from './dto/factory-onboarding.dto';
 import { FactoryProfile } from '@src/user/entities/profile/factory-profile.entity';
+import { FactoryMaterial } from '@src/user/entities/material/factory-material.entity';
 import { InformationExternalPartnerDTo, WasteExternalPartnerDTo } from './dto/external-partner-onboarding.dto';
 import { ExternalPartnerProfile } from '@src/user/entities/profile/external-partner-profile.entity';
+import { ExternalPartnerMaterial } from '@src/user/entities/material/external-partner-material.entity';
 import { ExternalPartnerWasteCategory } from '@src/waste-management/entities/external-partner-waste-category.entity';
 import { FactoryWasteCategory } from '@src/waste-management/entities/factory-waste-category.entity';
 import { InstitutionWasteCategory } from '@src/waste-management/entities/institution-waste-category.entity';
+import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 
 
 @Injectable()
@@ -38,8 +42,12 @@ export class OnboardingService {
     private readonly acccountRepo: Repository<Account>,
     @InjectRepository(InstitutionProfile)
     private readonly institutionRepo: Repository<InstitutionProfile>,
+    @InjectRepository(InstitutionMaterial)
+    private readonly institutionMaterialRepo: Repository<InstitutionMaterial>,
     @InjectRepository(CollectorProfile)
     private readonly collectorRepo: Repository<CollectorProfile>,
+    @InjectRepository(FactoryMaterial)
+    private readonly factoryMaterialRepo: Repository<FactoryMaterial>,
     @InjectRepository(WasteCategory)
     private readonly wasteCategoryRepo: Repository<WasteCategory>,
     @InjectRepository(InstitutionType)
@@ -48,8 +56,25 @@ export class OnboardingService {
     private readonly factoryRepo: Repository<FactoryProfile>,
     @InjectRepository(ExternalPartnerProfile)
     private readonly externalPartnerRepo: Repository<ExternalPartnerProfile>,
-    private readonly commonService: CommonService
+    @InjectRepository(ExternalPartnerMaterial)
+    private readonly externalPartnerMaterialRepo: Repository<ExternalPartnerMaterial>,
+    private readonly commonService: CommonService,
+    private readonly cloudinaryService: CloudinaryService
   ) { }
+
+  /**
+   * Uploads a logo file to Cloudinary and returns the URL
+   * Used for profile logos that are stored directly in the profile entity
+   *
+   * @param file - Multer file object
+   * @param ownerType - Type of owner (institutions, factories, external_partners)
+   * @param ownerId - Profile ID
+   * @returns Cloudinary URL for the uploaded logo
+   */
+  private async uploadLogo(file: Express.Multer.File, ownerType: string, ownerId: string): Promise<string> {
+    const folder = `logos/${ownerType}/${ownerId}`;
+    return await this.cloudinaryService.uploadLogo(file, folder);
+  }
 
   async findAll(page = 1, limit = 10) {
     return await this.provinceRepo.find({
@@ -63,9 +88,9 @@ export class OnboardingService {
     });
   }
 
-  async addLocation(dto: any, role: Role, profile: any, userId: string) {
+  async addLocation(dto:any, role: Role, profile: any, userId: string) {
     const account = await this.acccountRepo.findOne({ where: { id: userId } })
-    const step = await this.commonService.getCurrentStep(account!)
+    const step = await this.commonService.getCurrentStep(account)
     if (step !== 'location') {
       throw new ForbiddenException('You cannot add location data,you must add data from the previous');
     }
@@ -80,13 +105,13 @@ export class OnboardingService {
     profile.DesscriptLocation = dto.descriptionAddress;
     profile.province = province;
     await this.resolver.getRepo(role).save(profile);
-    await this.commonService.completeStep(account!, 'location')
-    const getnextStep = await this.commonService.getCurrentStep(account!)
+    await this.commonService.completeStep(account, 'location')
+    const getnextStep = await this.commonService.getCurrentStep(account)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.acccountRepo.update(account.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
-    return { status: 'Please enter the information in the following stage', }
+    return { status: 'Please enter the information in the following stage', id:profile.id,step:getnextStep }
   }
 
 
@@ -104,6 +129,7 @@ export class OnboardingService {
         accountId: account.id
       })
 
+      
       stepInp === steps[0] ? newprog.completedSteps.push[stepInp] : newprog.completedSteps = [];
       await this.progressRepo.save(newprog);
       return steps[0];
@@ -120,14 +146,34 @@ export class OnboardingService {
   /// api Institution
   async addInformationInstitutionSer(dto: InformationInstitutionDTo, userId: string, file?: Express.Multer.File) {
     const account = await this.acccountRepo.findOne({ where: { id: userId } })
-    const step = await this.commonService.getCurrentStep(account!)
+    const step = await this.commonService.getCurrentStep(account)
     if (step !== 'information') {
       throw new ForbiddenException('You cannot add information data,you must add data from the previous');
     }
-    const exist = await this.institutionRepo.findOne({ where: { account: account! } })
+  
+    const exist = await this.institutionRepo.findOne({ where: { account: account } })
     if (exist) {
       throw new ForbiddenException('You cannot add the information again,please move to the next stage');
     }
+
+    // Check for unique fields
+    const phoneExists = await this.institutionRepo.findOne({ where: { institutionPhone: dto.landlinePhone } });
+    if (phoneExists) {
+      throw new BadRequestException('Institution phone number already exists');
+    }
+
+    const licenseExists = await this.institutionRepo.findOne({ where: { licenseNumber: dto.licenseNumber } });
+    if (licenseExists) {
+      throw new BadRequestException('License number already exists');
+    }
+
+    if (dto.taxNumber) {
+      const taxExists = await this.institutionRepo.findOne({ where: { taxNumber: dto.taxNumber } });
+      if (taxExists) {
+        throw new BadRequestException('Tax number already exists');
+      }
+    }
+
     if (!dto.institutionTypeId && !dto.otherInstitutionType) {
       throw new BadRequestException(
         'Either institutionTypeId or otherInstitutionType is required',
@@ -137,10 +183,10 @@ export class OnboardingService {
     let information = this.institutionRepo.create({
       institutionName: dto.institutionName,
       institutionPhone: dto.landlinePhone,
-      institutionSlogo: `image/uploads/${file?.filename}` || ``,
+      institutionSlogo: '', 
       taxNumber: dto.taxNumber,
       licenseNumber: dto.licenseNumber,
-      account: account!
+      account: account
     })
 
     if (dto.institutionTypeId) {
@@ -154,18 +200,32 @@ export class OnboardingService {
       information.otherInstitutionType = dto.otherInstitutionType;
     }
     const profile = await this.institutionRepo.save(information);
-    await this.commonService.completeStep(account!, 'information')
-    const getnextStep = await this.commonService.getCurrentStep(account!)
+
+    // Upload logo if file provided
+    if (file) {
+      try {
+        const logoUrl = await this.uploadLogo(file, 'institutions', profile.id);
+        profile.institutionSlogo = logoUrl;
+        await this.institutionRepo.save(profile);
+      } catch (error) {
+        // If upload fails, delete the profile and rethrow
+        await this.institutionRepo.delete(profile.id);
+        throw error;
+      }
+    }
+
+    await this.commonService.completeStep(account, 'information')
+    const getnextStep = await this.commonService.getCurrentStep(account)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.acccountRepo.update(account.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved', id: profile.id }
     }
-    return { status: 'Please enter the information in the following stage', }
+    return { status: 'Please enter the information in the following stage',id:profile.id,step:getnextStep }
   }
 
   async addMaterialInstitutionSer(dto: WasteInstitutionDTo, profile: any, userId: string) {
     const account = await this.acccountRepo.findOne({ where: { id: userId } })
-    const step = await this.commonService.getCurrentStep(account!)
+    const step = await this.commonService.getCurrentStep(account)
     if (step !== 'materials') {
       throw new ForbiddenException('You cannot add materials data,you must add data from the previous');
     }
@@ -174,88 +234,140 @@ export class OnboardingService {
     const wasteTypes = wasteTypesEntities.map((wt) => {
       const pivot = new InstitutionWasteCategory();
       pivot.wasteType = wt;
-      pivot.institution = profile;
+
       return pivot;
     });
 
-    profile.wasteTypes = wasteTypes;
-    profile.preferredCollectionTime = dto.preferredCollectionTime;
-    profile.estimatedWasteQuantity = dto.estimatedWasteQuantity;
-    profile.collectionFrequney = dto.collectionFrequney;
+    // Create InstitutionMaterial entity
+    const materialInputs = this.institutionMaterialRepo.create({
+      institutionProfile: profile,
+      wasteTypes: wasteTypes,
+      preferredCollectionTime: dto.preferredCollectionTime,
+      estimatedWasteQuantity: dto.estimatedWasteQuantity,
+      collectionFrequney:dto.collectionFrequney
+    });
+
+    // Save material inputs
+    const savedMaterialInputs = await this.institutionMaterialRepo.save(materialInputs);
+
+    // Attach to profile
+    profile.materialInputs = savedMaterialInputs;
     await this.resolver.getRepo('INSITUTIONS').save(profile)
-    await this.commonService.completeStep(account!, 'materials')
-    const getnextStep = await this.commonService.getCurrentStep(account!)
+
+    await this.commonService.completeStep(account, 'materials')
+    const getnextStep = await this.commonService.getCurrentStep(account)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.acccountRepo.update(account.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
-    return { status: 'Please enter the information in the following stage', }
+    return { status: 'Please enter the information in the following stage',id:profile.id,step:getnextStep }
   }
 
   ///api collector
   async addInformationCollectorSer(dto: InformationCollectorDTo, userId: string) {
     const account = await this.acccountRepo.findOne({ where: { id: userId } })
-    const step = await this.commonService.getCurrentStep(account!)
+    const step = await this.commonService.getCurrentStep(account)
     if (step !== 'information') {
       throw new ForbiddenException('You cannot add information data,you must add data from the previous');
     }
-    const exist = await this.collectorRepo.findOne({ where: { account: account! } })
+    const nationId = await this.collectorRepo.findOne({where:{NationalID:dto.NationalID}});
+    if(nationId){
+      throw new BadRequestException('This National Id is already used by another collector')
+    }
+    const exist = await this.collectorRepo.findOne({ where: { account: account } })
     if (exist) {
       throw new ForbiddenException('You cannot add the information again,please move to the next stage')
     }
     const information = this.collectorRepo.create({
       shift: dto.shift,
       NationalID: dto.NationalID,
-      account: account!
+      account: account
 
     })
     const profile = await this.collectorRepo.save(information);
-    await this.commonService.completeStep(account!, 'information')
-    const getnextStep = await this.commonService.getCurrentStep(account!)
+    await this.commonService.completeStep(account, 'information')
+    const getnextStep = await this.commonService.getCurrentStep(account)
     if (getnextStep === null) {
-      await this.acccountRepo.update({ id: account!.id }, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.acccountRepo.update({ id: account.id }, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
-    return { status: 'Please enter the information in the following stage', id: profile.id }
+    return { status: 'Please enter the information in the following stage', id: profile.id,step:getnextStep }
   }
 
   //api factory
 
   async addInformationFactorySer(dto: InformationFactorynDTo, userId: string, file?: Express.Multer.File) {
     const account = await this.acccountRepo.findOne({ where: { id: userId } })
-    const step = await this.commonService.getCurrentStep(account!)
+    const step = await this.commonService.getCurrentStep(account)
     if (step !== 'information') {
       throw new ForbiddenException('You cannot add information data,you must add data from the previous');
     }
-    const exist = await this.factoryRepo.findOne({ where: { account: account! } })
+    const exist = await this.factoryRepo.findOne({ where: { account: account } })
     if (exist) {
       throw new ForbiddenException('You cannot add the information again,please move to the next stage');
+    }
+
+    // Check for unique fields
+    const phoneExists = await this.factoryRepo.findOne({ where: { factoryPhone: dto.landlinePhone } });
+    if (phoneExists) {
+      throw new BadRequestException('Factory phone number already exists');
+    }
+
+    const commercialRecordExists = await this.factoryRepo.findOne({ where: { commercialRecord: dto.commercialRecord } });
+    if (commercialRecordExists) {
+      throw new BadRequestException('Commercial record already exists');
+    }
+
+    const industrialRecordExists = await this.factoryRepo.findOne({ where: { industrialRecord: dto.industrialRecord } });
+    if (industrialRecordExists) {
+      throw new BadRequestException('Industrial record already exists');
+    }
+
+    if (dto.taxNumber) {
+      const taxExists = await this.factoryRepo.findOne({ where: { taxNumber: dto.taxNumber } });
+      if (taxExists) {
+        throw new BadRequestException('Tax number already exists');
+      }
     }
 
 
     const information = this.factoryRepo.create({
       factoryName: dto.factoryName,
       factoryPhone: dto.landlinePhone,
-      factorySlogo: `image/uploads/${file?.filename}` || ``,
+      factorySlogo: '', // temporary
       taxNumber: dto.taxNumber,
       commercialRecord: dto.commercialRecord,
       industrialRecord: dto.industrialRecord,
-      account: account!
+      account: account
     })
     const profile = await this.factoryRepo.save(information);
-    await this.commonService.completeStep(account!, 'information')
-    const getnextStep = await this.commonService.getCurrentStep(account!)
+
+    // Upload logo if file provided
+    if (file) {
+      try {
+        const logoUrl = await this.uploadLogo(file, 'factories', profile.id);
+        profile.factorySlogo = logoUrl;
+        await this.factoryRepo.save(profile);
+      } catch (error) {
+        // If upload fails, delete the profile and rethrow
+        await this.factoryRepo.delete(profile.id);
+        throw error;
+      }
+    }
+
+    await this.commonService.completeStep(account, 'information')
+    const getnextStep = await this.commonService.getCurrentStep(account)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.acccountRepo.update(account.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
-    return { status: 'Please enter the information in the following stage', id: profile.id }
+    return { status: 'Please enter the information in the following stage', id:profile.id,step:getnextStep}
   }
 
 
   async addMaterialFactorySer(dto: WasteFactoryDTo, profile: any, userId: string) {
     const account = await this.acccountRepo.findOne({ where: { id: userId } })
-    const step = await this.commonService.getCurrentStep(account!)
+    const step = await this.commonService.getCurrentStep(account)
     if (step !== 'materials') {
       throw new ForbiddenException('You cannot add materials data,you must add data from the previous');
     }
@@ -263,24 +375,28 @@ export class OnboardingService {
     const wasteTypes = wasteTypesEntities.map((wt) => {
       const pivot = new FactoryWasteCategory();
       pivot.wasteType = wt;
-      pivot.factory = profile;
       return pivot;
     });
 
+    const factoryMaterial = this.factoryMaterialRepo.create({
+      factoryProfile: profile,
+      wasteTypes: wasteTypes,
+      averageOrderQuantity: dto.averageOrderQuantity,
+      estimationOrderSchedule: dto.estimationOrderSchedule,
+      deliveryPreference: dto.deliveryPreference,
+      perferredDeliverySchedule: dto.perferredDeliverySchedule,
+    });
 
-    profile.wasteTypes = wasteTypes;
-    profile.averageOrderQuantity = dto.averageOrderQuantity;
-    profile.estimationOrderSchedule = dto.estimationOrderSchedule;
-    profile.deliveryPreference = dto.deliveryPreference;
-    profile.perferredDeliverySchedule = dto.perferredDeliverySchedule
-    await this.resolver.getRepo('FACTORY').save(profile)
-    await this.commonService.completeStep(account!, 'materials')
-    const getnextStep = await this.commonService.getCurrentStep(account!)
+    const savedFactoryMaterial = await this.factoryMaterialRepo.save(factoryMaterial);
+    profile.factoryMaterial = savedFactoryMaterial;
+    await this.resolver.getRepo('FACTORY').save(profile);
+    await this.commonService.completeStep(account, 'materials')
+    const getnextStep = await this.commonService.getCurrentStep(account)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.acccountRepo.update(account.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
-    return { status: 'Please enter the information in the following stage', }
+    return { status: 'Please enter the information in the following stage',id:profile.id,step:getnextStep }
   }
 
 
@@ -288,36 +404,55 @@ export class OnboardingService {
 
   async addInformationExternalPartnerSer(dto: InformationExternalPartnerDTo, userId: string, file?: Express.Multer.File) {
     const account = await this.acccountRepo.findOne({ where: { id: userId } })
-    const step = await this.commonService.getCurrentStep(account!)
+    const step = await this.commonService.getCurrentStep(account)
     if (step !== 'information') {
       throw new ForbiddenException('You cannot add information data,you must add data from the previous');
     }
-    const exist = await this.factoryRepo.findOne({ where: { account: account! } })
+    const exist = await this.externalPartnerRepo.findOne({ where: { account: account } })
     if (exist) {
       throw new ForbiddenException('You cannot add the information again,please move to the next stage');
+    }
+
+        const phoneExists = await this.externalPartnerRepo.findOne({ where: { externalPartnerPhone: dto.landlinePhone } });
+    if (phoneExists) {
+      throw new BadRequestException('Institution phone number already exists');
     }
 
 
     const information = this.externalPartnerRepo.create({
       externalPartnerName: dto.externalPartnerName,
       externalPartnerPhone: dto.landlinePhone,
-      externalPartnerSlogo: `image/uploads/${file?.filename}` || '',
-      account: account!
+      externalPartnerSlogo: '', // temporary
+      account: account
     })
     const profile = await this.externalPartnerRepo.save(information);
-    await this.commonService.completeStep(account!, 'information')
-    const getnextStep = await this.commonService.getCurrentStep(account!)
+
+    // Upload logo if file provided
+    if (file) {
+      try {
+        const logoUrl = await this.uploadLogo(file, 'external_partners', profile.id);
+        information.externalPartnerSlogo = logoUrl;
+        await this.externalPartnerRepo.save(information);
+      } catch (error) {
+        // If upload fails, delete the profile and rethrow
+        await this.externalPartnerRepo.delete(profile.id);
+        throw error;
+      }
+    }
+
+    await this.commonService.completeStep(account, 'information')
+    const getnextStep = await this.commonService.getCurrentStep(account)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.acccountRepo.update(account.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
-    return { status: 'Please enter the information in the following stage', id: profile.id }
+    return { status: 'Please enter the information in the following stage',id:profile.id,step:getnextStep }
   }
 
 
   async addMaterialExternalPartnerSer(dto: WasteExternalPartnerDTo, profile: any, userId: string) {
     const account = await this.acccountRepo.findOne({ where: { id: userId } })
-    const step = await this.commonService.getCurrentStep(account!)
+    const step = await this.commonService.getCurrentStep(account)
     if (step !== 'materials') {
       throw new ForbiddenException('You cannot add materials data,you must add data from the previous');
     }
@@ -328,23 +463,28 @@ export class OnboardingService {
     const wasteTypes = wasteTypesEntities.map((wt) => {
       const pivot = new ExternalPartnerWasteCategory();
       pivot.wasteType = wt;
-      pivot.externalPartner = profile;
       return pivot;
     });
 
-    profile.wasteTypes = wasteTypes;
-    profile.averageOrderQuantity = dto.averageOrderQuantity;
-    profile.estimationOrderSchedule = dto.estimationOrderSchedule;
-    profile.deliveryPreference = dto.deliveryPreference;
-    profile.perferredDeliverySchedule = dto.perferredDeliverySchedule
-    await this.resolver.getRepo('EXTERNAL_PARTNER').save(profile)
-    await this.commonService.completeStep(account!, 'materials')
-    const getnextStep = await this.commonService.getCurrentStep(account!)
+    const externalPartnerMaterial = this.externalPartnerMaterialRepo.create({
+      externalPartnerProfile: profile,
+      wasteTypes: wasteTypes,
+      averageOrderQuantity: dto.averageOrderQuantity,
+      estimationOrderSchedule: dto.estimationOrderSchedule,
+      deliveryPreference: dto.deliveryPreference,
+      perferredDeliverySchedule: dto.perferredDeliverySchedule,
+    });
+
+    const savedExternalPartnerMaterial = await this.externalPartnerMaterialRepo.save(externalPartnerMaterial);
+    profile.externalPartnerMaterial = savedExternalPartnerMaterial;
+    await this.resolver.getRepo('EXTERNAL_PARTNER').save(profile);
+    await this.commonService.completeStep(account, 'materials')
+    const getnextStep = await this.commonService.getCurrentStep(account)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account!.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.acccountRepo.update(account.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
-    return { status: 'Please enter the information in the following stage', }
+    return { status: 'Please enter the information in the following stage', id:profile.id,step:getnextStep}
   }
 
 

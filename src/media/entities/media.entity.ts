@@ -18,13 +18,48 @@ export enum statusMedia {
     APPROVED = 'APPROVED',
     REJECTED = 'REJECTED',
 }
+/**
+ * Media Entity - Stores image metadata
+ *
+ * Database Fields:
+ * - url: Cloudinary CDN URL (secure_url from Cloudinary response)
+ * - publicId: Cloudinary public identifier (used for deletion/updates)
+ * - fileType: Type of file (ID_CARD, LICENSE, etc.)
+ * - ownerId: Reference to owner (User, Institution, Factory)
+ * - ownerType: Type of owner
+ * - status: Approval status (PENDING, APPROVED, REJECTED)
+ *
+ * Design Pattern:
+ * - Only stores URL and publicId from Cloudinary
+ * - No file content stored in database
+ * - publicId enables atomic deletion operations
+ * - url provides direct CDN access
+ *
+ * Indexes:
+ * - (ownerId, fileType): Fast lookup for owner documents
+ * - (ownerId, ownerType): Fast lookup for owner records
+ * - status: Fast filtering for approval workflow
+ */
 @Entity('media')
 export class Media {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
+    /**
+     * Cloudinary CDN URL (secure_url)
+     * Direct link to serve image files
+     * Example: https://res.cloudinary.com/cloud_name/image/upload/v123/collectors/uuid/ID_CARD.jpg
+     */
     @Column()
     url: string;
+
+    /**
+     * Cloudinary public ID (unique identifier)
+     * Used to delete or update images in Cloudinary
+     * Example: collectors/uuid/ID_CARD/timestamp
+     */
+    @Column()
+    publicId: string;
 
     @Column({ type: 'enum', enum: MediaType })
     fileType: MediaType;
