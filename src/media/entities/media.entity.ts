@@ -10,7 +10,7 @@ export enum MediaType {
 
 export enum OwnerType {
     COLLECTOR = 'COLLECTOR',
-    INSITUTIONS = 'INSITUTIONS',
+    INSTITUTIONS = 'INSTITUTIONS',
     FACTORY = 'FACTORY',
 }
 export enum statusMedia {

@@ -1,6 +1,14 @@
 import {  Module } from '@nestjs/common';
 import { OnboardingService } from './onboarding.service';
+import { InstitutionOnboardingService } from './services/institution-onboarding.service';
+import { CollectorOnboardingService } from './services/collector-onboarding.service';
+import { FactoryOnboardingService } from './services/factory-onboarding.service';
+import { ExternalPartnerOnboardingService } from './services/external-partner-onboarding.service';
 import { OnboardingController } from './onboarding.controller';
+import { InstitutionOnboardingController } from './controllers/institution-onboarding.controller';
+import { FactoryOnboardingController } from './controllers/factory-onboarding.controller';
+import { ExternalPartnerOnboardingController } from './controllers/external-partner-onboarding.controller';
+import { CollectorOnboardingController } from './controllers/collector-onboarding.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AccountProgress } from './entities/account-progress.entity';
 import { Account } from '@src/user/entities/account.entity';
@@ -19,8 +27,8 @@ import { FactoryProfile } from '@src/user/entities/profile/factory-profile.entit
 import { FactoryMaterial } from '@src/user/entities/material/factory-material.entity';
 import { ExternalPartnerMaterial } from '@src/user/entities/material/external-partner-material.entity';
 import { ExternalPartnerProfile } from '@src/user/entities/profile/external-partner-profile.entity';
-import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
 import { InstitutionMaterial } from '@src/user/entities/material/institution-material.entity';
+import { CoreModule } from '@src/core/core.module';
 
 
 
@@ -41,10 +49,23 @@ import { InstitutionMaterial } from '@src/user/entities/material/institution-mat
     UserModule,
     MediaModule,
     CommonModule,
-    CloudinaryModule
+    CoreModule,
+  
   ],
-  controllers: [OnboardingController],
-  providers: [OnboardingService],
-  exports: [OnboardingService]
+  controllers: [OnboardingController, InstitutionOnboardingController, FactoryOnboardingController, ExternalPartnerOnboardingController, CollectorOnboardingController],
+  providers: [
+    OnboardingService,
+    InstitutionOnboardingService,
+    CollectorOnboardingService,
+    FactoryOnboardingService,
+    ExternalPartnerOnboardingService
+  ],
+  exports: [
+    OnboardingService,
+    InstitutionOnboardingService,
+    CollectorOnboardingService,
+    FactoryOnboardingService,
+    ExternalPartnerOnboardingService
+  ]
 })
 export class OnboardingModule { } 

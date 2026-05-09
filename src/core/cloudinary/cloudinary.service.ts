@@ -2,7 +2,7 @@ import { Injectable, Inject, BadRequestException, InternalServerErrorException, 
 import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
 import { Readable } from 'stream';
-import { UploadApiResponse, UploadApiErrorResponse } from 'cloudinary';
+
 
 export interface CloudinaryUploadResult {
   imageUrl: string;
@@ -114,50 +114,53 @@ export class CloudinaryService {
     const folder = `${ownerTypeFolder}/${fileType}`;
     const publicIdRelative = `${ownerId}/${timestamp}`;
 
-    try {
-      // Step 3: Create readable stream from buffer
-      const uploadStream = this.cloudinaryClient.uploader.upload_stream(
-        {
-          public_id: publicIdRelative,
-          folder,
-          resource_type: 'auto',
-          overwrite: false, // Prevent accidental overwrites
-        },
-        (error: UploadApiErrorResponse | undefined) => {
-          if (error) {
-            this.logger.error(`Upload failed for ${publicId}:`, error);
-            throw new InternalServerErrorException(`Failed to upload file to Cloudinary: ${error.message}`);
-          }
-        },
-      );
+ return new Promise((resolve, reject) => {
 
-      // Step 4: Upload file buffer to Cloudinary via stream
-      return new Promise((resolve, reject) => {
-        uploadStream.on('finish', (result: UploadApiResponse) => {
-          this.logger.debug(`File uploaded successfully: ${publicId}`);
+  const uploadStream =
+    this.cloudinaryClient.uploader.upload_stream(
 
-          // Step 5: Return upload result
-          resolve({
-            imageUrl: result.secure_url,
-            publicId: result.public_id,
-            fileName: result.original_filename || file.originalname,
-            fileSize: result.bytes,
-          });
+      {
+        public_id: publicIdRelative,
+        folder,
+        resource_type: 'auto',
+        overwrite: false,
+      },
+
+      (error, result) => {
+
+        if (error || !result) {
+
+          this.logger.error(
+            `Upload failed for ${publicId}`,
+            error,
+          );
+
+          return reject(
+            new InternalServerErrorException(
+              'Failed to upload file to Cloudinary',
+            ),
+          );
+        }
+
+        this.logger.debug(
+         `File uploaded successfully: ${publicId}`,
+        );
+
+        resolve({
+          imageUrl: result.secure_url,
+          publicId: result.public_id,
+          fileName:
+            result.original_filename ||
+            file.originalname,
+          fileSize: result.bytes,
         });
+      },
+    );
 
-        uploadStream.on('error', (error) => {
-          this.logger.error(`Upload stream error for ${publicId}:`, error);
-          reject(new InternalServerErrorException(`Failed to upload file: ${error.message}`));
-        });
-
-        // Convert buffer to stream and pipe to Cloudinary
-        const stream = Readable.from(file.buffer);
-        stream.pipe(uploadStream);
-      });
-    } catch (error) {
-      this.logger.error(`Cloudinary upload error:`, error);
-      throw new InternalServerErrorException('Failed to upload file to Cloudinary');
-    }
+  Readable
+    .from(file.buffer)
+    .pipe(uploadStream);
+});
   }
 
   /**
@@ -246,42 +249,60 @@ export class CloudinaryService {
     this.validateFile(file);
 
     try {
-      // Step 2: Create readable stream from buffer
-      const uploadStream = this.cloudinaryClient.uploader.upload_stream(
-        {
-          folder: folder,
-          resource_type: 'auto',
-          overwrite: false, // Prevent accidental overwrites
-        },
-        (error: UploadApiErrorResponse | undefined) => {
-          if (error) {
-            this.logger.error(`Logo upload failed for ${folder}:`, error);
-            throw new InternalServerErrorException(`Failed to upload logo to Cloudinary: ${error.message}`);
-          }
-        },
-      );
 
-      // Step 3: Upload file buffer to Cloudinary via stream
-      return new Promise((resolve, reject) => {
-        uploadStream.on('finish', (result: UploadApiResponse) => {
-          this.logger.debug(`Logo uploaded successfully: ${result.public_id}`);
+    return new Promise<string>((resolve, reject) => {
 
-          // Step 4: Return the secure URL
-          resolve(result.secure_url);
-        });
+      const uploadStream =
+        this.cloudinaryClient.uploader.upload_stream(
 
-        uploadStream.on('error', (error) => {
-          this.logger.error(`Logo upload stream error for ${folder}:`, error);
-          reject(new InternalServerErrorException(`Failed to upload logo: ${error.message}`));
-        });
+          {
+            folder,
+            resource_type: 'image',
+            overwrite: false,
+          },
 
-        // Convert buffer to stream and pipe to Cloudinary
-        const stream = Readable.from(file.buffer);
-        stream.pipe(uploadStream);
-      });
-    } catch (error) {
-      this.logger.error(`Cloudinary logo upload error:`, error);
-      throw new InternalServerErrorException('Failed to upload logo to Cloudinary');
-    }
+          (error, result) => {
+
+            if (error || !result) {
+
+              this.logger.error(
+                `Logo upload failed for ${folder}`,
+                error,
+              );
+
+              return reject(
+                new InternalServerErrorException(
+                  'Failed to upload logo',
+                ),
+              );
+            }
+
+            this.logger.debug(
+             ` Logo uploaded successfully: ${result.public_id}`,
+            );
+
+            resolve(result.secure_url);
+          },
+        );
+
+      uploadStream.end(file.buffer);
+    });
+
+  } catch (error) {
+
+    this.logger.error(
+      'Cloudinary logo upload error',
+      error,
+    );
+
+    throw new InternalServerErrorException(
+      'Failed to upload logo to Cloudinary',
+    );
   }
 }
+}
+
+
+
+
+  

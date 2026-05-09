@@ -1,5 +1,5 @@
 import { DeviceType } from '@src/user/enums/deviec-type.enum';
-import {  IsEnum, IsNotEmpty, IsOptional, IsPhoneNumber, IsString, MinLength } from 'class-validator';
+import {  IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 
 export class RefreshTokenDto {
@@ -8,7 +8,7 @@ export class RefreshTokenDto {
   deviceId: string;
 }
 
-export class RefreshTokenTemporayDto {
+export class RefreshTokenTemporaryDto {
 @IsString()
 token:string
 }

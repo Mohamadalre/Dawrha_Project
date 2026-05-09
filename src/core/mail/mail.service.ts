@@ -39,7 +39,7 @@ export class MailService {
       })
       this.logger.log(`OTP generated and queue task added for :${email}`)
 
-    } catch (error) {
+    } catch (error:any) {
       this.logger.log(`Failed to generate of queue OTP : ${error.message}`)
 
       await this.redis.del(redisKey);
@@ -51,7 +51,7 @@ export class MailService {
     const tokenUrl = crypto.randomBytes(32).toString('hex')
     const redisKey = `reset:${tokenUrl}`;
 
-    const link = `${this.configService.get<string>('SEVER_HOST')}:${this.configService.get<number>('PORT')}/v1/auth/reset-password?token=${tokenUrl}`
+    const link = `${this.configService.get<string>('FRONTEND_URL')}?token=${tokenUrl}`
     console.log(tokenUrl);
 
     try {
@@ -67,7 +67,7 @@ export class MailService {
 
       })
       this.logger.log(`TokenURL generated and queue task added for :${email}`)
-    } catch (error) {
+    } catch (error:any) {
       this.logger.log(`Failed to generate of queue TokenURL : ${error.message}`)
 
       await this.redis.del(redisKey);

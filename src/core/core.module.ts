@@ -4,6 +4,7 @@ import { DatabaseModule } from './database/database.module';
 import { RedisModule } from './redis/redis.module';
 import { MailModule }  from './mail/mail.module' 
 import { QueueModule } from './queue/queue.module';
+import { CloudinaryModule } from './cloudinary/cloudinary.module';
 
 @Module({
   imports: [
@@ -11,7 +12,9 @@ import { QueueModule } from './queue/queue.module';
     DatabaseModule,
     RedisModule,
     MailModule,
-    QueueModule
+    QueueModule,
+    CloudinaryModule
   ],
+  exports:[CloudinaryModule]
 })
 export class CoreModule {}

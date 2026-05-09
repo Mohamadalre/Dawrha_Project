@@ -3,6 +3,7 @@ import { AppModule } from './app.module';
 import * as dotenv from 'dotenv';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { DatabaseExceptionFilter } from './common/filters/database-exception.filter';
 import { ClassSerializerInterceptor, ValidationPipe, VersioningType } from '@nestjs/common';
 import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './core/logger-config/logger.config';
@@ -10,60 +11,89 @@ import { LoggerExceptionsFilter } from './common/filters/logger-exception.filter
 
 import { NestExpressApplication } from '@nestjs/platform-express';
 
-
-
-
+/**
+ * Main application bootstrap function
+ * Initializes the NestJS application with:
+ * - Global filters for exception handling
+ * - Global interceptors for response transformation
+ * - Validation pipes for DTO validation
+ * - API versioning and routing
+ * - Winston logger configuration
+ */
 async function bootstrap() {
   const logger = WinstonModule.createLogger(winstonConfig);
   dotenv.config();
   const port = process.env.PORT || 3000;
   try {
+    // Create NestJS application with Express platform
     const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-      logger
-      , bufferLogs: true
+      logger,
+      bufferLogs: true
     });
-    //  app.useLogger(logger);
 
-
-
+    // Set global API prefix
     app.setGlobalPrefix('api');
+    
+    // Enable URI-based versioning (e.g., /api/v1/...)
     app.enableVersioning({ type: VersioningType.URI })
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true,forbidNonWhitelisted:true }));
+    
+    /**
+     * Global validation pipe configuration:
+     * - whitelist: Remove properties not defined in DTO
+     * - transform: Automatically transform payloads to DTO instances
+     * - forbidNonWhitelisted: Throw error if unknown properties are sent
+     */
+    app.useGlobalPipes(new ValidationPipe({ 
+      whitelist: true, 
+      transform: true,
+      forbidNonWhitelisted: true 
+    }));
+
+    /**
+     * Apply global filters in order of execution:
+     * 1. LoggerExceptionsFilter - Logs exceptions for monitoring
+     * 2. AllExceptionsFilter - Handles HTTP exceptions and generic errors
+     * 3. DatabaseExceptionFilter - Handles database-specific errors
+     */
     app.useGlobalFilters(new LoggerExceptionsFilter());
+    app.useGlobalFilters(new AllExceptionsFilter());
+    app.useGlobalFilters(new DatabaseExceptionFilter());
+    
+    /**
+     * Apply global interceptors for response transformation:
+     * 1. TransformInterceptor - Standardizes API response format
+     * 2. ClassSerializerInterceptor - Handles DTO serialization
+     */
     app.useGlobalInterceptors(new TransformInterceptor());
     app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
-    app.useGlobalFilters(new AllExceptionsFilter());
-   
 
-
+    // Start listening on configured port
     await app.listen(port);
 
     logger.log(`Server is running on port ${port}`, 'SYSTEM')
 
-
   } catch (error: any) {
+    // Log critical system errors and exit process
     logger.error(`Critical System Failure : ${error.message}`, error.stack, 'SYSTEM');
     console.log(`error ${error}`);
 
     process.exit(1)
   }
-
 }
-
 
 bootstrap();
 
-
-
 /**
+ * Commented out global process error handlers
+ * Can be enabled for additional error tracking:
  * 
- *   process.on('uncaughtException', (err) => {
-  const logger = WinstonModule.createLogger(winstonConfig);
-  logger.error(`Uncaught Exception: ${err.message}, err.stack, 'SYSTEM'`);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  const logger = WinstonModule.createLogger(winstonConfig);
-  logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}, 'SYSTEM'`);
-});
+ * process.on('uncaughtException', (err) => {
+ *   const logger = WinstonModule.createLogger(winstonConfig);
+ *   logger.error(`Uncaught Exception: ${err.message}, err.stack, 'SYSTEM'`);
+ * });
+ *
+ * process.on('unhandledRejection', (reason, promise) => {
+ *   const logger = WinstonModule.createLogger(winstonConfig);
+ *   logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}, 'SYSTEM'`);
+ * });
  */

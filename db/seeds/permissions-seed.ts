@@ -4,7 +4,7 @@ import { ROLE_PERMISSIONS } from "./role-permissions.config";
 import { Role } from "@src/user/enums/role.enum";
 import { DataSource } from "typeorm";
 
-export async function seed(dataSource: DataSource) {
+export async function seedPermissions(dataSource: DataSource) {
     const permissionRepo = dataSource.getRepository(Permission);
     const rolePermissionRepo = dataSource.getRepository(RolePermission);
 

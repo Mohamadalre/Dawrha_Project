@@ -1,7 +1,7 @@
 import { CollectionFrequeny } from "@src/user/enums/collectionFrequeny.enum";
 import { IsNotEmpty, IsString, IsOptional, Matches, IsEnum,IsUUID, IsArray, ArrayNotEmpty } from "class-validator";
 
-export class InformationInstitutionDTo {
+export class InformationInstitutionDto {
     @IsNotEmpty()
     @IsString()
     institutionName: string;
@@ -25,14 +25,14 @@ export class InformationInstitutionDTo {
 
     @IsString()
     @IsNotEmpty()
-    @Matches(/^011[0-9][0-9]{6}$/, {
-        message: 'The phone number must be a Syrian number',
+    @Matches(/^011[1-9][0-9]{5}$/, {
+        message: 'The landline phone number must be a Syrian number',
     })
     landlinePhone: string;
 }
 
 
-export class WasteInstitutionDTo {
+export class WasteInstitutionDto {
     @IsArray()
     @IsString({ each: true })
     wasteCategoryId: string[];

@@ -6,7 +6,7 @@ import { Request } from "express";
 
 
 @Injectable()
-export class RefreshTokenGuarud implements CanActivate {
+export class RefreshTokenGuard implements CanActivate {
     constructor(
         private readonly jwtService: JwtService,
         private readonly configService: ConfigService,
@@ -26,6 +26,7 @@ export class RefreshTokenGuarud implements CanActivate {
     
                 request['user'] = token;
                 request['id'] = account.id
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (error) {
                 throw new UnauthorizedException("invalid token")
             }

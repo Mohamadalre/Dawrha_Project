@@ -1,15 +1,15 @@
-import { Controller, Post, Body, UseGuards, Get, HttpCode, Put, Req } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, HttpCode, Put, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { DeviceDto, RefreshTokenDto, RefreshTokenTemporayDto } from './dto/auth.dto';
+import { DeviceDto, RefreshTokenDto, RefreshTokenTemporaryDto } from './dto/auth.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/forgot-password.dto'
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
-import { RolesGuard } from './guards/roles.guard';
-import { Roles } from './decorators/roles.decorator';
+// import { RolesGuard } from './guards/roles.guard';
+// import { Roles } from './decorators/roles.decorator';
 import { Role } from '../user/enums/role.enum';
-import { RefreshTokenGuarud } from './guards/refresh-token.guard';
+import { RefreshTokenGuard } from './guards/refresh-token.guard';
 import { JwtTemporaryGuard } from './guards/jwt-temporary.guard';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { LoginGoogleDto } from './dto/logoin-google.dto';
@@ -23,153 +23,262 @@ import { LoginGoogleDto } from './dto/logoin-google.dto';
 export class AuthController {
   constructor(private readonly authService: AuthService) { }
 
-  @Post('citizen/register')
+  /**
+   * Register a citizen account.
+   * @param registerDto body payload containing fullName, email, phoneNumber, password
+   * @returns temporary token object for OTP verification
+   */
+  @Post('register/citizen')
   async registerCitizen(@Body() registerDto: RegisterDto) {
     const tokens = await this.authService.register(registerDto, Role.CITIZEN);
     return { message: 'Registration successful', result: tokens };
   }
 
 
-  @Post('institution/register')
+  /**
+   * Register an institution account.
+   * @param registerDto body payload containing fullName, email, phoneNumber, password
+   * @returns temporary token object for OTP verification
+   */
+  @Post('register/institution')
   async registerInstitution(@Body() registerDto: RegisterDto) {
-    const tokens = await this.authService.register(registerDto, Role.INSITUTIONS);
+    const tokens = await this.authService.register(registerDto, Role.INSTITUTIONS);
     return { message: 'Registration successful', result: tokens };
   }
 
-  @Post('collector/register')
+  /**
+   * Register a collector account.
+   * @param registerDto body payload containing fullName, email, phoneNumber, password
+   * @returns temporary token object for OTP verification
+   */
+  @Post('register/collector')
   async registerCollector(@Body() registerDto: RegisterDto) {
     const tokens = await this.authService.register(registerDto, Role.COLLECTOR);
     return { message: 'Registration successful', result: tokens };
   }
 
-  @Post('admin/login')
+  /**
+   * Login as admin.
+   * @param loginDto body payload containing email and password
+   * @returns JWT tokens if credentials and role match
+   */
+  @Post('login/admin')
   @HttpCode(200)
   async loginAdmin(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.ADMIN);
     return { message: 'Login successful', result: tokens };
   }
 
-  @Post('citizen/login')
+  /**
+   * Login as citizen.
+   * @param loginDto body payload containing email and password
+   * @returns JWT tokens if credentials and role match
+   */
+  @Post('login/citizen')
   @HttpCode(200)
   async loginCitizen(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.CITIZEN);
     return { message: 'Login successful', result: tokens };
   }
 
-  @Post('collector/login')
+  /**
+   * Login as collector.
+   * @param loginDto body payload containing email and password
+   * @returns JWT tokens if credentials and role match
+   */
+  @Post('login/collector')
   @HttpCode(200)
-  async logincollector(@Body() loginDto: LoginDto) {
+  async loginCollector(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.COLLECTOR);
     return { message: 'Login successful', result: tokens };
   }
 
-  @Post('externalPartner/login')
+  /**
+   * Login as external partner.
+   * @param loginDto body payload containing email and password
+   * @returns JWT tokens if credentials and role match
+   */
+  @Post('login/external-partner')
   @HttpCode(200)
   async loginExternalPartner(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.EXTERNAL_PARTNER);
     return { message: 'Login successful', result: tokens };
   }
 
-  @Post('factory/login')
+  /**
+   * Login as factory.
+   * @param loginDto body payload containing email and password
+   * @returns JWT tokens if credentials and role match
+   */
+  @Post('login/factory')
   @HttpCode(200)
-  async loginfactory(@Body() loginDto: LoginDto) {
+  async loginFactory(@Body() loginDto: LoginDto) {
     const tokens = await this.authService.login(loginDto, Role.FACTORY);
     return { message: 'Login successful', result: tokens };
   }
-  @Post('insitution/login')
+
+  /**
+   * Login as institution.
+   * @param loginDto body payload containing email and password
+   * @returns JWT tokens if credentials and role match
+   */
+  @Post('login/institution')
   @HttpCode(200)
-  async logininsitution(@Body() loginDto: LoginDto) {
-    const tokens = await this.authService.login(loginDto, Role.INSITUTIONS);
+  async loginInstitution(@Body() loginDto: LoginDto) {
+    const tokens = await this.authService.login(loginDto, Role.INSTITUTIONS);
     return { message: 'Login successful', result: tokens };
   }
 
-  @Post('citizen/login-google')
+  /**
+   * Google login for citizen users.
+   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken
+   * @returns JWT tokens if the Google token is valid and role matches
+   */
+  @Post('login/citizen/google')
   @HttpCode(200)
-  async googleLogin(@Body() dto: LoginGoogleDto) {
+  async googleLoginCitizen(@Body() dto: LoginGoogleDto) {
     const tokens = await this.authService.googleLogin(dto, Role.CITIZEN)
     return { message: 'Login with Google successful', result: tokens };
   }
 
-  @Post('collector/login-google')
+  /**
+   * Google login for collector users.
+   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken
+   * @returns JWT tokens if the Google token is valid and role matches
+   */
+  @Post('login/collector/google')
   @HttpCode(200)
   async googleLoginCollector(@Body() dto: LoginGoogleDto) {
     const tokens = await this.authService.googleLogin(dto, Role.COLLECTOR)
     return { message: 'Login with Google successful', result: tokens };
   }
 
-  @Post('external-partiner/login-google')
+  /**
+   * Google login for external partner users.
+   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken
+   * @returns JWT tokens if the Google token is valid and role matches
+   */
+  @Post('login/external-partner/google')
   @HttpCode(200)
-  async googleLoginexternal(@Body() dto: LoginGoogleDto) {
+  async googleLoginExternalPartner(@Body() dto: LoginGoogleDto) {
     const tokens = await this.authService.googleLogin(dto, Role.EXTERNAL_PARTNER)
     return { message: 'Login with Google successful', result: tokens };
   }
 
-  @Post('factory/login-google')
+  /**
+   * Google login for factory users.
+   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken
+   * @returns JWT tokens if the Google token is valid and role matches
+   */
+  @Post('login/factory/google')
   @HttpCode(200)
-  async googleLoginfactory(@Body() dto: LoginGoogleDto) {
+  async googleLoginFactory(@Body() dto: LoginGoogleDto) {
     const tokens = await this.authService.googleLogin(dto, Role.FACTORY)
     return { message: 'Login with Google successful', result: tokens };
   }
 
-  @Post('insitution/login-google')
+  /**
+   * Google login for institution users.
+   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken
+   * @returns JWT tokens if the Google token is valid and role matches
+   */
+  @Post('login/institution/google')
   @HttpCode(200)
-  async googleLogininstution(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.googleLogin(dto, Role.INSITUTIONS)
+  async googleLoginInstitution(@Body() dto: LoginGoogleDto) {
+    const tokens = await this.authService.googleLogin(dto, Role.INSTITUTIONS)
     return { message: 'Login with Google successful', result: tokens };
   }
+
+  /**
+   * Confirm OTP received by email for temporary users.
+   * @param user current temporary authenticated user from JwtTemporaryGuard
+   * @param verifyOtpDto body payload containing otpCode, deviceId, deviceType and optional fcmToken
+   * @returns full JWT access and refresh tokens
+   */
   @UseGuards(JwtTemporaryGuard)
-  @Post('verification-otp')
+  @Post('otp/verify')
   @HttpCode(200)
-  async verifiyOTP(@CurrentUser() user: any, @Body() verifyOtpDto: VerifyOtpDto) {
-    const tokens = await this.authService.verifyOtpServ(verifyOtpDto, user.id);
-    return { message: 'Your account confirm successfull', result: tokens };
+  async verifyOTP(@CurrentUser() user: any, @Body() verifyOtpDto: VerifyOtpDto) {
+    const tokens = await this.authService.verifyOtpCode(verifyOtpDto, user.id);
+    return { message: 'Your account has been confirmed successfully', result: tokens };
   }
 
+  /**
+   * Resend OTP to the current temporary authenticated user.
+   * @param user current temporary authenticated user from JwtTemporaryGuard
+   * @returns cooldown info for OTP resending
+   */
   @UseGuards(JwtTemporaryGuard)
-  @Put('resend-otp')
+  @Put('otp/resend')
   @HttpCode(200)
   async resendOTP(@CurrentUser() user: any) {
-    const data = await this.authService.resendOtpServ(user.id)
-    return { message: 'The Otp code send successfully', result: data };
+    const data = await this.authService.resendOtpCode(user.id)
+    return { message: 'The OTP code has been sent successfully', result: data };
   }
 
 
-  @Post('forgot-password')
+  /**
+   * Request a password reset link for the given email.
+   * @param forgotPasswordDto body payload containing email
+   * @returns success message when reset URL is generated
+   */
+  @Post('password/forgot')
   @HttpCode(200)
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
     const res = await this.authService.forgotPassword(forgotPasswordDto);
     return { message: res.message };
   }
 
-  @Post('reset-password')
+  /**
+   * Reset the user password using a token URL.
+   * @param resetDto body payload containing newPassword, confirmPassword, and tokenUrl
+   * @returns success message when password is reset
+   */
+  @Post('password/reset')
   @HttpCode(200)
   async resetPassword(@Body() resetDto: ResetPasswordDto) {
     const res = await this.authService.resetPassword(resetDto);
     return { message: res.message };
   }
 
-  @UseGuards(RefreshTokenGuarud)
+  /**
+   * Refresh user access and refresh tokens using a valid refresh token.
+   * @param req request object containing authenticated user and request id from RefreshTokenGuard
+   * @param refreshTokenDto body payload containing deviceId
+   * @returns new access and refresh tokens
+   */
+  @UseGuards(RefreshTokenGuard)
   @Post('refresh-token')
-  async gereateRefreshTokens(@Req() req: any, @Body() refreshTokenDto: RefreshTokenDto) {
+  async refreshTokens(@Req() req: any, @Body() refreshTokenDto: RefreshTokenDto) {
     const tokens = await this.authService.refreshTokens(refreshTokenDto, req.user, req.id);
     return { message: 'Tokens refreshed successfully', result: tokens };
   }
 
 
-
-  @Post('/refresh/tokenTemploaray')
+  /**
+   * Refresh a temporary token to a new temporary token.
+   * @param token body payload containing temporary token string
+   * @returns new temporary token object
+   */
+  @Post('temporary-token/refresh')
   @HttpCode(200)
-  async generateToken(@Body() token: RefreshTokenTemporayDto) {
-    const tokens = await this.authService.refreshTokensTemporary(token)
-    return { message: 'Token-Tempoarary refreshed successfully', result: tokens }
+  async refreshTemporaryToken(@Body() token: RefreshTokenTemporaryDto) {
+    const tokens = await this.authService.refreshTemporaryTokens(token)
+    return { message: 'Temporary token refreshed successfully', result: tokens }
   }
 
+  /**
+   * Logout the current authenticated user for a specific device.
+   * @param user current authenticated user from JwtAuthGuard
+   * @param deviceId body payload containing the current device ID
+   * @returns success flag after clearing refresh token and fcmToken
+   */
   @UseGuards(JwtAuthGuard)
   @HttpCode(200)
   @Post('logout')
   async logout(@CurrentUser() user: any, @Body() { deviceId }: DeviceDto) {
-    const data = await this.authService.logoutServ(user.id, deviceId)
-    return {messge:'logout successfully'}
+    await this.authService.logout(user.id, deviceId)
+    return { message: 'Logout successfully' }
   }
 
 

@@ -2,7 +2,7 @@ import { CollectionFrequeny } from "@src/user/enums/collectionFrequeny.enum";
 import { DeliverySchedule } from "@src/user/enums/delivery-schedule.enum";
 import { IsNotEmpty, IsString, IsOptional, Matches, IsArray, ArrayNotEmpty, IsEnum, IsBoolean } from "class-validator";
 
-export class InformationExternalPartnerDTo {
+export class InformationExternalPartnerDto {
     @IsNotEmpty()
     @IsString()
     externalPartnerName: string;
@@ -18,7 +18,7 @@ export class InformationExternalPartnerDTo {
 
 
 
-export class WasteExternalPartnerDTo {
+export class WasteExternalPartnerDto {
     @IsArray()
     @ArrayNotEmpty()
     @IsString({ each: true })

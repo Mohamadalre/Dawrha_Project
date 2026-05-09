@@ -4,7 +4,7 @@ import { DeliverySchedule } from "@src/user/enums/delivery-schedule.enum";
 import { IsNotEmpty, IsString, IsOptional, Matches, IsArray, ArrayNotEmpty, IsEnum, IsBoolean } from "class-validator";
 
 
-export class InformationFactorynDTo {
+export class InformationFactoryDto {
     @IsNotEmpty()
     @IsString()
     factoryName: string;
@@ -31,7 +31,7 @@ export class InformationFactorynDTo {
 
 
 
-export class WasteFactoryDTo {
+export class WasteFactoryDto {
     @IsArray()
     @ArrayNotEmpty()
     @IsString({ each: true })

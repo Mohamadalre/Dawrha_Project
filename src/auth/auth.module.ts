@@ -12,7 +12,6 @@ import { Account } from '@src/user/entities/account.entity';
 import { BullModule } from '@nestjs/bullmq';
 import { JwtTemporaryStrategy } from './strategies/jwt-temporary.strategy';
 import { ActiveHandler } from './handlers/active.handler';
-import { OnboardingModule } from '@src/onboarding/onboarding.module';
 import { PendingProfileHandler } from './handlers/pending-profile.handler';
 import { PendingApprovalHandler } from './handlers/pending-approval.handler';
 import { BlockedHandler } from './handlers/blocked.handler';

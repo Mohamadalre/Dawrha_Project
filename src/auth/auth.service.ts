@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException, Inject, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, Inject, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -6,7 +6,7 @@ import { Repository } from 'typeorm';
 import * as argon2 from 'argon2';
 import { UserService } from '../user/user.service';
 import { UserDevice } from './entities/user-device.entity';
-import { DeviceDto, RefreshTokenDto, RefreshTokenTemporayDto } from './dto/auth.dto';
+import { RefreshTokenDto, RefreshTokenTemporaryDto } from './dto/auth.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/forgot-password.dto'
 import { RegisterDto } from './dto/register.dto'
 import { MailService } from '../core/mail/mail.service';
@@ -93,9 +93,15 @@ export class AuthService {
     const saveAccount = await this.accountRepository.save(account);
     await this.mailService.generateAndSendOtp(saveAccount.email);
 
-    return await this.generateTokensTemporary(saveAccount.id, saveAccount.role, saveAccount.accountStatus);
+    return await this.generateTemporaryTokens(saveAccount.id, saveAccount.role, saveAccount.accountStatus);
   }
 
+  /**
+   * Authenticate with email and password for a specific role.
+   * @param dto contains email, password, deviceId, fcmToken, deviceType
+   * @param role expected account role for login
+   * @returns handler result that may include access/refresh tokens or temporary token info
+   */
   async login({ email, password, deviceId, fcmToken, deviceType }: LoginDto, role: Role) {
     const account = await this.accountRepository.findOne({ where: { email: email } });
     if (!account) {
@@ -105,20 +111,26 @@ export class AuthService {
     if (account.role !== role) {
       throw new UnauthorizedException(`You cannot enter as ${role},your account is registered as ${account.role}`)
     }
-    const isPasswordValid = await argon2.verify(account.passwordHash!, password);
+    const isPasswordValid = await argon2.verify(account.passwordHash, password);
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
     if (!account.isEmailVerified) {
       await this.mailService.generateAndSendOtp(account.email);
-      const token = await this.generateTokensTemporary(account.id, account.role, account.accountStatus);
+      const token = await this.generateTemporaryTokens(account.id, account.role, account.accountStatus);
       return { status: 'The email is not confirmed ', data: token }
     }
     const handler = this.handlers[account.accountStatus];
     return handler.handle(account, { deviceId, fcmToken, deviceType })
   }
 
-  async verifyOtpServ({ otpCode, deviceId, deviceType, fcmToken }: VerifyOtpDto, userId: string) {
+  /**
+   * Verify OTP and activate the user account.
+   * @param dto contains otpCode, deviceId, deviceType, fcmToken
+   * @param userId current user id from temporary authentication
+   * @returns full access and refresh tokens when OTP succeeds
+   */
+  async verifyOtpCode({ otpCode, deviceId, deviceType, fcmToken }: VerifyOtpDto, userId: string) {
 
     const account = await this.userService.findById(userId);
     const { accessToken, refreshToken } = await this.generateTokens(account.id, account.role, account.accountStatus, deviceId, deviceType, fcmToken);
@@ -132,7 +144,12 @@ export class AuthService {
   }
 
 
-  async resendOtpServ(userId: string) {
+  /**
+   * Resend OTP email with a short cooldown.
+   * @param userId current user id for which to resend OTP
+   * @returns cooldownSeconds until the next resend is allowed
+   */
+  async resendOtpCode(userId: string) {
     const account = await this.userService.findById(userId);
     const cooldownKey = `otp:cooldown:${account.email}`;
     const ttl = await this.redis.ttl(cooldownKey);
@@ -155,6 +172,11 @@ export class AuthService {
   }
 
 
+  /**
+   * Generate and send a password reset URL for an email.
+   * @param dto contains email
+   * @returns success message after sending the reset URL
+   */
   async forgotPassword({ email }: ForgotPasswordDto) {
     const account = await this.userService.findByEmail(email);
     const cooldownKey = `tokenUrl:cooldown:${email}`;
@@ -181,7 +203,8 @@ export class AuthService {
     const userId = await this.mailService.getRedisByKey(`reset:${tokenUrl}`);
     if (!userId) throw new BadRequestException('Invailed or expired token');
     const hashPassword = await argon2.hash(newPassword);
-    const existUser = await this.userService.update(userId!, { passwordHash: hashPassword })
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const existUser = await this.userService.update(userId, { passwordHash: hashPassword })
 
 
     await this.userDeviceRepository.update({ accountId: userId }, { refreshToken: '' }); // null to empty string or remove type error
@@ -193,7 +216,13 @@ export class AuthService {
     return { message: 'Password reset successfully' };
   }
 
-  async logoutServ(userId: string, deviceId: string) {
+  /**
+   * Logout user by invalidating the refresh token for a specific device.
+   * @param userId current authenticated user id
+   * @param deviceId device id to logout from
+   * @returns success object after clearing saved tokens
+   */
+  async logout(userId: string, deviceId: string) {
     const device = await this.userDeviceRepository.findOne({
       where: { accountId: userId, deviceId: deviceId }
     });
@@ -209,16 +238,26 @@ export class AuthService {
   }
 
 
+  /**
+   * Generate access and refresh tokens, store hashed refresh token per device.
+   * @param accountId id of the authenticated account
+   * @param role account role
+   * @param accountStatus current account status
+   * @param deviceId device identifier for refresh token storage
+   * @param deviceType optional device type
+   * @param fcmToken optional push notification token
+   * @returns accessToken and raw refreshToken
+   */
   async generateTokens(accountId: string, role: Role, accountStatus: AccountStatus, deviceId: string, deviceType?: DeviceType, fcmToken?: string) {
     const payload = { id: accountId, role: role, accountStatus };
 
     const [accessToken, refreshTokenRaw] = await Promise.all([
       this.jwtService.signAsync(payload, {
-        secret: this.configService.get<string>('JWT_ACCESS_SECRET')!,
+        secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
         expiresIn: this.configService.get<string>('JWT_ACCESS_EXPIRATION') as any,
       }),
       this.jwtService.signAsync(payload, {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET')!,
+        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
         expiresIn: this.configService.get<string>('JWT_REFRESH_EXPIRATION') as any,
       }),
     ]);
@@ -263,7 +302,12 @@ export class AuthService {
 
 
 
-  async refreshTokensTemporary({ token }: RefreshTokenTemporayDto) {
+  /**
+   * Refresh a temporary authentication token before OTP confirmation.
+   * @param dto contains the temporary token string
+   * @returns a new temporary token object if valid
+   */
+  async refreshTemporaryTokens({ token }: RefreshTokenTemporaryDto) {
     try {
       const payload = await this.jwtService.verifyAsync(token, {
         secret: this.configService.get<string>('JWT_TEMPORARY_SECRET'),
@@ -273,24 +317,38 @@ export class AuthService {
       if (account.accountStatus !== AccountStatus.INACTIVE) throw new UnauthorizedException('Invaild Token')
 
 
-      return await this.generateTokensTemporary(account.id, account.role, account.accountStatus);
+      return await this.generateTemporaryTokens(account.id, account.role, account.accountStatus);
     } catch {
       throw new UnauthorizedException('Invaild Token');
     }
   }
 
 
-  async generateTokensTemporary(accountId: string, role: Role, accountStatus: AccountStatus) {
+  /**
+   * Generate a temporary token used before OTP confirmation.
+   * @param accountId id of the account
+   * @param role account role
+   * @param accountStatus current account status
+   * @returns object containing a temporary token
+   */
+  async generateTemporaryTokens(accountId: string, role: Role, accountStatus: AccountStatus) {
     const payload = { id: accountId, role: role, accountStatus };
     const TemporaryToken = await this.jwtService.signAsync(payload,
       {
-        secret: this.configService.get<string>('JWT_TEMPORARY_SECRET')!,
+        secret: this.configService.get<string>('JWT_TEMPORARY_SECRET'),
         expiresIn: this.configService.get<string>('JWT_TEMPORARY_EXPIRATION') as any,
       });
 
     return { Token: TemporaryToken };
   }
 
+  /**
+   * Refresh access tokens using a stored hashed refresh token.
+   * @param dto contains deviceId
+   * @param token raw refresh token string
+   * @param accountId current account id
+   * @returns new access and refresh tokens if refresh token is valid
+   */
   async refreshTokens({ deviceId }: RefreshTokenDto, token: string, accountId: string) {
     try {
 
@@ -316,6 +374,7 @@ export class AuthService {
         throw new UnauthorizedException('Access denied');
       }
       return this.generateTokens(account.id, account.role, account.accountStatus, deviceId);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (error) {
       throw new UnauthorizedException("access denied, invalid token")
     }
@@ -323,6 +382,12 @@ export class AuthService {
 
 
 
+  /**
+   * Authenticate or register a Google user for the requested role.
+   * @param dto contains Tokenid, deviceId, deviceType, fcmToken
+   * @param role expected account role for Google login
+   * @returns accessToken, refreshToken, accountStatus, role
+   */
   async googleLogin({ Tokenid, deviceId, deviceType, fcmToken }: LoginGoogleDto, role: Role) {
     const { email, name, googleId, picture } = await verifyGoogleToken(Tokenid);
 

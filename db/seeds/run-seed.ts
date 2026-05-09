@@ -1,7 +1,7 @@
 import { AppDataSource } from '../data-source';
 import { seedAdmin } from './admin-seed';
 import { seedProvince } from './province-seed';
-import { seed } from './seed';
+import { seedPermissions } from './permissions-seed';
 import { seedInstitutionTypes } from './institution-type-seed';
 import { logger } from '@src/common/logger/winston.logger';
 
@@ -11,7 +11,7 @@ async function run() {
 
     await AppDataSource.initialize();
 
-    await seed(AppDataSource);
+    await seedPermissions(AppDataSource);
     await seedAdmin(AppDataSource);
     await seedProvince(AppDataSource);
     await seedInstitutionTypes(AppDataSource);

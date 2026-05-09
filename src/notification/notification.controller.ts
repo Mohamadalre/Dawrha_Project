@@ -1,11 +1,11 @@
 import { Controller,Get, Req,Patch,Param } from '@nestjs/common';
 import { NotificationService } from './notification.service';
 
-@Controller('notification')
+@Controller('notifications')
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 
-@Get('Notification')
+  @Get()
   getMyNotifications(@Req() req) {
     return this.notificationService.findUserNotifications(req.user.id);
   }

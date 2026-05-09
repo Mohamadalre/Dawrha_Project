@@ -9,6 +9,7 @@ import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { UploadImageDto } from './dto/upload-image.dto';
 
+
 /**
  * Media Service - Handle all media operations
  *
@@ -32,10 +33,11 @@ export class MediaService {
     @InjectRepository(Media)
     private readonly mediaRepository: Repository<Media>,
     @InjectRepository(Account)
+    private readonly accountRepository: Repository<Account>,
     private readonly cloudinaryService: CloudinaryService,
     private readonly commonService: CommonService,
     private readonly dataSource: DataSource,
-  ) {}
+  ) { }
 
   /**
    * Upload image and save to database
@@ -61,14 +63,19 @@ export class MediaService {
     file: Express.Multer.File,
     dto: UploadImageDto,
     userId: string,
-  ): Promise<{ status: string; image: string; mediaId: string }> {
+  ): Promise<{ status: string; image?: string; mediaId?: string }> {
     const { ownerId, ownerType, fileType } = dto;
 
     this.logger.debug(`Starting image upload for owner ${ownerId}, type: ${fileType}`);
 
     try {
+
+
       // Step 1: Check if owner already has image of this type
       await this.validateUniqueImageType(ownerId, fileType);
+
+
+
 
       // Step 2: Upload to Cloudinary
       const uploadResult = await this.cloudinaryService.uploadFile(
@@ -77,6 +84,7 @@ export class MediaService {
         ownerType,
         fileType,
       );
+
 
       this.logger.debug(`Image uploaded to Cloudinary: ${uploadResult.publicId}`);
 
@@ -93,30 +101,42 @@ export class MediaService {
           ownerId,
           ownerType,
           fileType,
-          status:statusMedia.PENDING ,
+          status: statusMedia.PENDING,
         });
 
         const savedMedia = await queryRunner.manager.save(Media, media);
+
+
         this.logger.debug(`Media record saved to database: ${savedMedia.id}`);
 
-        // Step 5: Update account completion status
-        const account = await queryRunner.manager.findOne(Account, { where: { id: userId } });
-        if (account) {
 
-          // Step 6: Check if ready for approval
-          if (await this.areAllImagesApproved(ownerId, ownerType)) {
-            await this.commonService.completeStep(account, 'documents');
-            await queryRunner.manager.update(
-              Account,
-              { id: userId },
-              { accountStatus: AccountStatus.PENDING_APPROVAL },
-            );
-
-          }
-        }
 
         // Step 7: Commit transaction
         await queryRunner.commitTransaction();
+        // Step 5: Update account completion status
+        const account = await queryRunner.manager.findOne(Account, { where: { id: userId } });
+        if (account) {
+          const check = await this.areAllImagesApproved(ownerId, ownerType);
+          console.log(check);
+
+          // Step 6: Check if ready for approval
+          if (check) {
+            await this.commonService.completeStep(account, 'documents');
+            const step = await this.commonService.getCurrentStep(account);
+            if (step == null) {
+              await queryRunner.manager.update(
+                Account,
+                { id: userId },
+                { accountStatus: AccountStatus.PENDING_APPROVAL },
+              );
+              return {
+                status: 'Your request has been sent,wait for it to be approved'
+              }
+            }
+
+
+          }
+        }
         this.logger.debug(`Transaction committed for media ${savedMedia.id}`);
 
         return {
@@ -143,8 +163,13 @@ export class MediaService {
         await queryRunner.release();
       }
     } catch (error) {
+
+
       this.logger.error(`Image upload failed:`, error);
-      if (error instanceof (BadRequestException || ForbiddenException)) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof ForbiddenException
+      ) {
         throw error;
       }
       throw new InternalServerErrorException('Image upload failed');
@@ -343,10 +368,13 @@ export class MediaService {
     const requiredCounts = {
       [OwnerType.COLLECTOR]: 2,
       [OwnerType.FACTORY]: 2,
-      [OwnerType.INSITUTIONS]: 1,
+      [OwnerType.INSTITUTIONS]: 1,
     };
 
     const requiredCount = requiredCounts[ownerType];
-    return images.length == requiredCount ? true : false;
+    console.log(ownerType);
+    console.log(requiredCount);
+    console.log(images.length);
+    return images.length === requiredCount ? true : false;
   }
 }

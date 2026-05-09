@@ -27,7 +27,7 @@ export class ProfileResolver {
     ) {
         this.profileMap.set('CITIZEN', this.citizenRepo);
         this.profileMap.set('FACTORY', this.factoryRepo);
-        this.profileMap.set('INSITUTIONS', this.institutionRepo);
+        this.profileMap.set('INSTITUTIONS', this.institutionRepo);
         this.profileMap.set('EXTERNAL_PARTNER', this.externalPartnerRepo);
         this.profileMap.set('COLLECTOR', this.collectorRepo);
     }
