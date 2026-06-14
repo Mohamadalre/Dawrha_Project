@@ -39,6 +39,9 @@ export class Account {
   @Column({ nullable: true })
   profileImage?: string;
 
+  @Column({ default: '' })
+  description: string;
+
   @Column({
     type: 'enum',
     enum: Role,

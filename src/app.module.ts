@@ -13,6 +13,11 @@ import { MediaModule } from './media/media.module';
 import { WasteManagementModule } from './waste-management/waste-management.module';
 import { InstitutionModule } from './institution/institution.module';
 import { CloudinaryModule } from './core/cloudinary/cloudinary.module';
+import { AccountManagementModule } from './account-management/account-management.module';
+import { TruckModule } from './truck/truck.module';
+import { OdooModule } from './odoo/odoo.module';
+import { WarehouseModule } from './warehouse/warehouse.module';
+
 
 
 @Module({
@@ -28,7 +33,11 @@ import { CloudinaryModule } from './core/cloudinary/cloudinary.module';
     MediaModule,
     WasteManagementModule,
     InstitutionModule,
-    CloudinaryModule
+    CloudinaryModule,
+    AccountManagementModule,
+    TruckModule,
+    OdooModule,
+    WarehouseModule
   ],
   controllers: [AppController],
   providers: [AppService],
