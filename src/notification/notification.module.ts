@@ -1,34 +1,53 @@
 import { Module } from '@nestjs/common';
-import { NotificationService } from './notification.service';
-import { NotificationController } from './notification.controller';
-import * as admin from 'firebase-admin';
-
-
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BullModule } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
+import { NotificationController } from './notification.controller';
+import { NotificationListener } from './listeners/notification.listener';
+import { NotificationProcessor } from './processors/notification.processor';
+import { NotificationService } from './notification.service';
+import { FirebaseService } from './services/firebase.service';
+import { Notification } from './entities/notification.entity';
 import { UserDevice } from '@src/auth/entities/user-device.entity';
 import { Account } from '@src/user/entities/account.entity';
-import { Notification } from './entities/notification.entity';
+import { NOTIFICATION_QUEUE_NAME } from './queues/notification.queue';
+import * as admin from 'firebase-admin';
 
 @Module({
-  imports:[TypeOrmModule.forFeature([UserDevice,Account,Notification]),],
+  imports: [
+    TypeOrmModule.forFeature([Notification, UserDevice, Account]),
+    BullModule.registerQueue({
+      name: NOTIFICATION_QUEUE_NAME,
+    }),
+    ScheduleModule.forRoot(),
+  ],
   controllers: [NotificationController],
- providers: [
-  NotificationService,
+  providers: [
+    NotificationService,
+    FirebaseService,
+    NotificationListener,
+    NotificationProcessor,
     {
-      provide: 'FIREBASE_NOTIFICATION',
-      useFactory: () => {
-        const app = admin.initializeApp({
+      provide: 'FIREBASE_ADMIN_APP',
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        if (admin.apps.length) {
+          return admin.app();
+        }
+
+        return admin.initializeApp({
           credential: admin.credential.cert({
-            projectId: process.env.FIREBASE_PROJECT_ID,
-            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-            privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+            projectId: configService.get<string>('FIREBASE_PROJECT_ID'),
+            clientEmail: configService.get<string>('FIREBASE_CLIENT_EMAIL'),
+            privateKey: configService
+              .get<string>('FIREBASE_PRIVATE_KEY')
+              ?.replace(/\\n/g, '\n'),
           }),
         });
-
-        return app;
       },
     },
   ],
-  exports: ['FIREBASE_NOTIFICATION'],
+  exports: [NotificationService],
 })
 export class NotificationModule {}

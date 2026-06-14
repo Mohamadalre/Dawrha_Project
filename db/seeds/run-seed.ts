@@ -3,11 +3,17 @@ import { seedAdmin } from './admin-seed';
 import { seedProvince } from './province-seed';
 import { seedPermissions } from './permissions-seed';
 import { seedInstitutionTypes } from './institution-type-seed';
-import { logger } from '@src/common/logger/winston.logger';
+import { winstonLogger } from '@src/core/logger-config/winston.config';
 
 async function run() {
   try {
-    logger.info('Running Seed...');
+    winstonLogger.info('Running seed process', {
+      context: 'SeedRunner',
+      channel: 'app',
+      metadata: {
+        task: 'seed',
+      },
+    });
 
     await AppDataSource.initialize();
 
@@ -15,11 +21,25 @@ async function run() {
     await seedAdmin(AppDataSource);
     await seedProvince(AppDataSource);
     await seedInstitutionTypes(AppDataSource);
-    logger.info('Seed Completed Successfully');
+
+    winstonLogger.info('Seed completed successfully', {
+      context: 'SeedRunner',
+      channel: 'app',
+      metadata: {
+        task: 'seed',
+      },
+    });
 
     await AppDataSource.destroy();
-  } catch (error:any) {
-    logger.error(`Seed Failed: ${error.message}`);
+  } catch (error: any) {
+    winstonLogger.error('Seed failed', {
+      context: 'SeedRunner',
+      channel: 'app',
+      stack: error?.stack,
+      metadata: {
+        message: error?.message,
+      },
+    });
     process.exit(1);
   }
 }

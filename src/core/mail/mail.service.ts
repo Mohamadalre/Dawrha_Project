@@ -5,13 +5,20 @@ import * as crypto from 'crypto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
+import {
+  MAIL_QUEUE_NAME,
+  MAIL_SEND_OTP_JOB_NAME,
+  MAIL_SEND_RESET_LINK_JOB_NAME,
+  MAIL_MAX_ATTEMPTS,
+  MAIL_BACKOFF_DELAY_MS,
+} from './queues/mail.queue';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name)
   constructor(
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
-    @InjectQueue('mail-queue') private mailQueue: Queue,
+    @InjectQueue(MAIL_QUEUE_NAME) private mailQueue: Queue,
     private readonly configService: ConfigService,
   ) { }
 
@@ -28,12 +35,15 @@ export class MailService {
     try {
       await this.redis.set(redisKey, hashed, 'EX', 600);
       await this.redis.set(`otp:cooldown:${email}`, 'locked', 'EX', 60)
-      await this.mailQueue.add('send-otp', {
+      await this.mailQueue.add(MAIL_SEND_OTP_JOB_NAME, {
         email,
         otp
       }, {
-        attempts: 3,
-        backoff: 5000,
+        
+        attempts: MAIL_MAX_ATTEMPTS,
+        backoff: {
+          type: 'exponential',
+          delay:MAIL_BACKOFF_DELAY_MS},
         removeOnComplete: true,
 
       })
@@ -57,12 +67,15 @@ export class MailService {
     try {
       await this.redis.set(redisKey, userId, 'EX', 600);
       await this.redis.set(`tokenUrl:cooldown:${email}`, 'locked', 'EX', 60)
-      await this.mailQueue.add('send-reset-link', {
+      await this.mailQueue.add(MAIL_SEND_RESET_LINK_JOB_NAME, {
         email,
         link
       }, {
-        attempts: 3,
-        backoff: 5000,
+        attempts: MAIL_MAX_ATTEMPTS,
+        backoff: {
+          type:'exponential',
+          delay: MAIL_BACKOFF_DELAY_MS
+        },
         removeOnComplete: true,
 
       })

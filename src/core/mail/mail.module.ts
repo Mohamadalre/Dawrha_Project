@@ -3,16 +3,17 @@ import { Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { MailService } from "./mail.service";
 import { BullModule } from "@nestjs/bullmq";
-import { MailProcessor } from "./mail.processor";
+import { MailProcessor } from "./processors/mail.processor";
 import { join } from "path";
 import { EjsAdapter } from "@nestjs-modules/mailer/adapters/ejs.adapter";
+import { MAIL_QUEUE_NAME } from "./queues/mail.queue";
 
 
 
 @Module({
   imports: [
     BullModule.registerQueue({
-      name: 'mail-queue',
+      name: MAIL_QUEUE_NAME,
       defaultJobOptions: {
         removeOnFail: 500
       }

@@ -1,4 +1,4 @@
-import { Controller, UseGuards, Post, Body, Param, Req, Get, Query, ForbiddenException, ParseIntPipe, DefaultValuePipe } from '@nestjs/common';
+import { Controller, UseGuards, Post, Body, Req, Get, Query, ForbiddenException, ParseIntPipe, DefaultValuePipe } from '@nestjs/common';
 import { OnboardingService } from './onboarding.service';
 import { ProfileOwnerGuard } from './gurads/profile-owner.guard';
 import { LocationDto } from './dto/location.dto';
@@ -39,15 +39,14 @@ export class OnboardingController {
    * Adds location information for non-collector roles during onboarding
    * Handles location data with coordinates, address, and province
    *
-   * @param profileId - Profile ID
    * @param dto - Location data
    * @param req - Request object containing user and profile information
    * @returns Success message with onboarding status
    */
   @UseGuards(ProfileOwnerGuard)
   @Roles(Role.EXTERNAL_PARTNER, Role.FACTORY, Role.INSTITUTIONS)
-  @Post('location/:profileId')
-  public async createLocation(@Param('profileId') profileId: string, @Body() dto: LocationDto, @Req() req: any) {
+  @Post('location')
+  public async createLocation( @Body() dto: LocationDto, @Req() req: any) {
     const profile = req.profile;
     const account = req.user;
     const role = req.user.role;

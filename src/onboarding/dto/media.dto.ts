@@ -11,3 +11,10 @@ export class MediaDto {
     @IsString()
     fileType: MediaType;
 }
+
+// export class MediaCollectorDto {
+//     @IsNotEmpty()
+//     @IsEnum({MediaType.ID_CARD_FRONT,MediaType.ID_CARD_BACK})
+//     @IsString()
+//     fileType: MediaType;
+// }

@@ -1,4 +1,4 @@
-import { Column, Entity, OneToMany, PrimaryGeneratedColumn,CreateDateColumn,UpdateDateColumn } from "typeorm";
+import { Column, Entity, OneToMany, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn } from "typeorm";
 import { InstitutionWasteCategory } from "./institution-waste-category.entity";
 
 
@@ -10,6 +10,9 @@ export class WasteCategory {
 
     @Column()
     name: string;
+
+    @Column()
+    imageCategoryURL: string;
 
     @OneToMany(() => InstitutionWasteCategory, (iwt) => iwt.wasteType)
     institutions: InstitutionWasteCategory[];

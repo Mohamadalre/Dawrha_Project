@@ -1,78 +1,267 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
-import { UserDevice } from '@src/auth/entities/user-device.entity';
-import * as admin from 'firebase-admin';
-import { Repository } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
+import { Queue } from 'bullmq';
 import { Notification } from './entities/notification.entity';
+import { UserDevice } from '@src/auth/entities/user-device.entity';
+import { Account } from '@src/user/entities/account.entity';
+import { NotificationQueryDto } from './dto/notification-query.dto';
+import { NotificationJobPayload } from './interfaces/notification-payload.interface';
+import {
+  NOTIFICATION_BACKOFF_DELAY_MS,
+  NOTIFICATION_MAX_ATTEMPTS,
+  NOTIFICATION_QUEUE_NAME,
+  NOTIFICATION_SEND_JOB_NAME,
+} from './queues/notification.queue';
+import { NotificationStatus } from './enums/notification-status.enum';
+import { NotificationPayload } from './interfaces/notification-payload.interface';
+import { NotificationNotFoundException } from './exceptions/notification.exceptions';
+import { winstonLogger } from '@src/core/logger-config/winston.config';
 
 @Injectable()
 export class NotificationService {
-    constructor(
-        @Inject('FIREBASE_NOTIFICATION')
-        private readonly firebaseApp: admin.app.App,
-        @InjectRepository(UserDevice)
-        private readonly userDerviceRep: Repository<UserDevice>,
-        @InjectRepository(Notification)
-        private readonly notificationrep: Repository<Notification>
-    ) { }
+  private readonly logger = new Logger('NOTIFICATIONS');
 
-    async sendToUser(
-        userId: string,
-        title: string,
-        body: string,
-        data?: Record<string, string>,
-    ) {
-        const devices = await this.userDerviceRep.find({
-            where: { accountId: userId },
-        });
+  constructor(
+    @InjectRepository(Notification)
+    private readonly notificationRepository: Repository<Notification>,
+    @InjectRepository(UserDevice)
+    private readonly userDeviceRepository: Repository<UserDevice>,
+    @InjectQueue(NOTIFICATION_QUEUE_NAME)
+    private readonly notificationQueue: Queue,
+  ) {}
 
-        const tokens = devices.map(d => d.fcmToken).filter(Boolean);
+  async createNotification(payload: NotificationPayload): Promise<Notification> {
+    const notification = this.notificationRepository.create({
+      userId: payload.userId,
+      title: payload.title,
+      body: payload.body,
+      type: payload.type,
+      metadata: payload.metadata,
+      status: NotificationStatus.PENDING,
+      user: { id: payload.userId } as Account,
+    });
 
-        if (!tokens.length) return;
+    const result = await this.notificationRepository.save(notification);
+    this.logger.log(`Notification created for user ${payload.userId}`);
+    return result;
+  }
 
-        return this.firebaseApp.messaging().sendEachForMulticast({
-            tokens,
-            notification: { title, body },
-            data: data || {},
-        });
+  async enqueueNotification(notificationId: string): Promise<void> {
+    await this.notificationQueue.add(
+      NOTIFICATION_SEND_JOB_NAME,
+      { notificationId } as NotificationJobPayload,
+      {
+        attempts: NOTIFICATION_MAX_ATTEMPTS,
+        backoff: {
+          type: 'exponential',
+          delay: NOTIFICATION_BACKOFF_DELAY_MS,
+        },
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
+    );
+
+    this.logger.log(`Notification job enqueued ${notificationId}`);
+  }
+
+  async findUserNotifications(userId: string, query: NotificationQueryDto) {
+    const orderByMap = {
+      createdAt: 'notification.createdAt',
+      sentAt: 'notification.sentAt',
+      readAt: 'notification.readAt',
+      updatedAt: 'notification.updatedAt',
+    } as const;
+    const sortBy = orderByMap[query.sortBy ?? 'createdAt'];
+
+    const qb = this.notificationRepository
+      .createQueryBuilder('notification')
+      .where('notification.userId = :userId', { userId })
+      .andWhere('notification.deletedAt IS NULL');
+
+    if (query.unreadOnly) {
+      qb.andWhere('notification.isRead = false');
     }
 
-    async sendToDevice(
-        token: string,
-        title: string,
-        body: string,
-        data?: Record<string, string>,
-    ) {
-        const message: admin.messaging.Message = {
-            token,
-            notification: {
-                title,
-                body,
-            },
-            data: data || {},
-        };
+    if (query.status) {
+      qb.andWhere('notification.status = :status', { status: query.status });
+    }
 
+    if (query.type) {
+      qb.andWhere('notification.type = :type', { type: query.type });
+    }
+
+    qb.orderBy(sortBy, query.order)
+      .skip((query.page - 1) * query.limit)
+      .take(query.limit);
+
+    const [items, total] = await qb.getManyAndCount();
+
+    return {
+      items,
+      total,
+      page: query.page,
+      limit: query.limit,
+    };
+  }
+
+  async countUnread(userId: string): Promise<number> {
+    return this.notificationRepository.count({
+      where: {
+        userId,
+        isRead: false,
+        deletedAt: IsNull(),
+      },
+    });
+  }
+
+  async getNotificationById(userId: string, id: string): Promise<Notification> {
+    const notification = await this.notificationRepository.findOne({
+      where: { id, userId },
+    });
+
+    if (!notification) {
+      throw new NotificationNotFoundException(id);
+    }
+
+    return notification;
+  }
+
+  async getNotificationByQueueId(id: string): Promise<Notification | null> {
+    return this.notificationRepository.findOne({
+      where: { id },
+    });
+  }
+
+  async markAsRead(userId: string, id: string) {
+    const notification = await this.getNotificationById(userId, id);
+    if (notification.isRead) {
+      return { message: 'Notification already marked as read' };
+    }
+
+    notification.isRead = true;
+    notification.readAt = new Date();
+    await this.notificationRepository.save(notification);
+    this.logger.log(`Notification ${id} marked as read`);
+
+    return {
+      message: 'Notification marked as read',
+    };
+  }
+
+  async markAllAsRead(userId: string) {
+    await this.notificationRepository.update(
+      { userId, isRead: false, deletedAt: IsNull() },
+      {
+        isRead: true,
+        readAt: new Date(),
+      },
+    );
+
+    this.logger.log(`All notifications marked as read for user ${userId}`);
+    return { message: 'All notifications marked as read' };
+  }
+
+  async deleteNotification(userId: string, id: string) {
+    const result = await this.notificationRepository.delete({ id, userId });
+    if (result.affected === 0) {
+      throw new NotificationNotFoundException(id);
+    }
+
+    this.logger.log(`Notification ${id} deleted for user ${userId}`);
+    return { message: 'Notification deleted' };
+  }
+
+  async clearAllNotifications(userId: string) {
+    await this.notificationRepository.softDelete({ userId });
+    this.logger.log(`All notifications soft deleted for user ${userId}`);
+
+    return { message: 'All notifications cleared' };
+  }
+
+  async getDeviceTokens(userId: string): Promise<string[]> {
+    const devices = await this.userDeviceRepository.find({
+      where: { accountId: userId },
+    });
+
+    return devices.map((device) => device.fcmToken).filter(Boolean);
+  }
+
+  async markAsSent(notificationId: string): Promise<void> {
+    await this.notificationRepository.update(notificationId, {
+      status: NotificationStatus.SENT,
+      sentAt: new Date(),
+    });
+  }
+
+  async markAsFailed(notificationId: string, failureReason: string): Promise<void> {
+    await this.notificationRepository.update(notificationId, {
+      status: NotificationStatus.FAILED,
+      failureReason,
+    });
+  }
+
+  /**
+   * Cron job that retries failed notifications every 5 minutes
+   * Queries for all notifications with FAILED status and re-enqueues them
+   */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async retryFailedNotifications(): Promise<void> {
+    try {
+      winstonLogger.log('info', 'Starting retry of failed notifications...', { channel: 'jobs' });
+
+      // Find all failed notifications (limit to 100 per run to avoid overload)
+      const failedNotifications = await this.notificationRepository.find({
+        where: {
+          status: NotificationStatus.FAILED,
+          deletedAt: IsNull(),
+        },
+        take: 100,
+        order: {
+          updatedAt: 'ASC',
+        },
+      });
+
+      if (failedNotifications.length === 0) {
+        winstonLogger.log('info', 'No failed notifications to retry', { channel: 'jobs' });
+        return;
+      }
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      // Re-enqueue each failed notification
+      for (const notification of failedNotifications) {
         try {
-            const response = await this.firebaseApp.messaging().send(message);
-            return { success: true, messageId: response };
+          // Reset status back to PENDING
+          notification.status = NotificationStatus.PENDING;
+          notification.failureReason = null;
+          await this.notificationRepository.save(notification);
+
+          // Re-enqueue the notification
+          await this.enqueueNotification(notification.id);
+          successCount++;
         } catch (error) {
-            return { success: false, error: error.message };
+          errorCount++;
+          winstonLogger.error(
+            `Failed to retry notification ${notification.id}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            { channel: 'jobs' },
+          );
         }
-    }
+      }
 
-    create(data: Partial<Notification>) {
-        return this.notificationrep.save(this.notificationrep.create(data));
+      winstonLogger.log(
+        'info',
+        `Retry completed: ${successCount} succeeded, ${errorCount} failed out of ${failedNotifications.length} notifications`,
+        { channel: 'jobs' },
+      );
+    } catch (error) {
+      winstonLogger.error(
+        `Cron retry job failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        { channel: 'jobs' },
+      );
     }
-
-    findUserNotifications(userId: string) {
-        return this.notificationrep.find({
-            where: { user: { id: userId } },
-            order: { createdAt: 'DESC' },
-        });
-    }
-
-    async markAsRead(id: string) {
-        await this.notificationrep.update(id, { isRead: true });
-        return { message: 'Marked as read' };
-    }
+  }
 }

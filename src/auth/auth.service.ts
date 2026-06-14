@@ -181,7 +181,7 @@ export class AuthService {
     const account = await this.userService.findByEmail(email);
     const cooldownKey = `tokenUrl:cooldown:${email}`;
     const ttl = await this.redis.ttl(cooldownKey);
-    console.log(ttl);
+   // console.log(ttl);
 
     if (ttl > 0) {
 

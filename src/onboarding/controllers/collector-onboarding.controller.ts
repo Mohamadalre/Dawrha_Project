@@ -1,4 +1,4 @@
-import { Controller, UseGuards, Post, Body, Param, Req, UseInterceptors, BadRequestException, UploadedFile, ForbiddenException } from '@nestjs/common';
+import { Controller, UseGuards, Post, Body, Req, UseInterceptors, BadRequestException, UploadedFile, ForbiddenException } from '@nestjs/common';
 import { RolesGuard } from '@src/auth/guards/roles.guard';
 import { Roles } from '@src/auth/decorators/roles.decorator';
 import { Role } from '@src/user/enums/role.enum';
@@ -59,8 +59,7 @@ export class CollectorOnboardingController {
   /**
    * Uploads collector documents during onboarding
    * Handles ID card front and back document uploads
-   *
-   * @param profileId - Collector profile ID
+   * 
    * @param file - Document file to upload
    * @param dto - Media data with file type
    * @param req - Request object containing user and profile information
@@ -68,10 +67,9 @@ export class CollectorOnboardingController {
    */
   @UseGuards(ProfileOwnerGuard)
   @Roles(Role.COLLECTOR)
-  @Post('upload-doc/:profileId')
+  @Post('upload-doc')
   @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
   async uploadFileCollector(
-    @Param('profileId') profileId: string,
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: MediaDto,
     @Req() req,
@@ -99,15 +97,14 @@ export class CollectorOnboardingController {
    * Adds collector location during onboarding
    * Handles location data with coordinates and address
    *
-   * @param profileId - Collector profile ID
    * @param dto - Location collector data
    * @param req - Request object containing user and profile information
    * @returns Success message with onboarding status
    */
   @UseGuards(ProfileOwnerGuard)
   @Roles(Role.COLLECTOR)
-  @Post('location/:profileId')
-  public async createLocationCollector(@Param('profileId') profileId: string, @Body() dto: LocationCollectorDto, @Req() req: any) {
+  @Post('location')
+  public async createLocationCollector( @Body() dto: LocationCollectorDto, @Req() req: any) {
     const profile = req.profile;
     const account = req.user;
     const role = req.user.role;

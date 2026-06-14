@@ -2,6 +2,7 @@ import {
   ArgumentsHost,
   Catch,
   ExceptionFilter,
+  Logger,
 } from '@nestjs/common';
 
 import { QueryFailedError } from 'typeorm';
@@ -16,6 +17,8 @@ import { QueryFailedError } from 'typeorm';
 export class DatabaseExceptionFilter
   implements ExceptionFilter
 {
+  private readonly logger = new Logger('Database');
+
   /**
    * Catches and processes database query failures with proper error handling
    *
@@ -34,6 +37,20 @@ export class DatabaseExceptionFilter
     const request = ctx.getRequest();
 
     let message = 'Database error';
+
+    // Log database connection and query errors
+    this.logger.error(
+      `Database connection/query error: ${exception.message}`,
+      {
+        code: exception.code,
+        detail: exception.detail,
+        query: (exception as any).query,
+        parameters: (exception as any).parameters,
+        method: request.method,
+        path: request.url,
+        timestamp: new Date().toISOString(),
+      },
+    );
 
     /**
      * PostgreSQL error codes mapping:

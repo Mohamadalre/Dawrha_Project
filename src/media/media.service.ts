@@ -111,15 +111,15 @@ export class MediaService {
 
 
 
-        // Step 7: Commit transaction
+        // Step 5: Commit transaction
         await queryRunner.commitTransaction();
-        // Step 5: Update account completion status
+        // Step 6: Update account completion status
         const account = await queryRunner.manager.findOne(Account, { where: { id: userId } });
         if (account) {
           const check = await this.areAllImagesApproved(ownerId, ownerType);
           console.log(check);
 
-          // Step 6: Check if ready for approval
+          // Step 7: Check if ready for approval
           if (check) {
             await this.commonService.completeStep(account, 'documents');
             const step = await this.commonService.getCurrentStep(account);
@@ -129,9 +129,11 @@ export class MediaService {
                 { id: userId },
                 { accountStatus: AccountStatus.PENDING_APPROVAL },
               );
-              return {
-                status: 'Your request has been sent,wait for it to be approved'
-              }
+                return {
+                  status: 'Your request has been sent,wait for it to be approved',
+                  image: uploadResult.imageUrl,
+                  mediaId: savedMedia.id,
+                };
             }
 
 

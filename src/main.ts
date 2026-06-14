@@ -1,12 +1,14 @@
+/* eslint-disable @typescript-eslint/restrict-template-expressions */
 import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
 import * as dotenv from 'dotenv';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { LoggerHttpInterceptor } from './common/interceptors/logger-http.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { DatabaseExceptionFilter } from './common/filters/database-exception.filter';
 import { ClassSerializerInterceptor, ValidationPipe, VersioningType } from '@nestjs/common';
 import { WinstonModule } from 'nest-winston';
-import { winstonConfig } from './core/logger-config/logger.config';
+import { winstonConfig, winstonLogger } from './core/logger-config/winston.config';
 import { LoggerExceptionsFilter } from './common/filters/logger-exception.filter';
 
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -61,39 +63,48 @@ async function bootstrap() {
     
     /**
      * Apply global interceptors for response transformation:
-     * 1. TransformInterceptor - Standardizes API response format
-     * 2. ClassSerializerInterceptor - Handles DTO serialization
+     * 1. LoggerHttpInterceptor - Logs all HTTP requests and responses
+     * 2. TransformInterceptor - Standardizes API response format
+     * 3. ClassSerializerInterceptor - Handles DTO serialization
      */
+    app.useGlobalInterceptors(new LoggerHttpInterceptor());
     app.useGlobalInterceptors(new TransformInterceptor());
     app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
 
     // Start listening on configured port
     await app.listen(port);
 
-    logger.log(`Server is running on port ${port}`, 'SYSTEM')
+    logger.log(`Server is running on port ${port}`, 'SYSTEM');
 
   } catch (error: any) {
     // Log critical system errors and exit process
     logger.error(`Critical System Failure : ${error.message}`, error.stack, 'SYSTEM');
     console.log(`error ${error}`);
 
-    process.exit(1)
+    process.exit(1);
   }
 }
 
 bootstrap();
 
+process.on('uncaughtException', (err: Error) => {
+  winstonLogger.error(`Uncaught Exception: ${err.message}`, {
+    context: 'SYSTEM',
+    stack: err.stack,
+    channel: 'exceptions',
+  });
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  winstonLogger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`, {
+    context: 'SYSTEM',
+    channel: 'exceptions',
+    metadata: { reason },
+  });
+});
+
 /**
- * Commented out global process error handlers
- * Can be enabled for additional error tracking:
- * 
- * process.on('uncaughtException', (err) => {
- *   const logger = WinstonModule.createLogger(winstonConfig);
- *   logger.error(`Uncaught Exception: ${err.message}, err.stack, 'SYSTEM'`);
- * });
- *
- * process.on('unhandledRejection', (reason, promise) => {
- *   const logger = WinstonModule.createLogger(winstonConfig);
- *   logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}, 'SYSTEM'`);
- * });
+ * Global process error handlers
+ * Ensures uncaught exceptions and promise rejections are written to system logs
  */

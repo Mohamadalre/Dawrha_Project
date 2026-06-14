@@ -1,18 +1,20 @@
 import { MailerService } from "@nestjs-modules/mailer";
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
-import { Logger } from "@nestjs/common";
 import { Job } from "bullmq";
+import { winstonLogger } from "@src/core/logger-config/winston.config";
+import {
+  MAIL_QUEUE_NAME,
+  MAIL_SEND_OTP_JOB_NAME,
+  MAIL_SEND_RESET_LINK_JOB_NAME,
+} from '../queues/mail.queue';
 
-
-
-@Processor('mail-queue', {
+@Processor(MAIL_QUEUE_NAME, {
     concurrency: 10,
     stalledInterval:3000,
     lockDuration:6000
 })
 export class MailProcessor extends WorkerHost {
 
-    private readonly logger = new Logger('JOBS')
     constructor(
         private readonly mailerService: MailerService) {
         super();
@@ -21,19 +23,20 @@ export class MailProcessor extends WorkerHost {
         string,
         (job: Job) => Promise<any>
     > = {
-            'send-otp': this.handleOtp.bind(this),
-            'send-reset-link': this.handleReset.bind(this),
+            [MAIL_SEND_OTP_JOB_NAME]: this.handleOtp.bind(this),
+            [MAIL_SEND_RESET_LINK_JOB_NAME]: this.handleReset.bind(this),
         };
 
     async process(job: Job): Promise<any> {
-        this.logger.log(
+        winstonLogger.log('info', 
             `Processing job ${job.id} of type ${job.name}`,
+            { channel: 'jobs' }
         );
 
         const handler = this.handlers[job.name];
 
         if (!handler) {
-            this.logger.error(`No handler for job: ${job.name}`);
+            winstonLogger.error(`No handler for job: ${job.name}`, { channel: 'jobs' });
             throw new Error(`Unknown job type: ${job.name}`);
         }
 
@@ -74,15 +77,18 @@ export class MailProcessor extends WorkerHost {
 
     private async handleError(job: Job, error: any) {
         if (error.response?.code === 'EENVELOPE') {
-            this.logger.warn(
-                `Invalid email ${ job.data.email } → discard,`
+            winstonLogger.warn(
+                `Invalid email ${ job.data.email } → discard,`,
+                { channel: 'jobs' }
             );
+            // eslint-disable-next-line @typescript-eslint/await-thenable
             await job.discard();
             throw new Error('Invalid Email');
         }
 
-        this.logger.error(
-            `Job ${ job.id } failed: ${ error.message },`
+        winstonLogger.error(
+            `Job ${ job.id } failed: ${ error.message },`,
+            { channel: 'jobs' }
         );
 
         throw error;
@@ -98,12 +104,12 @@ export class MailProcessor extends WorkerHost {
             attemptsMade: job.attemptsMade,
             reason: error.message
         };
-        this.logger.warn(`job ${job.id} permanently failed: ${JSON.stringify(errorData)}`);
+        winstonLogger.warn(`job ${job.id} permanently failed: ${JSON.stringify(errorData)}`, { channel: 'jobs' });
     }
 
     @OnWorkerEvent('completed')
     onCompleted(job: Job) {
-        this.logger.log(`job ${job.id} has been finished successfully.`)
+        winstonLogger.log('info', `job ${job.id} has been finished successfully.`, { channel: 'jobs' });
     }
 }
 

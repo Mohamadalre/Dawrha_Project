@@ -1,4 +1,4 @@
-import { Controller, UseGuards, Post, Body, Req,Param, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, UseGuards, Post, Body, Req,UseInterceptors, UploadedFile } from '@nestjs/common';
 import { RolesGuard } from '@src/auth/guards/roles.guard';
 import { Roles } from '@src/auth/decorators/roles.decorator';
 import { Role } from '@src/user/enums/role.enum';
@@ -50,15 +50,14 @@ export class ExternalPartnerOnboardingController {
    * Adds external partner materials during onboarding
    * Handles waste category selection and delivery preferences
    *
-   * @param profileId - External partner profile ID
    * @param dto - Waste external partner data
    * @param req - Request object containing user and profile information
    * @returns Success message with onboarding status
    */
   @UseGuards(ProfileOwnerGuard)
   @Roles(Role.EXTERNAL_PARTNER)
-  @Post('material/:profileId')
-  public async addMaterialExternalPartner(@Param('profileId') profileId: string, @Body() dto: WasteExternalPartnerDto, @Req() req: any) {
+  @Post('material')
+  public async addMaterialExternalPartner(@Body() dto: WasteExternalPartnerDto, @Req() req: any) {
     const profile = req.profile;
     const account = req.user;
     const data = await this.externalPartnerOnboardingService.addExternalPartnerMaterials(dto, profile, account.id);

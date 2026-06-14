@@ -6,9 +6,14 @@ import { WasteCategory } from './entities/waste-category.entity';
 import { InstitutionWasteCategory } from './entities/institution-waste-category.entity';
 import { FactoryWasteCategory } from './entities/factory-waste-category.entity';
 import { ExternalPartnerWasteCategory } from './entities/external-partner-waste-category.entity';
+import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([WasteCategory, InstitutionWasteCategory,FactoryWasteCategory,ExternalPartnerWasteCategory])],
+  imports: [TypeOrmModule.forFeature([WasteCategory, InstitutionWasteCategory,
+    FactoryWasteCategory, ExternalPartnerWasteCategory
+  ]),
+    CloudinaryModule
+  ],
   controllers: [WasteManagementController],
   providers: [WasteManagementService],
 })

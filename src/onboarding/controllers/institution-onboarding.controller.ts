@@ -1,4 +1,4 @@
-import { Controller, UseGuards, Post, Body, Param, Req, UseInterceptors, BadRequestException, UploadedFile, ForbiddenException } from '@nestjs/common';
+import { Controller, UseGuards, Post, Body, Req, UseInterceptors, BadRequestException, UploadedFile, ForbiddenException } from '@nestjs/common';
 import { RolesGuard } from '@src/auth/guards/roles.guard';
 import { Roles } from '@src/auth/decorators/roles.decorator';
 import { Role } from '@src/user/enums/role.enum';
@@ -63,15 +63,14 @@ export class InstitutionOnboardingController {
    * Adds institution materials during onboarding
    * Handles waste category selection and collection preferences
    *
-   * @param profileId - Institution profile ID
    * @param dto - Waste institution data
    * @param req - Request object containing user and profile information
    * @returns Success message with onboarding status
    */
   @UseGuards(ProfileOwnerGuard)
   @Roles(Role.INSTITUTIONS)
-  @Post('material/:profileId')
-  public async addMaterialInstitution(@Param('profileId') profileId: string, @Body() dto: WasteInstitutionDto, @Req() req: any) {
+  @Post('material')
+  public async addMaterialInstitution( @Body() dto: WasteInstitutionDto, @Req() req: any) {
     const profile = req.profile;
     const account = req.user;
     const data = await this.institutionOnboardingService.addInstitutionMaterials(dto, profile, account.id);
@@ -82,7 +81,6 @@ export class InstitutionOnboardingController {
    * Uploads institution documents during onboarding
    * Handles license document uploads for institutions
    *
-   * @param profileId - Institution profile ID
    * @param file - Document file to upload
    * @param dto - Media data with file type
    * @param req - Request object containing user and profile information
@@ -90,10 +88,9 @@ export class InstitutionOnboardingController {
    */
   @UseGuards(ProfileOwnerGuard)
   @Roles(Role.INSTITUTIONS)
-  @Post('upload-doc/:profileId')
+  @Post('upload-doc')
   @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
   async uploadFileInstitution(
-    @Param('profileId') profileId: string,
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: MediaDto,
     @Req() req,

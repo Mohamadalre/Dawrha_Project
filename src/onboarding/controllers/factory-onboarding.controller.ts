@@ -1,4 +1,4 @@
-import { Controller, UseGuards, Post, Body, Param, Req, UseInterceptors, BadRequestException, UploadedFile, ForbiddenException } from '@nestjs/common';
+import { Controller, UseGuards, Post, Body, Req, UseInterceptors, BadRequestException, UploadedFile, ForbiddenException } from '@nestjs/common';
 import { RolesGuard } from '@src/auth/guards/roles.guard';
 import { Roles } from '@src/auth/decorators/roles.decorator';
 import { Role } from '@src/user/enums/role.enum';
@@ -63,15 +63,14 @@ export class FactoryOnboardingController {
    * Adds factory materials during onboarding
    * Handles waste category selection and delivery preferences
    *
-   * @param profileId - Factory profile ID
    * @param dto - Waste factory data
    * @param req - Request object containing user and profile information
    * @returns Success message with onboarding status
    */
   @UseGuards(ProfileOwnerGuard)
   @Roles(Role.FACTORY)
-  @Post('material/:profileId')
-  public async addMaterialFactory(@Param('profileId') profileId: string, @Body() dto: WasteFactoryDto, @Req() req: any) {
+  @Post('material')
+  public async addMaterialFactory( @Body() dto: WasteFactoryDto, @Req() req: any) {
     const profile = req.profile;
     const account = req.user;
     const data = await this.factoryOnboardingService.addFactoryMaterials(dto, profile, account.id);
@@ -82,7 +81,6 @@ export class FactoryOnboardingController {
    * Uploads factory documents during onboarding
    * Handles industrial registration and license document uploads
    *
-   * @param profileId - Factory profile ID
    * @param file - Document file to upload
    * @param dto - Media data with file type
    * @param req - Request object containing user and profile information
@@ -90,10 +88,9 @@ export class FactoryOnboardingController {
    */
   @UseGuards(ProfileOwnerGuard)
   @Roles(Role.FACTORY)
-  @Post('upload-doc/:profileId')
+  @Post('upload-doc')
   @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
   async uploadFileFactory(
-    @Param('profileId') profileId: string,
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: MediaDto,
     @Req() req,

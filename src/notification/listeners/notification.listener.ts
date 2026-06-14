@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { NotificationService } from '../notification.service';
-import { SendNotificationEvent } from '../events/send-notification.event';
+import { SendNotificationEvent } from '../events/notification.events';
 
 @Injectable()
 export class NotificationListener {
@@ -9,22 +9,16 @@ export class NotificationListener {
     private readonly notificationService: NotificationService,
   ) {}
 
-  @OnEvent('notification.send') 
-  async handle(event:SendNotificationEvent) {
-    const { userId, title, body, data } = event;
-    await this.notificationService.create({
-      user: { id: userId } as any,
-      title,
-      body,
-      data,
+  @OnEvent('notification.send', { async: true })
+  async handleNotificationSend(event: SendNotificationEvent) {
+    const notification = await this.notificationService.createNotification({
+      userId: event.userId,
+      title: event.title,
+      body: event.body,
+      type: event.type,
+      metadata: event.metadata,
     });
 
-    // 2. Send FCM
-    await this.notificationService.sendToUser(
-      userId,
-      title,
-      body,
-      data,
-    );
+    await this.notificationService.enqueueNotification(notification.id);
   }
 }

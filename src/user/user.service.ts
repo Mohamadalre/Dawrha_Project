@@ -31,6 +31,7 @@ export class UserService {
     return account;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-wrapper-object-types
   async update(id: string, data: object): Promise<Boolean> {
     const account = await this.accountRepository.update(id,data);
     if (!account) {

@@ -1,0 +1,9 @@
+export enum NotificationType {
+  GENERAL = 'GENERAL',
+  ORDER = 'ORDER',
+  RECYCLING_REQUEST = 'RECYCLING_REQUEST',
+  WAREHOUSE = 'WAREHOUSE',
+  DRIVER = 'DRIVER',
+  TRUCK = 'TRUCK',
+  ODOO = 'ODOO',
+}
