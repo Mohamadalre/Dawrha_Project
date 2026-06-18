@@ -2,7 +2,6 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { UserService } from '../../user/user.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Account } from '@src/user/entities/account.entity';
@@ -19,7 +18,7 @@ export class JwtTemporaryStrategy extends PassportStrategy(Strategy,'jwtTemporar
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_TEMPORARY_SECRET')!,
+      secretOrKey: configService.get<string>('JWT_TEMPORARY_SECRET'),
     });
   }
 

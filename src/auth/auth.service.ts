@@ -37,7 +37,11 @@ import { NeedChangeHandler } from './handlers/needChange.handler';
 export class AuthService {
 
   private handlers: Record<AccountStatus, LoginHandler>;
-
+  private AllowedAccountType : Record<string,string[]>= {
+    user_app :['CITIZEN','INSTITUTIONS'],
+    collector_app :['COLLECTOR'],
+    factory_app:['FACTORY0','EXTERNAL_PARTNER']
+  }
   constructor(
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
@@ -102,24 +106,21 @@ export class AuthService {
    * @param role expected account role for login
    * @returns handler result that may include access/refresh tokens or temporary token info
    */
-  async login({ email, password, deviceId, fcmToken, deviceType }: LoginDto, role: Role) {
+  async login({ email, password, deviceId, fcmToken, deviceType }: LoginDto, role:string) {
     const account = await this.accountRepository.findOne({ where: { email: email } });
+    const allowed = this.AllowedAccountType[role];
     if (!account) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    if (account.role !== role) {
-      throw new UnauthorizedException(`You cannot enter as ${role},your account is registered as ${account.role}`)
+    if (!allowed || !allowed.includes(account.role)) {
+      throw new UnauthorizedException('This account is not authorized for this application')
     }
     const isPasswordValid = await argon2.verify(account.passwordHash, password);
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    if (!account.isEmailVerified) {
-      await this.mailService.generateAndSendOtp(account.email);
-      const token = await this.generateTemporaryTokens(account.id, account.role, account.accountStatus);
-      return { status: 'The email is not confirmed ', data: token }
-    }
+
     const handler = this.handlers[account.accountStatus];
     return handler.handle(account, { deviceId, fcmToken, deviceType })
   }
@@ -436,6 +437,8 @@ export class AuthService {
       role: account.role,
     };
   }
+
+
 
 
 

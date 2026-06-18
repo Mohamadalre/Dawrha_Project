@@ -70,64 +70,45 @@ export class AuthController {
   }
 
   /**
-   * Login as citizen.
+   * Login as user-app.
    * @param loginDto body payload containing email and password
-   * @returns JWT tokens if credentials and role match
+   * @returns JWT tokens if credentials and type-app match
    */
-  @Post('login/citizen')
+  @Post('login/user-app')
   @HttpCode(200)
   async loginCitizen(@Body() loginDto: LoginDto) {
-    const tokens = await this.authService.login(loginDto, Role.CITIZEN);
+    const tokens = await this.authService.login(loginDto,'user_app');
     return { message: 'Login successful', result: tokens };
   }
 
   /**
-   * Login as collector.
+   * Login as collector_app.
    * @param loginDto body payload containing email and password
-   * @returns JWT tokens if credentials and role match
+   * @returns JWT tokens if credentials and type-app match
    */
-  @Post('login/collector')
+  @Post('login/collector-app')
   @HttpCode(200)
   async loginCollector(@Body() loginDto: LoginDto) {
-    const tokens = await this.authService.login(loginDto, Role.COLLECTOR);
+    const tokens = await this.authService.login(loginDto,'collector_app');
     return { message: 'Login successful', result: tokens };
   }
 
-  /**
-   * Login as external partner.
-   * @param loginDto body payload containing email and password
-   * @returns JWT tokens if credentials and role match
-   */
-  @Post('login/external-partner')
-  @HttpCode(200)
-  async loginExternalPartner(@Body() loginDto: LoginDto) {
-    const tokens = await this.authService.login(loginDto, Role.EXTERNAL_PARTNER);
-    return { message: 'Login successful', result: tokens };
-  }
+
 
   /**
-   * Login as factory.
+   * Login as factory_app.
    * @param loginDto body payload containing email and password
-   * @returns JWT tokens if credentials and role match
+   * @returns JWT tokens if credentials and type-app match
    */
-  @Post('login/factory')
+  @Post('login/factory-app')
   @HttpCode(200)
   async loginFactory(@Body() loginDto: LoginDto) {
-    const tokens = await this.authService.login(loginDto, Role.FACTORY);
+    const tokens = await this.authService.login(loginDto,'factory_app');
     return { message: 'Login successful', result: tokens };
   }
 
-  /**
-   * Login as institution.
-   * @param loginDto body payload containing email and password
-   * @returns JWT tokens if credentials and role match
-   */
-  @Post('login/institution')
-  @HttpCode(200)
-  async loginInstitution(@Body() loginDto: LoginDto) {
-    const tokens = await this.authService.login(loginDto, Role.INSTITUTIONS);
-    return { message: 'Login successful', result: tokens };
-  }
+
+
 
   /**
    * Google login for citizen users.

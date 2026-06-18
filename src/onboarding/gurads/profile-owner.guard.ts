@@ -1,10 +1,11 @@
-import { CanActivate, ForbiddenException, Injectable, NotFoundException, ExecutionContext } from "@nestjs/common";
+import { CanActivate, ForbiddenException, Injectable, NotFoundException, ExecutionContext, UnauthorizedException } from "@nestjs/common";
 import { ProfileResolver } from "@src/user/providers/profile-resolver.privder";
 import { Role } from "@src/user/enums/role.enum";
 import { OnboardingService } from "../onboarding.service";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Account } from "@src/user/entities/account.entity";
 import { Repository } from "typeorm";
+import { AccountStatus } from "@src/user/enums/account-status.enum";
 
 
 @Injectable()
@@ -21,8 +22,9 @@ export class ProfileOwnerGuard implements CanActivate {
         const req = context.switchToHttp().getRequest();
 
         const account = req.user;
-    
 
+        if (account.accountStatus !== AccountStatus.PENDING_PROFILE)
+            throw new UnauthorizedException('Account is not pending profile completion');
 
         if (account.role == Role.CITIZEN || account.role == Role.ADMIN) {
             throw new ForbiddenException('You are not allowed');
@@ -32,7 +34,7 @@ export class ProfileOwnerGuard implements CanActivate {
 
 
         const profile = await repo.findOne({
-            where: {account:accountProfile},
+            where: { account: accountProfile },
             relations: ['account']
         });
         if (!profile) {
