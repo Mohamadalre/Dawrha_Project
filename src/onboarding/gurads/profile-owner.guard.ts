@@ -34,9 +34,11 @@ export class ProfileOwnerGuard implements CanActivate {
 
 
         const profile = await repo.findOne({
-            where: { account: accountProfile },
+            where: {account: { id: account.id }},
             relations: ['account']
         });
+        console.log(profile);
+        
         if (!profile) {
             throw new NotFoundException('Profile not found');
         }

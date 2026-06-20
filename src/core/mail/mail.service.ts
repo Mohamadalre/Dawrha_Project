@@ -106,7 +106,7 @@ export class MailService {
     const storedOtp = await this.redis.get(`otp:${email}`);
     if (!storedOtp) return false;
     const hashedInput = this.hash(inputOtp)
-    if (hashedInput === storedOtp) {
+    if (hashedInput == storedOtp) {
       await this.clearOtp(email);
       return true;
     }

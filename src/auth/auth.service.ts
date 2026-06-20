@@ -150,10 +150,16 @@ export class AuthService {
       throw new BadRequestException('The verification code is incorrect or expired')
     }
 
-    await this.userService.update(userId, { isEmailVerified: true, accountStatus: account.role == Role.CITIZEN ? AccountStatus.ACTIVE : AccountStatus.PENDING_PROFILE })
-    const { accessToken, refreshToken } = await this.generateTokens(account.id, account.role, account.accountStatus, deviceId, deviceType, fcmToken);
+   await this.userService.update(userId, {
+  isEmailVerified: true,
+  accountStatus: account.role == Role.CITIZEN ? AccountStatus.ACTIVE : AccountStatus.PENDING_PROFILE
+})
+
+const updatedAccount = await this.userService.findById(userId);   // أعد القراءة
+const handler = this.handlers[updatedAccount.accountStatus];
+const details = await handler.handle(updatedAccount, { deviceId, fcmToken, deviceType });
     await this.redisService.setRedisKey({ redisKey: `blackListTokenTemp:${userId}`, redisValue: jti, date: 1200 });
-    return { accessToken, refreshToken, role: account.role };
+    return {details:details, role: account.role };
   }
 
 
