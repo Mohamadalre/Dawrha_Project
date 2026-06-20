@@ -16,7 +16,8 @@ export const validationSchema = Joi.object({
   JWT_ACCESS_SECRET: Joi.string().required(),
   JWT_REFRESH_SECRET: Joi.string().required(),
   JWT_ACCESS_EXPIRATION: Joi.string().required(),
-  JWT_REFRESH_EXPIRATION: Joi.string().required(),
+  JWT_REFRESH_DEFAULT_EXPIRATION: Joi.string().required(),
+  JWT_REFRESH_REMEMBER_ME_EXPIRATION: Joi.string().required(),
 });
 
 export const configuration = () => ({
@@ -38,6 +39,6 @@ export const configuration = () => ({
     accessSecret: process.env.JWT_ACCESS_SECRET,
     refreshSecret: process.env.JWT_REFRESH_SECRET,
     accessExpiration: process.env.JWT_ACCESS_EXPIRATION,
-    refreshExpiration: process.env.JWT_REFRESH_EXPIRATION,
+    refreshExpiration: process.env.JWT_REFRESH_DEFAULT_EXPIRATION || process.env.JWT_REFRESH_REMEMBER_ME_EXPIRATION,
   },
 });

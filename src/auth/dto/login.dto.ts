@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsString ,MinLength,MaxLength} from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString ,MinLength,MaxLength,} from 'class-validator';
 import { DeviceDto } from './auth.dto';
 
 
@@ -14,6 +14,9 @@ export class LoginDto extends DeviceDto  {
   @MinLength(8, { message:'The password is very short(minimum 8 characters'})
   @MaxLength(64, { message: 'The password is very long(maximum 64 characters' })
   password: string;
+
+
+
 
 
 

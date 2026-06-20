@@ -6,14 +6,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Account } from '@src/user/entities/account.entity';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
+import { RedisService } from '@src/core/redis/redis.service';
 
 
 @Injectable()
-export class JwtTemporaryStrategy extends PassportStrategy(Strategy,'jwtTemporary') {
+export class JwtTemporaryStrategy extends PassportStrategy(Strategy, 'jwtTemporary') {
   constructor(
     private readonly configService: ConfigService,
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
+    private readonly redisService: RedisService
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -23,13 +25,15 @@ export class JwtTemporaryStrategy extends PassportStrategy(Strategy,'jwtTemporar
   }
 
   async validate(payload: any) {
-    const account = await this.accountRepository.findOne({where:{id:payload.id || payload.sub}});
-    
+    const account = await this.accountRepository.findOne({ where: { id: payload.id || payload.sub } });
+    const key = `blackListTokenTemp:${account.id}`;
+    const isBlackListed = await this.redisService.getRedisByKey(key);
+    if (isBlackListed)
+      throw new UnauthorizedException('Token temporary is invalidated');
     if (!account || account.accountStatus !== AccountStatus.INACTIVE) {
-      throw new UnauthorizedException('Account is disabled or not found');
+      throw new UnauthorizedException('Token is invalid or not found');
     }
-  
-  
-    return { id: account.id, role: payload.role,email:account.email };
+
+    return { id: account.id, role: payload.role, email: account.email };
   }
 }

@@ -1,9 +1,10 @@
 import { Account } from '@src/user/entities/account.entity';
 import { DeviceType } from '@src/user/enums/deviec-type.enum';
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, JoinColumn, ManyToOne } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, JoinColumn, ManyToOne, Unique } from 'typeorm';
 
-@Index(['accountId', 'deviceId'], { unique: true })
+
 @Entity('user_devices')
+@Unique(['accountId', 'deviceId'])
 export class UserDevice {
 
   @PrimaryGeneratedColumn('uuid')
@@ -24,7 +25,7 @@ export class UserDevice {
   @Column({ nullable: true })
   fcmToken: string;
 
-  @Column({ unique: true, nullable: true })
+  @Column({ nullable: true })
   deviceId: string;
 
 

@@ -5,7 +5,7 @@ import { winstonLogger } from "@src/core/logger-config/winston.config";
 import {
   MAIL_QUEUE_NAME,
   MAIL_SEND_OTP_JOB_NAME,
-  MAIL_SEND_RESET_LINK_JOB_NAME,
+  MAIL_SEND_FORGOT_OTP_JOB_NAME,
 } from '../queues/mail.queue';
 
 @Processor(MAIL_QUEUE_NAME, {
@@ -24,7 +24,7 @@ export class MailProcessor extends WorkerHost {
         (job: Job) => Promise<any>
     > = {
             [MAIL_SEND_OTP_JOB_NAME]: this.handleOtp.bind(this),
-            [MAIL_SEND_RESET_LINK_JOB_NAME]: this.handleReset.bind(this),
+            [MAIL_SEND_FORGOT_OTP_JOB_NAME]: this.handleReset.bind(this),
         };
 
     async process(job: Job): Promise<any> {
@@ -63,16 +63,16 @@ export class MailProcessor extends WorkerHost {
     }
 
     private async handleReset(job: Job) {
-        const { email, link } = job.data;
+        const { email, otp } = job.data;
 
         await this.mailerService.sendMail({
             to: email,
             subject: 'Reset Password - Dawrha App',
             template: 'reset-password',
-            context: { link },
+            context: { otp },
         });
 
-        return { status: 'reset_link_sent' };
+        return { status: 'reset_otp_sent' };
     }
 
     private async handleError(job: Job, error: any) {

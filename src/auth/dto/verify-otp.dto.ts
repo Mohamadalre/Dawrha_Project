@@ -1,5 +1,5 @@
-import { DeviceType } from "@src/user/enums/deviec-type.enum";
-import { IsNotEmpty, Matches, IsString, IsOptional, IsEnum } from "class-validator";
+
+import { IsNotEmpty, Matches } from "class-validator";
 import { DeviceDto } from "./auth.dto";
 
 

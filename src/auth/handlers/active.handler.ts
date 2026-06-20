@@ -18,7 +18,8 @@ export class ActiveHandler implements LoginHandler {
             account.accountStatus,
             dto.deviceId,
             dto.deviceType,
-            dto.fcmToken
+            dto.fcmToken,
+            dto.rememberMy
 
         );
         return {

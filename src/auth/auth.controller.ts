@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, HttpCode, Put, Req } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, HttpCode, Put, Req, Patch } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { DeviceDto, RefreshTokenDto, RefreshTokenTemporaryDto } from './dto/auth.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -13,6 +13,7 @@ import { RefreshTokenGuard } from './guards/refresh-token.guard';
 import { JwtTemporaryGuard } from './guards/jwt-temporary.guard';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { LoginGoogleDto } from './dto/logoin-google.dto';
+import { VerifyResetOtpDto } from './dto/verifyReset-otp.dto';
 
 
 
@@ -30,8 +31,8 @@ export class AuthController {
    */
   @Post('register/citizen')
   async registerCitizen(@Body() registerDto: RegisterDto) {
-    const tokens = await this.authService.register(registerDto, Role.CITIZEN);
-    return { message: 'Registration successful', result: tokens };
+    const result = await this.authService.register(registerDto, Role.CITIZEN);
+    return result;
   }
 
 
@@ -42,8 +43,8 @@ export class AuthController {
    */
   @Post('register/institution')
   async registerInstitution(@Body() registerDto: RegisterDto) {
-    const tokens = await this.authService.register(registerDto, Role.INSTITUTIONS);
-    return { message: 'Registration successful', result: tokens };
+    const result = await this.authService.register(registerDto, Role.INSTITUTIONS);
+    return result;
   }
 
   /**
@@ -53,9 +54,49 @@ export class AuthController {
    */
   @Post('register/collector')
   async registerCollector(@Body() registerDto: RegisterDto) {
-    const tokens = await this.authService.register(registerDto, Role.COLLECTOR);
-    return { message: 'Registration successful', result: tokens };
+    const result = await this.authService.register(registerDto, Role.COLLECTOR);
+    return result
   }
+
+
+  @Post('register/citizen/google')
+  @HttpCode(201)
+  async registerCitizenGoogle(@Body() dto: LoginGoogleDto) {
+    const tokens = await this.authService.registerWithGoogle(dto, Role.CITIZEN)
+    return { message: 'Registration with Google successful', result: tokens };
+  }
+
+
+  @Post('register/institution/google')
+  @HttpCode(201)
+  async registerInstitutionGoogle(@Body() dto: LoginGoogleDto) {
+    const tokens = await this.authService.registerWithGoogle(dto, Role.INSTITUTIONS)
+    return { message: 'Registration with Google successful', result: tokens };
+  }
+
+
+  @Post('register/collector/google')
+  @HttpCode(201)
+  async registerCollectorGoogle(@Body() dto: LoginGoogleDto) {
+    const tokens = await this.authService.registerWithGoogle(dto, Role.COLLECTOR)
+    return { message: 'Registration with Google successful', result: tokens };
+  }
+
+  @Post('register/factory/google')
+  @HttpCode(201)
+  async registerFactoryGoogle(@Body() dto: LoginGoogleDto) {
+    const tokens = await this.authService.registerWithGoogle(dto, Role.FACTORY)
+    return { message: 'Registration with Google successful', result: tokens };
+  }
+
+
+  @Post('register/external-partner/google')
+  @HttpCode(201)
+  async registerExternalPartnerGoogle(@Body() dto: LoginGoogleDto) {
+    const tokens = await this.authService.registerWithGoogle(dto, Role.EXTERNAL_PARTNER)
+    return { message: 'Registration with Google successful', result: tokens };
+  }
+
 
   /**
    * Login as admin.
@@ -65,7 +106,7 @@ export class AuthController {
   @Post('login/admin')
   @HttpCode(200)
   async loginAdmin(@Body() loginDto: LoginDto) {
-    const tokens = await this.authService.login(loginDto, Role.ADMIN);
+    const tokens = await this.authService.login(loginDto, 'admin');
     return { message: 'Login successful', result: tokens };
   }
 
@@ -76,8 +117,8 @@ export class AuthController {
    */
   @Post('login/user-app')
   @HttpCode(200)
-  async loginCitizen(@Body() loginDto: LoginDto) {
-    const tokens = await this.authService.login(loginDto,'user_app');
+  async loginUser(@Body() loginDto: LoginDto) {
+    const tokens = await this.authService.login(loginDto, 'user_app');
     return { message: 'Login successful', result: tokens };
   }
 
@@ -89,7 +130,7 @@ export class AuthController {
   @Post('login/collector-app')
   @HttpCode(200)
   async loginCollector(@Body() loginDto: LoginDto) {
-    const tokens = await this.authService.login(loginDto,'collector_app');
+    const tokens = await this.authService.login(loginDto, 'collector_app');
     return { message: 'Login successful', result: tokens };
   }
 
@@ -103,7 +144,7 @@ export class AuthController {
   @Post('login/factory-app')
   @HttpCode(200)
   async loginFactory(@Body() loginDto: LoginDto) {
-    const tokens = await this.authService.login(loginDto,'factory_app');
+    const tokens = await this.authService.login(loginDto, 'factory_app');
     return { message: 'Login successful', result: tokens };
   }
 
@@ -111,64 +152,47 @@ export class AuthController {
 
 
   /**
-   * Google login for citizen users.
-   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken
-   * @returns JWT tokens if the Google token is valid and role matches
+   * Google login for user app.
+   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken ant remember is true
+   * @returns JWT tokens if the Google token is valid and type app matches
    */
-  @Post('login/citizen/google')
+  @Post('login/user-app/google')
   @HttpCode(200)
-  async googleLoginCitizen(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.googleLogin(dto, Role.CITIZEN)
+  async loginUserGoogle(@Body() dto: LoginGoogleDto) {
+    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'user-app')
     return { message: 'Login with Google successful', result: tokens };
   }
 
   /**
-   * Google login for collector users.
-   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken
-   * @returns JWT tokens if the Google token is valid and role matches
+   * Google login for collector app.
+   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken and remember is true
+   * @returns JWT tokens if the Google token is valid and type app matches
    */
-  @Post('login/collector/google')
+  @Post('login/collector-app/google')
   @HttpCode(200)
-  async googleLoginCollector(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.googleLogin(dto, Role.COLLECTOR)
+  async LoginCollectorGoogle(@Body() dto: LoginGoogleDto) {
+    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'collector-app')
     return { message: 'Login with Google successful', result: tokens };
   }
 
-  /**
-   * Google login for external partner users.
-   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken
-   * @returns JWT tokens if the Google token is valid and role matches
-   */
-  @Post('login/external-partner/google')
+  @Post('login/factory-app/google')
   @HttpCode(200)
-  async googleLoginExternalPartner(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.googleLogin(dto, Role.EXTERNAL_PARTNER)
+  async LoginFactoryGoogle(@Body() dto: LoginGoogleDto) {
+    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'factory-app')
     return { message: 'Login with Google successful', result: tokens };
   }
 
-  /**
-   * Google login for factory users.
-   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken
-   * @returns JWT tokens if the Google token is valid and role matches
-   */
-  @Post('login/factory/google')
+
+
+  @Put('FCMToken')
   @HttpCode(200)
-  async googleLoginFactory(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.googleLogin(dto, Role.FACTORY)
-    return { message: 'Login with Google successful', result: tokens };
+  async addFCMToken(@Body() dto:DeviceDto,@CurrentUser() user:any){
+    const result = await this.authService.addFCMToken(dto, user.id)
+    return result.message;
   }
 
-  /**
-   * Google login for institution users.
-   * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken
-   * @returns JWT tokens if the Google token is valid and role matches
-   */
-  @Post('login/institution/google')
-  @HttpCode(200)
-  async googleLoginInstitution(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.googleLogin(dto, Role.INSTITUTIONS)
-    return { message: 'Login with Google successful', result: tokens };
-  }
+
+
 
   /**
    * Confirm OTP received by email for temporary users.
@@ -180,7 +204,7 @@ export class AuthController {
   @Post('otp/verify')
   @HttpCode(200)
   async verifyOTP(@CurrentUser() user: any, @Body() verifyOtpDto: VerifyOtpDto) {
-    const tokens = await this.authService.verifyOtpCode(verifyOtpDto, user.id);
+    const tokens = await this.authService.verifyOtpCode(verifyOtpDto, user.id, user.jti);
     return { message: 'Your account has been confirmed successfully', result: tokens };
   }
 
@@ -210,12 +234,20 @@ export class AuthController {
     return { message: res.message };
   }
 
+
+  @Post('password/verify')
+  @HttpCode(200)
+  async verifyReset(@Body() verifyResetOtpDto: VerifyResetOtpDto) {
+    const res = await this.authService.verifyResetOtp(verifyResetOtpDto);
+    return res;
+  }
+
   /**
    * Reset the user password using a token URL.
    * @param resetDto body payload containing newPassword, confirmPassword, and tokenUrl
    * @returns success message when password is reset
    */
-  @Post('password/reset')
+  @Patch('password/reset')
   @HttpCode(200)
   async resetPassword(@Body() resetDto: ResetPasswordDto) {
     const res = await this.authService.resetPassword(resetDto);
@@ -258,7 +290,7 @@ export class AuthController {
   @HttpCode(200)
   @Post('logout')
   async logout(@CurrentUser() user: any, @Body() { deviceId }: DeviceDto) {
-    await this.authService.logout(user.id, deviceId)
+    await this.authService.logout(user.id, deviceId, user.jti)
     return { message: 'Logout successfully' }
   }
 
