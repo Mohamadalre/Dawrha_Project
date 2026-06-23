@@ -24,6 +24,27 @@ export class Warehouse {
   @Column()
   odooWarehouseId: number;
 
+  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  latitude?: string;
+
+  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  longitude?: string;
+
+  @Column({ nullable: true })
+  address?: string;
+
+  @Column({ type: 'int', nullable: true })
+  capacity?: number;
+
+  @Column({ type: 'decimal', precision: 14, scale: 3, default: 0 })
+  currentLoad: string;
+
+  @Column({ default: true })
+  isActive: boolean;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  lastOdooSync?: Date;
+
   @OneToOne(
     () => WarehouseManager,
     (manager) => manager.warehouse,
