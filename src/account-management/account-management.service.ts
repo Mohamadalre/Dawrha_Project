@@ -11,6 +11,7 @@ import { AccountDetailsDto } from './dto/account-details.dto';
 import { BlockedAccountStatusDto, UpdateAccountStatusDto } from './dto/update-account-status.dto';
 import { UpdateMediaStatusDto } from './dto/update-media-status.dto';
 import { ProfileDataProvider } from './providers/profile-data.provider';
+import { AccountStatusNotifier } from '@src/notification/account-status.notifier';
 
 @Injectable()
 export class AccountManagementService {
@@ -21,6 +22,7 @@ export class AccountManagementService {
     private readonly mediaRepo: Repository<Media>,
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
+    private readonly statusNotifier: AccountStatusNotifier,
   ) {}
 //DOTO  remove id media in getprofile just
   async getProfiles(
@@ -77,8 +79,10 @@ export class AccountManagementService {
     const { profile } = await this.resolveProfile(media.ownerId);
     const account = profile.account;
 
+    let movedToNeedChanges = false;
     if (account.accountStatus === AccountStatus.PENDING_APPROVAL) {
       await this.accountRepo.update(account.id, { accountStatus: AccountStatus.NEED_CHANGES });
+      movedToNeedChanges = true;
     } else if (account.accountStatus !== AccountStatus.NEED_CHANGES) {
       throw new ConflictException(
         `Account is ${account.accountStatus.toLowerCase().replace('_', ' ')}. Media status can only be updated for pending approval or accounts needing changes`,
@@ -92,6 +96,14 @@ export class AccountManagementService {
     }
 
     await this.mediaRepo.update(mediaId, { status: dto.status });
+
+    if (movedToNeedChanges) {
+      await this.statusNotifier.notifyStatusDecision(
+        account.id,
+        AccountStatus.NEED_CHANGES,
+        'بعض المستندات تحتاج إلى تعديل وإعادة الرفع',
+      );
+    }
 
     return { message: `Media ${dto.status.toLowerCase()} successfully` };
   }
@@ -143,6 +155,9 @@ export class AccountManagementService {
     }
 
     await this.accountRepo.update(account.id, updateData);
+
+    // Tell the user the decision (approved / rejected / needs changes) and why.
+    await this.statusNotifier.notifyStatusDecision(account.id, dto.status, dto.description);
 
     return { message: `Account ${dto.status.toLowerCase().replace('_', ' ')} successfully` };
   }

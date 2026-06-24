@@ -154,6 +154,17 @@ export class CartService {
   }
 
   // ---------------------------------------------------------------------------
+  // Clear / delete the whole cart
+  // ---------------------------------------------------------------------------
+  async clearCart(caller: Caller) {
+    const cart = await this.cartRepo.findOne({ where: { accountId: caller.id } });
+    if (!cart) return { message: 'Cart is already empty' };
+    // CartItem rows cascade-delete with the cart (onDelete: CASCADE).
+    await this.cartRepo.delete(cart.id);
+    return { message: 'Cart cleared successfully' };
+  }
+
+  // ---------------------------------------------------------------------------
   // Get cart
   // ---------------------------------------------------------------------------
   async getCart(caller: Caller) {

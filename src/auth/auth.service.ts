@@ -10,7 +10,11 @@ import { UserDevice } from './entities/user-device.entity';
 import { DeviceDto, RefreshTokenDto, RefreshTokenTemporaryDto } from './dto/auth.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/forgot-password.dto'
 import { RegisterDto } from './dto/register.dto'
-import { MailService } from '../core/mail/mail.service';
+import {
+  MailService,
+  OTP_COOLDOWN_SECONDS,
+  OTP_MAX_DAILY_RESENDS,
+} from '../core/mail/mail.service';
 import { LoginDto } from './dto/login.dto'
 import { Role } from '@src/user/enums/role.enum';
 import { Account } from '@src/user/entities/account.entity';
@@ -173,9 +177,7 @@ const details = await handler.handle(updatedAccount, { deviceId, fcmToken, devic
     const cooldownKey = `otp:cooldown:${account.email}`;
     const ttl = await this.redis.ttl(cooldownKey);
 
-
     if (ttl > 0) {
-
       throw new HttpException({
         statusCode: HttpStatus.TOO_MANY_REQUESTS,
         message: 'Please wait before requesting again',
@@ -183,10 +185,21 @@ const details = await handler.handle(updatedAccount, { deviceId, fcmToken, devic
       }, HttpStatus.TOO_MANY_REQUESTS);
     }
 
+    // Cap the number of resends per email per day (anti email-bombing).
+    const dailyKey = `otp:resend:count:${account.email}`;
+    const count = await this.redis.incr(dailyKey);
+    if (count === 1) await this.redis.expire(dailyKey, 86400);
+    if (count > OTP_MAX_DAILY_RESENDS) {
+      throw new HttpException({
+        statusCode: HttpStatus.TOO_MANY_REQUESTS,
+        message: 'Daily resend limit reached. Please try again later.',
+      }, HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    // generateAndSendOtp owns the cooldown — single source of truth.
     await this.mailService.generateAndSendOtp(account.email);
-    await this.redis.set(cooldownKey, 'locked', 'EX', 120);
     return {
-      cooldownSeconds: 120
+      cooldownSeconds: OTP_COOLDOWN_SECONDS
     };
   }
 

@@ -110,9 +110,15 @@ export class OdooSyncProcessor extends WorkerHost {
     if (product.odooProductId) {
       await this.odoo.updateProduct(product.odooProductId, { name: product.name });
     } else {
+      // recycle.product requires a category — the category must be synced first.
+      if (!product.category?.odooCategoryId) {
+        throw new Error(
+          `Category for product ${product.id} is not synced to Odoo yet`,
+        );
+      }
       const odooId = await this.odoo.createProduct({
         name: product.name,
-        categOdooId: product.category?.odooCategoryId,
+        categoryOdooId: product.category.odooCategoryId,
       });
       product.odooProductId = odooId;
     }
@@ -137,7 +143,8 @@ export class OdooSyncProcessor extends WorkerHost {
       .getOne();
 
     if (price) {
-      await this.odoo.updateProduct(product.odooProductId, { list_price: Number(price.price) });
+      // recycle.product uses `price` (not the standard `list_price`).
+      await this.odoo.updateProduct(product.odooProductId, { price: Number(price.price) });
     }
   }
 

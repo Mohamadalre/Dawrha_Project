@@ -12,6 +12,7 @@ import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { CommonService } from '@src/common/common.service';
 import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
+import { AccountStatusNotifier } from '@src/notification/account-status.notifier';
 
 @Injectable()
 export class OnboardingService {
@@ -26,8 +27,18 @@ export class OnboardingService {
     @InjectRepository(WasteCategory)
     protected readonly wasteCategoryRepo: Repository<WasteCategory>,
     protected readonly commonService: CommonService,
-    protected readonly cloudinaryService: CloudinaryService
+    protected readonly cloudinaryService: CloudinaryService,
+    protected readonly statusNotifier: AccountStatusNotifier,
   ) { }
+
+  /**
+   * Marks an account as submitted for review (PENDING_APPROVAL) and notifies the
+   * user. Centralised so every onboarding flow behaves identically.
+   */
+  protected async markPendingApproval(accountId: string): Promise<void> {
+    await this.acccountRepo.update(accountId, { accountStatus: AccountStatus.PENDING_APPROVAL });
+    await this.statusNotifier.notifyPendingApproval(accountId);
+  }
 
   /**
    * Uploads a logo file to Cloudinary and returns the URL
@@ -91,7 +102,7 @@ export class OnboardingService {
     await this.commonService.completeStep(account, 'location')
     const getnextStep = await this.commonService.getCurrentStep(account)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.markPendingApproval(account.id);
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
     return { status: 'Please enter the information in the following stage', id: profile.id, step: getnextStep }

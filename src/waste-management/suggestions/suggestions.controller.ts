@@ -1,4 +1,5 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
@@ -16,6 +17,7 @@ import { CreateSuggestionDto } from './dto/create-suggestion.dto';
 export class SuggestionsController {
   constructor(private readonly suggestionsService: SuggestionsService) {}
 
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('suggest')
   @Permissions('waste.products.suggest')
   async suggest(@CurrentUser() user, @Body() dto: CreateSuggestionDto) {

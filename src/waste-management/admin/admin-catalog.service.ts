@@ -11,6 +11,7 @@ import { CartItem } from '../entities/cart-item.entity';
 import { OdooSyncStatus } from '../enums/odoo-sync-status.enum';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
 import { AuditService } from '@src/waste-management/common/providers/audit.service';
+import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import {
   AdminListQueryDto,
@@ -36,6 +37,7 @@ export class AdminCatalogService {
     private readonly cartItemRepo: Repository<CartItem>,
     private readonly odooSync: OdooSyncService,
     private readonly audit: AuditService,
+    private readonly cache: CatalogCacheService,
   ) {}
 
   // --- Categories -----------------------------------------------------------
@@ -78,6 +80,8 @@ export class AdminCatalogService {
       newValues: { name: dto.name },
     });
 
+    await this.cache.invalidate('categories');
+
     return {
       category_id: category.id,
       message: 'تم إضافة التصنيف بنجاح',
@@ -107,6 +111,8 @@ export class AdminCatalogService {
       newValues: { name: category.name, isActive: category.isActive },
     });
 
+    await this.cache.invalidate('categories', 'products');
+
     return { category_id: id, odoo_status: 'PENDING_SYNC', message: 'تم تحديث التصنيف بنجاح' };
   }
 
@@ -130,6 +136,8 @@ export class AdminCatalogService {
       entityId: id,
       oldValues: { name: category.name },
     });
+
+    await this.cache.invalidate('categories', 'products');
 
     return { message: 'تم حذف التصنيف بنجاح' };
   }
@@ -177,6 +185,8 @@ export class AdminCatalogService {
       newValues: { name: dto.name, categoryId: dto.category_id },
     });
 
+    await this.cache.invalidate('products', 'categories');
+
     return { product_id: product.id, odoo_sync_status: 'PENDING_SYNC' };
   }
 
@@ -202,6 +212,8 @@ export class AdminCatalogService {
       newValues: { name: product.name },
     });
 
+    await this.cache.invalidate('products', 'categories');
+
     return { product_id: id, odoo_sync_status: 'PENDING_SYNC' };
   }
 
@@ -225,6 +237,8 @@ export class AdminCatalogService {
       entityId: id,
       oldValues: { name: product.name },
     });
+
+    await this.cache.invalidate('products', 'categories');
 
     return { message: 'تم حذف المنتج بنجاح' };
   }

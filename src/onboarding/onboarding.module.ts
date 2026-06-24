@@ -29,11 +29,13 @@ import { ExternalPartnerMaterial } from '@src/user/entities/material/external-pa
 import { ExternalPartnerProfile } from '@src/user/entities/profile/external-partner-profile.entity';
 import { InstitutionMaterial } from '@src/user/entities/material/institution-material.entity';
 import { CoreModule } from '@src/core/core.module';
+import { NotificationModule } from '@src/notification/notification.module';
 
 
 
 @Module({
   imports: [
+    NotificationModule,
     TypeOrmModule.forFeature([AccountProgress, Account,
        Province, InstitutionProfile,CollectorProfile,
        WasteCategory,InstitutionType,FactoryProfile,

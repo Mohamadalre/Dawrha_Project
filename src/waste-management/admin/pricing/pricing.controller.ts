@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, UseGuards, ParseUUIDPipe } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards, ParseUUIDPipe } from '@nestjs/common';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
@@ -20,5 +20,12 @@ export class PricingController {
   ) {
     const result = await this.pricingService.setPricing(user.id, productId, dto);
     return { message: result.message, result };
+  }
+
+  @Get(':productId/pricing')
+  @Permissions('admin.pricing.manage')
+  async getHistory(@Param('productId', ParseUUIDPipe) productId: string) {
+    const result = await this.pricingService.getPriceHistory(productId);
+    return { message: 'Price history fetched successfully', result };
   }
 }

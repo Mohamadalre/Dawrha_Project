@@ -1,14 +1,17 @@
 import { Role } from '@src/user/enums/role.enum';
 
 /**
- * Pricing tiers used by the marketplace.
- * The prompt models three commercial tiers (individual / company / factory).
- * Free-facility (EXTERNAL_PARTNER) shares the FACTORY tier by default.
+ * Commercial pricing tiers. Every buyer role has its OWN tier / price:
+ *   - INDIVIDUAL    → CITIZEN (المستخدم الفرد)
+ *   - COMPANY       → INSTITUTIONS (المؤسسة)
+ *   - FACTORY       → FACTORY (المعامل)
+ *   - FREE_FACILITY → EXTERNAL_PARTNER (الجهات الحرة)
  */
 export enum PricingTier {
   INDIVIDUAL = 'INDIVIDUAL',
   COMPANY = 'COMPANY',
   FACTORY = 'FACTORY',
+  FREE_FACILITY = 'FREE_FACILITY',
 }
 
 /**
@@ -21,8 +24,9 @@ export function tierForRole(role: Role): PricingTier {
     case Role.INSTITUTIONS:
       return PricingTier.COMPANY;
     case Role.FACTORY:
-    case Role.EXTERNAL_PARTNER:
       return PricingTier.FACTORY;
+    case Role.EXTERNAL_PARTNER:
+      return PricingTier.FREE_FACILITY;
     default:
       return PricingTier.INDIVIDUAL;
   }

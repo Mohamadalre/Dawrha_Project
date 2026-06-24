@@ -6,6 +6,7 @@ import { ProductPricing } from '@src/waste-management/entities/product-pricing.e
 import { CartItem } from '@src/waste-management/entities/cart-item.entity';
 import { PricingTier, tierForRole } from '@src/waste-management/enums/pricing-tier.enum';
 import { AuditService } from '@src/waste-management/common/providers/audit.service';
+import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { SetPricingDto } from './dto/set-pricing.dto';
 
@@ -20,6 +21,7 @@ export class PricingService {
     private readonly cartItemRepo: Repository<CartItem>,
     private readonly odooSync: OdooSyncService,
     private readonly audit: AuditService,
+    private readonly cache: CatalogCacheService,
   ) {}
 
   async setPricing(adminId: string, productId: string, dto: SetPricingDto) {
@@ -33,6 +35,7 @@ export class PricingService {
       [PricingTier.INDIVIDUAL]: dto.individual,
       [PricingTier.COMPANY]: dto.company,
       [PricingTier.FACTORY]: dto.factory,
+      [PricingTier.FREE_FACILITY]: dto.free_facility,
     };
 
     // Close out the currently-effective price rows for each tier, then insert new.
@@ -68,17 +71,58 @@ export class PricingService {
       newValues: { ...tierValues, effectiveFrom },
     });
 
+    // Prices are embedded in the cached product listings → drop that cache.
+    await this.cache.invalidate('products');
+
     return {
       product_id: productId,
       pricing: {
         individual: dto.individual,
         company: dto.company,
         factory: dto.factory,
+        free_facility: dto.free_facility,
       },
       effective_from: effectiveFrom,
       updated_cart_items: updatedCarts,
       message: 'تم تحديث الأسعار بنجاح',
     };
+  }
+
+  /**
+   * Returns the full pricing history of a product, grouped by tier, with the
+   * currently-effective price flagged per tier.
+   */
+  async getPriceHistory(productId: string) {
+    const product = await this.productRepo.findOne({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const rows = await this.pricingRepo.find({
+      where: { productId },
+      order: { effectiveFrom: 'DESC' },
+    });
+
+    const now = Date.now();
+    const isCurrent = (r: ProductPricing): boolean =>
+      new Date(r.effectiveFrom).getTime() <= now &&
+      (!r.effectiveUntil || new Date(r.effectiveUntil).getTime() > now);
+
+    const tiers: Record<string, unknown> = {};
+    for (const tier of Object.values(PricingTier)) {
+      const tierRows = rows.filter((r) => r.tier === tier);
+      const current = tierRows.find(isCurrent);
+      tiers[tier.toLowerCase()] = {
+        current: current ? Number(current.price) : null,
+        history: tierRows.map((r) => ({
+          price: Number(r.price),
+          currency: r.currency,
+          effective_from: r.effectiveFrom,
+          effective_until: r.effectiveUntil ?? null,
+          is_current: isCurrent(r),
+        })),
+      };
+    }
+
+    return { product_id: productId, tiers };
   }
 
   /** Re-prices non-offer cart lines for this product using each owner's tier. */

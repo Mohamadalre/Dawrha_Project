@@ -15,6 +15,7 @@ import { ProfileResolver } from '@src/user/providers/profile-resolver.privder';
 import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
 import { CommonService } from '@src/common/common.service';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
+import { AccountStatusNotifier } from '@src/notification/account-status.notifier';
 
 @Injectable()
 export class InstitutionOnboardingService extends OnboardingService {
@@ -30,6 +31,7 @@ export class InstitutionOnboardingService extends OnboardingService {
     wasteCategoryRepo: Repository<WasteCategory>,
     commonService: CommonService,
     cloudinaryService: CloudinaryService,
+    statusNotifier: AccountStatusNotifier,
     @InjectRepository(InstitutionProfile)
     private readonly institutionRepo: Repository<InstitutionProfile>,
     @InjectRepository(InstitutionMaterial)
@@ -37,7 +39,7 @@ export class InstitutionOnboardingService extends OnboardingService {
     @InjectRepository(InstitutionType)
     private readonly institutionTypeRepo: Repository<InstitutionType>
   ) {
-    super(progressRepo, resolver, provinceRepo, acccountRepo, wasteCategoryRepo, commonService, cloudinaryService);
+    super(progressRepo, resolver, provinceRepo, acccountRepo, wasteCategoryRepo, commonService, cloudinaryService, statusNotifier);
   }
 
   /**
@@ -120,7 +122,7 @@ export class InstitutionOnboardingService extends OnboardingService {
     await this.commonService.completeStep(account, 'information')
     const getnextStep = await this.commonService.getCurrentStep(account)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.markPendingApproval(account.id);
       return { status: 'Your request has been sent,wait for it to be approved', id: profile.id }
     }
     return { status: 'Please enter the information in the following stage', id: profile.id, step: getnextStep }
@@ -167,7 +169,7 @@ export class InstitutionOnboardingService extends OnboardingService {
     await this.commonService.completeStep(account, 'materials')
     const getnextStep = await this.commonService.getCurrentStep(account)
     if (getnextStep === null) {
-      await this.acccountRepo.update(account.id, { accountStatus: AccountStatus.PENDING_APPROVAL });
+      await this.markPendingApproval(account.id);
       return { status: 'Your request has been sent,wait for it to be approved' }
     }
     return { status: 'Please enter the information in the following stage', id: profile.id, step: getnextStep }

@@ -1,0 +1,35 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { PermissionsModule } from '@src/permission/permissions.module';
+import { Account } from '@src/user/entities/account.entity';
+import { TruckEntity } from '@src/truck/entities/truck.entity';
+import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
+import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
+import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
+import { Product } from '@src/waste-management/entities/product.entity';
+import { Offer } from '@src/waste-management/entities/offer.entity';
+import { ProductSuggestion } from '@src/waste-management/entities/product-suggestion.entity';
+import { StatisticsService } from './statistics.service';
+import { StatisticsController } from './statistics.controller';
+
+/**
+ * Admin-only reports & statistics. Read-only aggregation across existing tables.
+ */
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([
+      Account,
+      TruckEntity,
+      TruckAssignmentEntity,
+      Warehouse,
+      WasteCategory,
+      Product,
+      Offer,
+      ProductSuggestion,
+    ]),
+    PermissionsModule,
+  ],
+  controllers: [StatisticsController],
+  providers: [StatisticsService],
+})
+export class ReportsModule {}

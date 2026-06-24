@@ -6,9 +6,10 @@ import { WasteCategory } from '../entities/waste-category.entity';
 import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
 import { Offer } from '../entities/offer.entity';
-import { PricingTier } from '../enums/pricing-tier.enum';
+import { PricingTier, tierForRole } from '../enums/pricing-tier.enum';
 import { AssignedCategoryProvider } from '@src/waste-management/common/providers/assigned-category.provider';
-import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
+import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
+import { buildPagination, PaginationMeta } from '@src/waste-management/common/dto/pagination.dto';
 import {
   ByPriceQueryDto,
   CategoryQueryDto,
@@ -21,6 +22,22 @@ import {
 interface Caller {
   id: string;
   role: Role;
+}
+
+export interface CategoryListResult {
+  categories: Record<string, unknown>[];
+  pagination: PaginationMeta;
+}
+
+export interface ProductListResult {
+  category?: Record<string, unknown>;
+  products: Record<string, unknown>[];
+  pagination: PaginationMeta;
+}
+
+export interface OfferListResult {
+  offers: Record<string, unknown>[];
+  pagination: PaginationMeta;
 }
 
 /**
@@ -42,12 +59,30 @@ export class CatalogService {
     @InjectRepository(Offer)
     private readonly offerRepo: Repository<Offer>,
     private readonly assignedCategories: AssignedCategoryProvider,
+    private readonly cache: CatalogCacheService,
   ) {}
+
+  /**
+   * Cache scope: unrestricted roles (CITIZEN/ADMIN) share one cache entry ('all');
+   * restricted roles are cached per account because their assigned categories differ.
+   * Derived from role alone so a cache HIT needs no DB lookup.
+   */
+  private scopeFor(caller: Caller): string {
+    const restricted =
+      caller.role === Role.INSTITUTIONS ||
+      caller.role === Role.FACTORY ||
+      caller.role === Role.EXTERNAL_PARTNER;
+    return restricted ? `acc:${caller.id}` : 'all';
+  }
 
   // ---------------------------------------------------------------------------
   // Categories
   // ---------------------------------------------------------------------------
   async getCategories(caller: Caller, query: CategoryQueryDto) {
+    const cacheParts = `${this.scopeFor(caller)}:${query.page}:${query.limit}:${query.search ?? ''}:${query.sort}:${query.order}`;
+    const cached = await this.cache.get<CategoryListResult>('categories', cacheParts);
+    if (cached) return cached;
+
     const allowed = await this.assignedCategories.getAssignedCategoryIds(caller.id, caller.role);
 
     const qb = this.categoryRepo
@@ -73,10 +108,12 @@ export class CatalogService {
     const [rows, total] = await qb.getManyAndCount();
     const counts = await this.productCounts(rows.map((c) => c.id));
 
-    return {
+    const result = {
       categories: rows.map((c) => this.mapCategory(c, counts.get(c.id) ?? 0)),
       pagination: buildPagination(total, query.page, query.limit),
     };
+    await this.cache.set('categories', cacheParts, result);
+    return result;
   }
 
   // ---------------------------------------------------------------------------
@@ -85,16 +122,22 @@ export class CatalogService {
   async getProductsByCategory(caller: Caller, categoryId: string, query: ProductQueryDto) {
     await this.assertCategoryAllowed(caller, categoryId);
 
+    const cacheParts = `${this.scopeFor(caller)}:${categoryId}:${query.page}:${query.limit}:${query.sort}:${query.order}:${query.price_min ?? ''}:${query.price_max ?? ''}`;
+    const cached = await this.cache.get<ProductListResult>('products', cacheParts);
+    if (cached) return cached;
+
     const category = await this.categoryRepo.findOne({ where: { id: categoryId } });
     if (!category) throw new NotFoundException('Category not found');
 
     const { items, total } = await this.queryProducts(caller, query, { categoryId });
 
-    return {
+    const result = {
       category: this.mapCategory(category),
       products: items,
       pagination: buildPagination(total, query.page, query.limit),
     };
+    await this.cache.set('products', cacheParts, result);
+    return result;
   }
 
   // ---------------------------------------------------------------------------
@@ -151,6 +194,10 @@ export class CatalogService {
   // Offers
   // ---------------------------------------------------------------------------
   async getOffers(caller: Caller, query: OfferQueryDto) {
+    const cacheParts = `${this.scopeFor(caller)}:${query.page}:${query.limit}:${query.active_only}:${query.sort}`;
+    const cached = await this.cache.get<OfferListResult>('offers', cacheParts);
+    if (cached) return cached;
+
     const allowed = await this.assignedCategories.getAssignedCategoryIds(caller.id, caller.role);
     if (allowed && allowed.length === 0) {
       return this.emptyList('offers', query.page, query.limit);
@@ -167,10 +214,12 @@ export class CatalogService {
     qb.skip((query.page - 1) * query.limit).take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
-    return {
+    const result = {
       offers: rows.map((o) => this.mapOffer(o)),
       pagination: buildPagination(total, query.page, query.limit),
     };
+    await this.cache.set('offers', cacheParts, result);
+    return result;
   }
 
   async searchOffers(caller: Caller, query: OfferSearchQueryDto) {
@@ -241,7 +290,7 @@ export class CatalogService {
                  ${query.price_min != null ? 'AND pp.price >= :priceMin' : ''}
                  ${query.price_max != null ? 'AND pp.price <= :priceMax' : ''})`,
             {
-              priceTier: PricingTier.INDIVIDUAL,
+              priceTier: tierForRole(caller.role),
               priceMin: query.price_min,
               priceMax: query.price_max,
             },
@@ -268,8 +317,12 @@ export class CatalogService {
 
     // Price sort applied on the materialised page using the caller's own tier.
     if (query.sort === 'price') {
-      const tier = this.tier(caller.role);
-      const key = tier.toLowerCase() as 'individual' | 'company' | 'factory';
+      const tier = tierForRole(caller.role);
+      const key = tier.toLowerCase() as
+        | 'individual'
+        | 'company'
+        | 'factory'
+        | 'free_facility';
       items = items.sort((a, b) => {
         const pricingA = a.pricing as unknown as Record<string, number>;
         const pricingB = b.pricing as unknown as Record<string, number>;
@@ -357,13 +410,6 @@ export class CatalogService {
     return map;
   }
 
-  private tier(role: Role): PricingTier {
-    // Imported lazily to keep this method self-contained.
-    if (role === Role.INSTITUTIONS) return PricingTier.COMPANY;
-    if (role === Role.FACTORY || role === Role.EXTERNAL_PARTNER) return PricingTier.FACTORY;
-    return PricingTier.INDIVIDUAL;
-  }
-
   private mapCategory(c: WasteCategory, productCount?: number) {
     return {
       id: c.id,
@@ -396,6 +442,7 @@ export class CatalogService {
       individual: pick(PricingTier.INDIVIDUAL),
       company: pick(PricingTier.COMPANY),
       factory: pick(PricingTier.FACTORY),
+      free_facility: pick(PricingTier.FREE_FACILITY),
       currency: 'JOD',
     };
   }

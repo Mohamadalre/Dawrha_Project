@@ -41,7 +41,7 @@ cleanup cron in `src/maintenance`.
 | Individual      | `CITIZEN`                  | INDIVIDUAL   |
 | Company         | `INSTITUTIONS`             | COMPANY      |
 | Factory         | `FACTORY`                  | FACTORY      |
-| Free Facility   | `EXTERNAL_PARTNER`         | FACTORY      |
+| Free Facility   | `EXTERNAL_PARTNER`         | FREE_FACILITY |
 | Admin           | `ADMIN`                    | —            |
 
 Company / Factory / Free-Facility callers are **automatically restricted** to the

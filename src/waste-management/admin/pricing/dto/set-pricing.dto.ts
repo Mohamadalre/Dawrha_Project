@@ -17,6 +17,11 @@ export class SetPricingDto {
   @Min(0)
   factory: number;
 
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  free_facility: number;
+
   @IsOptional()
   @IsDateString()
   effective_from?: string;

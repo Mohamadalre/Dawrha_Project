@@ -9,6 +9,7 @@ import { RolePermission } from '@src/permission/entities/role-permission.entity'
 import { AuditService } from './providers/audit.service';
 import { AssignedCategoryProvider } from './providers/assigned-category.provider';
 import { PermissionSeederService } from './providers/permission-seeder.service';
+import { CatalogCacheService } from './providers/catalog-cache.service';
 
 /**
  * Domain kernel for the waste-management marketplace. Holds the cross-cutting
@@ -27,7 +28,7 @@ import { PermissionSeederService } from './providers/permission-seeder.service';
       RolePermission,
     ]),
   ],
-  providers: [AuditService, AssignedCategoryProvider, PermissionSeederService],
-  exports: [AuditService, AssignedCategoryProvider],
+  providers: [AuditService, AssignedCategoryProvider, PermissionSeederService, CatalogCacheService],
+  exports: [AuditService, AssignedCategoryProvider, CatalogCacheService],
 })
 export class WasteCommonModule {}

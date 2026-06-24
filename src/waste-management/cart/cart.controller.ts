@@ -64,4 +64,11 @@ export class CartController {
     const result = await this.cartService.addOffer(user, dto);
     return { message: 'Offer added to cart', result };
   }
+
+  /** Clears the entire cart (removes all items). */
+  @Delete()
+  @Permissions('cart.manage')
+  async clearCart(@CurrentUser() user) {
+    return this.cartService.clearCart(user);
+  }
 }

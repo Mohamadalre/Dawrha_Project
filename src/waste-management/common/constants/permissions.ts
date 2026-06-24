@@ -21,6 +21,7 @@ export const WASTE_PERMISSIONS = {
   'admin.pricing.manage': 'Set product pricing',
   'admin.warehouse.view': 'View warehouse data',
   'admin.warehouse.sync': 'Sync warehouse with Odoo',
+  'admin.reports.view': 'View reports and statistics',
 } as const;
 
 export type WastePermissionKey = keyof typeof WASTE_PERMISSIONS;
