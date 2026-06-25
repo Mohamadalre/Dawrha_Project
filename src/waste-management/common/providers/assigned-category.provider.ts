@@ -9,10 +9,10 @@ import { ExternalPartnerWasteCategory } from '@src/waste-management/entities/ext
 /**
  * Resolves which waste-category IDs are assigned to a given account.
  *
- * Companies (INSTITUTIONS), factories (FACTORY) and free facilities
- * (EXTERNAL_PARTNER) only ever see categories/products/offers that were selected
- * for them during registration. Individuals (CITIZEN) and admins are not
- * restricted — callers should treat a `null` result as "no restriction".
+ * Only companies (INSTITUTIONS) are restricted to the categories selected for
+ * them during registration. Everyone else — individuals (CITIZEN), factories
+ * (FACTORY), free facilities (EXTERNAL_PARTNER) and admins — sees the full
+ * catalogue. Callers treat a `null` result as "no restriction".
  */
 @Injectable()
 export class AssignedCategoryProvider {
@@ -48,32 +48,9 @@ export class AssignedCategoryProvider {
           .getRawMany();
         break;
 
-      case Role.FACTORY:
-        rows = await this.factoryRepo
-          .createQueryBuilder('fwc')
-          .innerJoin('fwc.factoryMaterial', 'material')
-          .innerJoin('material.factoryProfile', 'profile')
-          .innerJoin('profile.account', 'account')
-          .innerJoin('fwc.wasteType', 'category')
-          .where('account.id = :accountId', { accountId })
-          .select('DISTINCT category.id', 'id')
-          .getRawMany();
-        break;
-
-      case Role.EXTERNAL_PARTNER:
-        rows = await this.partnerRepo
-          .createQueryBuilder('epwc')
-          .innerJoin('epwc.externalPartnerMaterial', 'material')
-          .innerJoin('material.externalPartnerProfile', 'profile')
-          .innerJoin('profile.account', 'account')
-          .innerJoin('epwc.wasteType', 'category')
-          .where('account.id = :accountId', { accountId })
-          .select('DISTINCT category.id', 'id')
-          .getRawMany();
-        break;
-
       default:
-        return null; // CITIZEN / ADMIN — no category restriction
+        // CITIZEN / FACTORY / EXTERNAL_PARTNER / ADMIN — no category restriction.
+        return null;
     }
 
     return rows.map((r) => r.id).filter(Boolean);

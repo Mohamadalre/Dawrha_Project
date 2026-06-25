@@ -9,6 +9,7 @@ import { Province } from './entities/location/province.entity';
 import { InstitutionProfile } from './entities/profile/institution-profile.entity';
 import { ExternalPartnerProfile } from './entities/profile/external-partner-profile.entity';
 import { UserService } from './user.service';
+import { UserController } from './user.controller';
 import { Location } from './entities/location/location.entity';
 import { ProfileResolver } from './providers/profile-resolver.privder';
 
@@ -25,6 +26,7 @@ import { ProfileResolver } from './providers/profile-resolver.privder';
       ExternalPartnerProfile,
     ]),
   ],
+  controllers: [UserController],
   providers: [UserService,ProfileResolver],
   exports: [UserService,ProfileResolver],
 })

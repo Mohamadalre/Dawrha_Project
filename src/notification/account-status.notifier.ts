@@ -60,6 +60,26 @@ export class AccountStatusNotifier {
     await this.send(accountId, title, body, { event: status, reason: description ?? null });
   }
 
+  /** Fired when an admin blocks an account. */
+  async notifyBlocked(accountId: string, reason?: string): Promise<void> {
+    await this.send(
+      accountId,
+      'تم حظر حسابك',
+      reason ? `تم حظر حسابك. السبب: ${reason}` : 'تم حظر حسابك. يرجى التواصل مع الدعم.',
+      { event: AccountStatus.BLOCKED, reason: reason ?? null },
+    );
+  }
+
+  /** Fired when an admin lifts a block. */
+  async notifyUnblocked(accountId: string): Promise<void> {
+    await this.send(
+      accountId,
+      'تم رفع الحظر عن حسابك',
+      'تمت إعادة تفعيل حسابك ويمكنك الآن استخدام المنصّة.',
+      { event: 'UNBLOCKED' },
+    );
+  }
+
   private async send(
     userId: string,
     title: string,

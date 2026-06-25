@@ -12,8 +12,11 @@ const logger = new Logger('Queue');
         useFactory:(configService:ConfigService)=>({
          connection:{
           host: configService.get<string>('REDIS_HOST'),
-          port: configService.get<number>('REDIS_PORT'),
-          password: configService.get<string>('REDIS_PASSWORD'),
+          port: Number(configService.get('REDIS_PORT')) || 6379,
+          password: configService.get<string>('REDIS_PASSWORD') || undefined,
+          // BullMQ REQUIRES this: workers issue blocking commands (BRPOPLPUSH),
+          // and the default retry budget tears the socket down → ECONNRESET loop.
+          maxRetriesPerRequest: null,
           retryStrategy: (times) => {
             const delay = Math.min(times * 50, 2000);
             logger.warn(`Queue Redis retry attempt ${times}, waiting ${delay}ms`);

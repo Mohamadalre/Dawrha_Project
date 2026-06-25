@@ -6,8 +6,13 @@
     "deleteOutDir": true,
     "tsConfigPath": "tsconfig.build.json",
     "assets": [
-      { 
+      {
         "include":"./core/mail/templates",
+        "outDir": "dist/src",
+        "watchAssets": true
+        },
+      {
+        "include": "./i18n/**/*.json",
         "outDir": "dist/src",
         "watchAssets": true
         }

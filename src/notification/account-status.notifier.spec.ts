@@ -41,6 +41,15 @@ describe('AccountStatusNotifier', () => {
     expect(notifications.createNotification).not.toHaveBeenCalled();
   });
 
+  it('notifies on block (with reason) and on unblock', async () => {
+    await notifier.notifyBlocked('acc1', 'مخالفة الشروط');
+    expect(notifications.createNotification.mock.calls[0][0].title).toBe('تم حظر حسابك');
+    expect(notifications.createNotification.mock.calls[0][0].body).toContain('مخالفة الشروط');
+
+    await notifier.notifyUnblocked('acc1');
+    expect(notifications.createNotification.mock.calls[1][0].title).toBe('تم رفع الحظر عن حسابك');
+  });
+
   it('is fail-safe: a notification error does not throw', async () => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     notifications.createNotification.mockRejectedValueOnce(new Error('down'));

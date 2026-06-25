@@ -84,7 +84,7 @@ export class AdminCatalogService {
 
     return {
       category_id: category.id,
-      message: 'تم إضافة التصنيف بنجاح',
+      message: 'Category created successfully',
       odoo_status: 'PENDING_SYNC',
     };
   }
@@ -113,7 +113,7 @@ export class AdminCatalogService {
 
     await this.cache.invalidate('categories', 'products');
 
-    return { category_id: id, odoo_status: 'PENDING_SYNC', message: 'تم تحديث التصنيف بنجاح' };
+    return { category_id: id, odoo_status: 'PENDING_SYNC', message: 'Category updated successfully' };
   }
 
   async deleteCategory(adminId: string, id: string) {
@@ -139,7 +139,7 @@ export class AdminCatalogService {
 
     await this.cache.invalidate('categories', 'products');
 
-    return { message: 'تم حذف التصنيف بنجاح' };
+    return { message: 'Category deleted successfully' };
   }
 
   // --- Products -------------------------------------------------------------
@@ -240,7 +240,7 @@ export class AdminCatalogService {
 
     await this.cache.invalidate('products', 'categories');
 
-    return { message: 'تم حذف المنتج بنجاح' };
+    return { message: 'Product deleted successfully' };
   }
 
   // --- helpers --------------------------------------------------------------

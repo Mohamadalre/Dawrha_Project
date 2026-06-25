@@ -84,7 +84,7 @@ export class PricingService {
       },
       effective_from: effectiveFrom,
       updated_cart_items: updatedCarts,
-      message: 'تم تحديث الأسعار بنجاح',
+      message: 'Pricing updated successfully',
     };
   }
 

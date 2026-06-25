@@ -66,7 +66,7 @@ export class WarehouseAdminService {
       imported: odooWarehouses.length,
       created,
       updated,
-      message: 'تمت مزامنة المستودعات من Odoo',
+      message: 'Warehouses imported from Odoo',
     };
   }
 
@@ -184,7 +184,7 @@ export class WarehouseAdminService {
       warehouse_id: warehouseId,
       sync_job_id: jobId,
       status: 'QUEUED',
-      message: 'جاري المزامنة مع نظام Odoo',
+      message: 'Warehouse sync started',
     };
   }
 

@@ -12,8 +12,10 @@ export const WASTE_PERMISSIONS = {
   'waste.products.view': 'View products',
   'waste.products.suggest': 'Suggest new products',
   'waste.offers.view': 'View offers',
+  'waste.categories.request': 'Request additional assigned categories',
   'cart.view': 'View cart',
   'cart.manage': 'Manage cart (add, update, remove)',
+  'admin.categories.request.manage': 'Review category-add requests',
   'admin.waste.manage': 'Full waste management',
   'admin.waste.create': 'Create categories/products',
   'admin.waste.update': 'Update categories/products',
@@ -36,6 +38,9 @@ const BUYER_PERMISSIONS: WastePermissionKey[] = [
   'cart.manage',
 ];
 
+/** Extra permission only institutions hold (they alone are category-restricted). */
+const INSTITUTION_EXTRA: WastePermissionKey[] = ['waste.categories.request'];
+
 const ADMIN_PERMISSIONS = Object.keys(WASTE_PERMISSIONS) as WastePermissionKey[];
 
 /**
@@ -46,7 +51,7 @@ const ADMIN_PERMISSIONS = Object.keys(WASTE_PERMISSIONS) as WastePermissionKey[]
  */
 export const ROLE_PERMISSIONS_MAP: Partial<Record<Role, WastePermissionKey[]>> = {
   [Role.CITIZEN]: BUYER_PERMISSIONS,
-  [Role.INSTITUTIONS]: BUYER_PERMISSIONS,
+  [Role.INSTITUTIONS]: [...BUYER_PERMISSIONS, ...INSTITUTION_EXTRA],
   [Role.FACTORY]: BUYER_PERMISSIONS,
   [Role.EXTERNAL_PARTNER]: BUYER_PERMISSIONS,
   [Role.ADMIN]: ADMIN_PERMISSIONS,

@@ -75,7 +75,7 @@ export class AdminCatalogController {
   @Permissions('admin.waste.create')
   async createProduct(@CurrentUser() user, @Body() dto: CreateProductDto) {
     const result = await this.adminCatalog.createProduct(user.id, dto);
-    return { message: 'تم إضافة المنتج بنجاح', result };
+    return { message: 'Product created successfully', result };
   }
 
   @Put('products/:productId')
@@ -86,7 +86,7 @@ export class AdminCatalogController {
     @Body() dto: UpdateProductDto,
   ) {
     const result = await this.adminCatalog.updateProduct(user.id, productId, dto);
-    return { message: 'تم تحديث المنتج بنجاح', result };
+    return { message: 'Product updated successfully', result };
   }
 
   @Delete('products/:productId')

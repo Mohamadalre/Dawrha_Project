@@ -58,7 +58,7 @@ export class SuggestionsService {
       suggestion_id: suggestion.id,
       status: suggestion.status,
       created_at: suggestion.createdAt,
-      message: 'تم إرسال الاقتراح بنجاح',
+      message: 'Suggestion submitted successfully',
     };
   }
 

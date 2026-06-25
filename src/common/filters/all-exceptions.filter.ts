@@ -6,6 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { I18nContext } from 'nestjs-i18n';
 
 /**
  * Global exception filter for handling all unhandled exceptions
@@ -59,13 +60,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = exception.message;
     }
 
-    // Send standardized error response
+    // Send standardized error response (message translated to the request language)
     response.status(statusCode).json({
       success: false,
-      message,
+      message: this.translate(message),
       data: '',
       statusCode,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  /** Translates an error message via i18n; falls back to the original literal. */
+  private translate(message: string): string {
+    const i18n = I18nContext.current();
+    if (!i18n || typeof message !== 'string') return message;
+    const key = `translation.${message}`;
+    const t = i18n.t(key);
+    return typeof t === 'string' && t !== key ? t : message;
   }
 }

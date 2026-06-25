@@ -68,11 +68,9 @@ export class CatalogService {
    * Derived from role alone so a cache HIT needs no DB lookup.
    */
   private scopeFor(caller: Caller): string {
-    const restricted =
-      caller.role === Role.INSTITUTIONS ||
-      caller.role === Role.FACTORY ||
-      caller.role === Role.EXTERNAL_PARTNER;
-    return restricted ? `acc:${caller.id}` : 'all';
+    // Only INSTITUTIONS are scoped to their assigned categories; everyone else
+    // (citizen / factory / free-facility / admin) shares the full-catalogue cache.
+    return caller.role === Role.INSTITUTIONS ? `acc:${caller.id}` : 'all';
   }
 
   // ---------------------------------------------------------------------------

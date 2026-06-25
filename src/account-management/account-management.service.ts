@@ -181,6 +181,7 @@ export class AccountManagementService {
         accountStatus: AccountStatus.BLOCKED,
         ...(dto.description !== undefined && { description: dto.description }),
       });
+      await this.statusNotifier.notifyBlocked(account.id, dto.description);
       return { message: 'Account blocked successfully' };
     }
 
@@ -189,6 +190,7 @@ export class AccountManagementService {
         accountStatus: AccountStatus.ACTIVE,
         ...(dto.description !== undefined && { description: dto.description }),
       });
+      await this.statusNotifier.notifyUnblocked(account.id);
       return { message: 'Account unblocked successfully' };
     }
 

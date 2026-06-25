@@ -11,6 +11,6 @@ import { PermissionCacheProvider } from './permission-cache.provider';
   imports: [TypeOrmModule.forFeature([Permission, RolePermission])],
   controllers: [],
   providers: [PermissionsService, PermissionsGuard,PermissionCacheProvider],
-  exports: [PermissionsService, PermissionsGuard]
+  exports: [PermissionsService, PermissionsGuard, PermissionCacheProvider]
 })
 export class PermissionsModule { }
