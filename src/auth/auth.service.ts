@@ -144,16 +144,18 @@ export class AuthService {
    */
   async verifyOtpCode({ otpCode, deviceId, deviceType, fcmToken }: VerifyOtpDto, userId: string, jti: string) {
 
-    const account = await this.userService.findById(userId);
+    let account = await this.userService.findById(userId);
     const existVerify = await this.mailService.verifyOtp(account.email, otpCode)
     if (!existVerify) {
       throw new BadRequestException('The verification code is incorrect or expired')
     }
 
-    await this.userService.update(userId, { isEmailVerified: true, accountStatus: account.role == Role.CITIZEN ? AccountStatus.ACTIVE : AccountStatus.PENDING_PROFILE })
-    const { accessToken, refreshToken } = await this.generateTokens(account.id, account.role, account.accountStatus, deviceId, deviceType, fcmToken);
+    await this.accountRepository.update(userId, { isEmailVerified: true, accountStatus: account.role == Role.CITIZEN ? AccountStatus.ACTIVE : AccountStatus.PENDING_PROFILE })
+    const updatedAccount= await this.accountRepository.save(account)
+    const handler = this.handlers[updatedAccount.accountStatus];
+    const details = await handler.handle(updatedAccount, { deviceId, fcmToken, deviceType });
     await this.redisService.setRedisKey({ redisKey: `blackListTokenTemp:${userId}`, redisValue: jti, date: 1200 });
-    return { accessToken, refreshToken, role: account.role };
+    return  {details: details, role: account.role}
   }
 
 
