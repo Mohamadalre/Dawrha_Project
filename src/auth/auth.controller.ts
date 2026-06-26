@@ -1,4 +1,5 @@
 import { Controller, Post, Body, UseGuards, HttpCode, Put, Req, Patch } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { DeviceDto, RefreshTokenDto, RefreshTokenTemporaryDto } from './dto/auth.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -17,6 +18,9 @@ import { VerifyResetOtpDto } from './dto/verifyReset-otp.dto';
 
 
 
+// Auth is a brute-force / enumeration target: cap every auth route at 10/min per
+// IP, and tighten the login routes to 5/min individually below.
+@Throttle({ default: { limit: 10, ttl: 60_000 } })
 @Controller({
   path: 'auth',
   version: '1'
@@ -103,6 +107,7 @@ export class AuthController {
    * @param loginDto body payload containing email and password
    * @returns JWT tokens if credentials and role match
    */
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('login/admin')
   @HttpCode(200)
   async loginAdmin(@Body() loginDto: LoginDto) {
@@ -115,6 +120,7 @@ export class AuthController {
    * @param loginDto body payload containing email and password
    * @returns JWT tokens if credentials and type-app match
    */
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('login/user-app')
   @HttpCode(200)
   async loginUser(@Body() loginDto: LoginDto) {
@@ -127,6 +133,7 @@ export class AuthController {
    * @param loginDto body payload containing email and password
    * @returns JWT tokens if credentials and type-app match
    */
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('login/collector-app')
   @HttpCode(200)
   async loginCollector(@Body() loginDto: LoginDto) {
@@ -141,6 +148,7 @@ export class AuthController {
    * @param loginDto body payload containing email and password
    * @returns JWT tokens if credentials and type-app match
    */
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('login/factory-app')
   @HttpCode(200)
   async loginFactory(@Body() loginDto: LoginDto) {
@@ -159,7 +167,7 @@ export class AuthController {
   @Post('login/user-app/google')
   @HttpCode(200)
   async loginUserGoogle(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'user-app')
+    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'user_app')
     return { message: 'Login with Google successful', result: tokens };
   }
 
@@ -171,14 +179,14 @@ export class AuthController {
   @Post('login/collector-app/google')
   @HttpCode(200)
   async LoginCollectorGoogle(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'collector-app')
+    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'collector_app')
     return { message: 'Login with Google successful', result: tokens };
   }
 
   @Post('login/factory-app/google')
   @HttpCode(200)
   async LoginFactoryGoogle(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'factory-app')
+    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'factory_app')
     return { message: 'Login with Google successful', result: tokens };
   }
 

@@ -7,6 +7,7 @@ import { NotificationController } from './notification.controller';
 import { NotificationListener } from './listeners/notification.listener';
 import { NotificationProcessor } from './processors/notification.processor';
 import { NotificationService } from './notification.service';
+import { AccountStatusNotifier } from './account-status.notifier';
 import { FirebaseService } from './services/firebase.service';
 import { Notification } from './entities/notification.entity';
 import { UserDevice } from '@src/auth/entities/user-device.entity';
@@ -25,6 +26,7 @@ import * as admin from 'firebase-admin';
   controllers: [NotificationController],
   providers: [
     NotificationService,
+    AccountStatusNotifier,
     FirebaseService,
     NotificationListener,
     NotificationProcessor,
@@ -48,6 +50,6 @@ import * as admin from 'firebase-admin';
       },
     },
   ],
-  exports: [NotificationService],
+  exports: [NotificationService, AccountStatusNotifier],
 })
 export class NotificationModule {}

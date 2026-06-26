@@ -4,6 +4,7 @@ import { Media } from '@src/media/entities/media.entity';
 import { Account } from '@src/user/entities/account.entity';
 import { UserModule } from '@src/user/user.module';
 import { AuthModule } from '@src/auth/auth.module';
+import { NotificationModule } from '@src/notification/notification.module';
 import { AccountManagementController } from './account-management.controller';
 import { AccountManagementService } from './account-management.service';
 import { ProfileDataProvider } from './providers/profile-data.provider';
@@ -13,6 +14,7 @@ import { ProfileDataProvider } from './providers/profile-data.provider';
     TypeOrmModule.forFeature([Media, Account]),
     UserModule,
     AuthModule,
+    NotificationModule,
   ],
   controllers: [AccountManagementController],
   providers: [AccountManagementService, ProfileDataProvider],

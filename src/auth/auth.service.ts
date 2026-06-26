@@ -10,7 +10,11 @@ import { UserDevice } from './entities/user-device.entity';
 import { DeviceDto, RefreshTokenDto, RefreshTokenTemporaryDto } from './dto/auth.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/forgot-password.dto'
 import { RegisterDto } from './dto/register.dto'
-import { MailService } from '../core/mail/mail.service';
+import {
+  MailService,
+  OTP_COOLDOWN_SECONDS,
+  OTP_MAX_DAILY_RESENDS,
+} from '../core/mail/mail.service';
 import { LoginDto } from './dto/login.dto'
 import { Role } from '@src/user/enums/role.enum';
 import { Account } from '@src/user/entities/account.entity';
@@ -32,6 +36,9 @@ import { InactiveHandler } from './handlers/inactive.handler';
 import { NeedChangeHandler } from './handlers/needChange.handler';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 import { VerifyResetOtpDto } from './dto/verifyReset-otp.dto';
+import { AllowedAccountType } from './AllowedAccountType';
+
+
 
 
 
@@ -40,12 +47,7 @@ import { VerifyResetOtpDto } from './dto/verifyReset-otp.dto';
 export class AuthService {
 
   private handlers: Record<AccountStatus, LoginHandler>;
-  private AllowedAccountType: Record<string, string[]> = {
-    user_app: ['CITIZEN', 'INSTITUTIONS'],
-    collector_app: ['COLLECTOR'],
-    factory_app: ['FACTORY', 'EXTERNAL_PARTNER'],
-    admin: ['ADMIN']
-  }
+
   constructor(
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
@@ -118,7 +120,7 @@ export class AuthService {
    */
   async login({ email, password, deviceId, fcmToken, deviceType, rememberMy }: LoginDto, role: string) {
     const account = await this.accountRepository.findOne({ where: { email: email } });
-    const allowed = this.AllowedAccountType[role];
+    const allowed = AllowedAccountType[role];
     if (!account) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -133,7 +135,7 @@ export class AuthService {
 
     const handler = this.handlers[account.accountStatus];
     const details = await handler.handle(account, { deviceId, fcmToken, deviceType, rememberMy });
-    return  {details: details, role: account.role}
+    return { details: details, role: account.role }
   }
 
   /**
@@ -150,12 +152,17 @@ export class AuthService {
       throw new BadRequestException('The verification code is incorrect or expired')
     }
 
-    await this.accountRepository.update(userId, { isEmailVerified: true, accountStatus: account.role == Role.CITIZEN ? AccountStatus.ACTIVE : AccountStatus.PENDING_PROFILE })
-    const updatedAccount= await this.accountRepository.save(account)
+    await this.userService.update(userId, {
+      isEmailVerified: true,
+      accountStatus: account.role == Role.CITIZEN ? AccountStatus.ACTIVE : AccountStatus.PENDING_PROFILE
+    })
+
+    const updatedAccount = await this.userService.findById(userId);
     const handler = this.handlers[updatedAccount.accountStatus];
     const details = await handler.handle(updatedAccount, { deviceId, fcmToken, deviceType });
     await this.redisService.setRedisKey({ redisKey: `blackListTokenTemp:${userId}`, redisValue: jti, date: 1200 });
-    return  {details: details, role: account.role}
+    return { details: details, role: account.role };
+
   }
 
 
@@ -169,9 +176,7 @@ export class AuthService {
     const cooldownKey = `otp:cooldown:${account.email}`;
     const ttl = await this.redis.ttl(cooldownKey);
 
-
     if (ttl > 0) {
-
       throw new HttpException({
         statusCode: HttpStatus.TOO_MANY_REQUESTS,
         message: 'Please wait before requesting again',
@@ -179,10 +184,21 @@ export class AuthService {
       }, HttpStatus.TOO_MANY_REQUESTS);
     }
 
+    // Cap the number of resends per email per day (anti email-bombing).
+    const dailyKey = `otp:resend:count:${account.email}`;
+    const count = await this.redis.incr(dailyKey);
+    if (count === 1) await this.redis.expire(dailyKey, 86400);
+    if (count > OTP_MAX_DAILY_RESENDS) {
+      throw new HttpException({
+        statusCode: HttpStatus.TOO_MANY_REQUESTS,
+        message: 'Daily resend limit reached. Please try again later.',
+      }, HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    // generateAndSendOtp owns the cooldown — single source of truth.
     await this.mailService.generateAndSendOtp(account.email);
-    await this.redis.set(cooldownKey, 'locked', 'EX', 120);
     return {
-      cooldownSeconds: 120
+      cooldownSeconds: OTP_COOLDOWN_SECONDS
     };
   }
 
@@ -454,18 +470,19 @@ export class AuthService {
    */
   async loginWithGoogle({ TokenId, deviceId, deviceType, fcmToken, rememberMy }: LoginGoogleDto, role: string) {
     const { email, googleId, } = await verifyGoogleToken(TokenId);
-    const allowed = this.AllowedAccountType[role];
-    let account = await this.accountRepository.findOne({
+    const allowed = AllowedAccountType[role];
+    const account = await this.accountRepository.findOne({
       where: { email: email },
     });
 
 
-    if (!allowed || !allowed.includes(account.role)) {
-      throw new UnauthorizedException('This account is not authorized for this application')
-    }
-
     if (!account) {
       throw new NotFoundException('Account not found. Please register first.');
+    }
+
+
+    if (!allowed || !allowed.includes(account.role)) {
+      throw new UnauthorizedException('This account is not authorized for this application')
     }
 
     if (!account.googleId) {
@@ -475,14 +492,15 @@ export class AuthService {
     }
 
     const handler = this.handlers[account.accountStatus];
-    return { details: handler.handle(account, { deviceId, fcmToken, deviceType, rememberMy }), role: account.role }
+    const details = await handler.handle(account, { deviceId, fcmToken, deviceType, rememberMy });
+    return { details: details, role: account.role }
   }
 
 
   async registerWithGoogle({ TokenId, deviceId, deviceType, fcmToken }: LoginGoogleDto, role: Role) {
     const { name, email, googleId, picture } = await verifyGoogleToken(TokenId);
 
-    let account = await this.accountRepository.findOne({
+    const account = await this.accountRepository.findOne({
       where: { email: email },
     });
 
@@ -490,11 +508,9 @@ export class AuthService {
     if (account) {
       throw new BadRequestException('The email already exists. Please login instead.');
     }
-    if (account.role !== role) {
-      throw new UnauthorizedException('This account is not authorized for this api')
-    }
 
-    account = this.accountRepository.create({
+
+    const accountCreated = this.accountRepository.create({
       name: name,
       email: email,
       role,
@@ -506,12 +522,12 @@ export class AuthService {
         role === Role.CITIZEN || role === Role.ADMIN ? AccountStatus.ACTIVE : AccountStatus.PENDING_PROFILE
     });
 
-    await this.accountRepository.save(account);
+    await this.accountRepository.save(accountCreated);
 
 
-
-    const handler = this.handlers[account.accountStatus];
-    return { details: handler.handle(account, { deviceId, fcmToken, deviceType }), role: account.role }
+    const handler = this.handlers[accountCreated.accountStatus];
+    const details = await handler.handle(accountCreated, { deviceId, fcmToken, deviceType });
+    return { details: details, role: accountCreated.role }
   }
 
 
@@ -531,8 +547,8 @@ export class AuthService {
     }
     await this.userDeviceRepository.update({ accountId: userId, deviceId }, { fcmToken, deviceType });
 
-    
-    return {message:'FCM token updated successfully.'}
+
+    return { message: 'FCM token updated successfully.' }
   }
 
 

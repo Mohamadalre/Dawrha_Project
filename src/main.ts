@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/restrict-template-expressions */
 import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
 import * as dotenv from 'dotenv';
@@ -12,6 +11,8 @@ import { winstonConfig, winstonLogger } from './core/logger-config/winston.confi
 import { LoggerExceptionsFilter } from './common/filters/logger-exception.filter';
 
 import { NestExpressApplication } from '@nestjs/platform-express';
+
+
 
 /**
  * Main application bootstrap function
@@ -76,6 +77,7 @@ async function bootstrap() {
 
     logger.log(`Server is running on port ${port}`, 'SYSTEM');
 
+
   } catch (error: any) {
     // Log critical system errors and exit process
     logger.error(`Critical System Failure : ${error.message}`, error.stack, 'SYSTEM');
@@ -87,6 +89,7 @@ async function bootstrap() {
 
 bootstrap();
 
+
 process.on('uncaughtException', (err: Error) => {
   winstonLogger.error(`Uncaught Exception: ${err.message}`, {
     context: 'SYSTEM',
@@ -96,7 +99,7 @@ process.on('uncaughtException', (err: Error) => {
   process.exit(1);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason:any, promise:any) => {
   winstonLogger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`, {
     context: 'SYSTEM',
     channel: 'exceptions',

@@ -1,0 +1,122 @@
+import { MigrationInterface, QueryRunner } from "typeorm";
+
+export class CategoryRequestsMigration1782347798779 implements MigrationInterface {
+    name = 'CategoryRequestsMigration1782347798779'
+
+    public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`CREATE TYPE "public"."product_pricing_tier_enum" AS ENUM('INDIVIDUAL', 'COMPANY', 'FACTORY', 'FREE_FACILITY')`);
+        await queryRunner.query(`CREATE TABLE "product_pricing" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "product_id" uuid NOT NULL, "tier" "public"."product_pricing_tier_enum" NOT NULL, "price" numeric(12,3) NOT NULL, "currency" character varying NOT NULL DEFAULT 'JOD', "effective_from" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "effective_until" TIMESTAMP WITH TIME ZONE, "created_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_96a4a861354899893dcf7c8d313" PRIMARY KEY ("id"))`);
+        await queryRunner.query(`CREATE INDEX "IDX_d45b0c01802c065a35ac11dcc7" ON "product_pricing" ("product_id", "tier") `);
+        await queryRunner.query(`CREATE TABLE "offers" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "product_id" uuid NOT NULL, "offer_price" numeric(12,3) NOT NULL, "discount_percentage" numeric(5,2) NOT NULL DEFAULT '0', "description" text, "valid_from" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "valid_until" TIMESTAMP WITH TIME ZONE, "is_active" boolean NOT NULL DEFAULT true, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_4c88e956195bba85977da21b8f4" PRIMARY KEY ("id"))`);
+        await queryRunner.query(`CREATE INDEX "IDX_07d9a626265f252fc5c743c42b" ON "offers" ("product_id") `);
+        await queryRunner.query(`CREATE TYPE "public"."products_unit_type_enum" AS ENUM('PIECE', 'KG')`);
+        await queryRunner.query(`CREATE TYPE "public"."products_odoo_sync_status_enum" AS ENUM('PENDING', 'SYNCED', 'FAILED')`);
+        await queryRunner.query(`CREATE TABLE "products" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "name" character varying NOT NULL, "description" text, "category_id" uuid NOT NULL, "image_url" character varying, "unit_type" "public"."products_unit_type_enum" NOT NULL DEFAULT 'PIECE', "is_active" boolean NOT NULL DEFAULT true, "odoo_product_id" integer, "odoo_sync_status" "public"."products_odoo_sync_status_enum" NOT NULL DEFAULT 'PENDING', "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_0806c755e0aca124e67c0cf6d7d" PRIMARY KEY ("id"))`);
+        await queryRunner.query(`CREATE INDEX "IDX_9a5f6868c96e0069e699f33e12" ON "products" ("category_id") `);
+        await queryRunner.query(`CREATE TYPE "public"."product_suggestions_unit_type_enum" AS ENUM('PIECE', 'KG')`);
+        await queryRunner.query(`CREATE TYPE "public"."product_suggestions_status_enum" AS ENUM('PENDING_REVIEW', 'APPROVED', 'REJECTED')`);
+        await queryRunner.query(`CREATE TABLE "product_suggestions" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "account_id" uuid NOT NULL, "product_name" character varying NOT NULL, "description" text, "category_id" uuid, "unit_type" "public"."product_suggestions_unit_type_enum" NOT NULL, "estimated_price" numeric(12,3), "image_url" character varying, "status" "public"."product_suggestions_status_enum" NOT NULL DEFAULT 'PENDING_REVIEW', "admin_notes" text, "reviewed_at" TIMESTAMP WITH TIME ZONE, "reviewed_by" uuid, "created_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_82d7b93590707649258cee10b26" PRIMARY KEY ("id"))`);
+        await queryRunner.query(`CREATE INDEX "IDX_6ce0723951137293df5e7c737e" ON "product_suggestions" ("account_id") `);
+        await queryRunner.query(`CREATE INDEX "IDX_171ecfa116bf322640af5a09c0" ON "product_suggestions" ("status") `);
+        await queryRunner.query(`CREATE TYPE "public"."cart_items_unit_type_enum" AS ENUM('PIECE', 'KG')`);
+        await queryRunner.query(`CREATE TABLE "cart_items" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "cart_id" uuid NOT NULL, "product_id" uuid NOT NULL, "offer_id" uuid, "quantity" numeric(12,3) NOT NULL, "unit_type" "public"."cart_items_unit_type_enum" NOT NULL, "unit_price" numeric(12,3) NOT NULL, "subtotal" numeric(12,3) NOT NULL, "is_offer" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_6fccf5ec03c172d27a28a82928b" PRIMARY KEY ("id"))`);
+        await queryRunner.query(`CREATE TABLE "carts" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "account_id" uuid NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_b5f695a59f5ebb50af3c8160816" PRIMARY KEY ("id"))`);
+        await queryRunner.query(`CREATE INDEX "IDX_e0f5c205a0bf214c883893bdca" ON "carts" ("account_id") `);
+        await queryRunner.query(`CREATE TABLE "audit_logs" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "user_id" uuid, "action" character varying NOT NULL, "entity_type" character varying NOT NULL, "entity_id" uuid, "old_values" jsonb, "new_values" jsonb, "created_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_1bb179d048bbc581caa3b013439" PRIMARY KEY ("id"))`);
+        await queryRunner.query(`CREATE INDEX "IDX_bd2726fd31b35443f2245b93ba" ON "audit_logs" ("user_id") `);
+        await queryRunner.query(`CREATE INDEX "IDX_ea9ba3dfb39050f831ee3be40d" ON "audit_logs" ("entity_type") `);
+        await queryRunner.query(`CREATE TYPE "public"."category_requests_role_enum" AS ENUM('CITIZEN', 'INSTITUTIONS', 'COLLECTOR', 'FACTORY', 'EXTERNAL_PARTNER', 'ADMIN')`);
+        await queryRunner.query(`CREATE TYPE "public"."category_requests_status_enum" AS ENUM('PENDING', 'APPROVED', 'REJECTED')`);
+        await queryRunner.query(`CREATE TABLE "category_requests" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "account_id" uuid NOT NULL, "role" "public"."category_requests_role_enum" NOT NULL, "category_ids" uuid array NOT NULL, "status" "public"."category_requests_status_enum" NOT NULL DEFAULT 'PENDING', "admin_reason" text, "reviewed_at" TIMESTAMP WITH TIME ZONE, "reviewed_by" uuid, "created_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_8761db16bbed36ed12b5c63aeb1" PRIMARY KEY ("id"))`);
+        await queryRunner.query(`CREATE INDEX "IDX_909aed95a4d48de40c87536545" ON "category_requests" ("account_id") `);
+        await queryRunner.query(`CREATE INDEX "IDX_14cd6310accd537b624de68224" ON "category_requests" ("status") `);
+        await queryRunner.query(`CREATE TABLE "warehouse_inventory" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "warehouse_id" uuid NOT NULL, "odoo_product_id" integer, "product_name" character varying, "quantity" numeric(14,3) NOT NULL DEFAULT '0', "reserved_quantity" numeric(14,3) NOT NULL DEFAULT '0', "reorder_level" integer NOT NULL DEFAULT '0', "synced_at" TIMESTAMP WITH TIME ZONE, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "UQ_9c98ad33a2e6e3d2bfb9cb8c07c" UNIQUE ("warehouse_id", "odoo_product_id"), CONSTRAINT "PK_68eed43c66d3da3931f9a10354c" PRIMARY KEY ("id"))`);
+        await queryRunner.query(`CREATE INDEX "IDX_1463feee3049bd06551f0eca19" ON "warehouse_inventory" ("warehouse_id") `);
+        await queryRunner.query(`CREATE TYPE "public"."truck_location_logs_reason_enum" AS ENUM('MANUAL_STOP', 'DRIVER_DISCONNECT', 'INACTIVITY')`);
+        await queryRunner.query(`CREATE TABLE "truck_location_logs" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "truck_id" uuid NOT NULL, "lat" numeric(10,7) NOT NULL, "lng" numeric(10,7) NOT NULL, "speed" numeric(6,2), "heading" numeric(5,2), "driver_id" uuid, "reason" "public"."truck_location_logs_reason_enum" NOT NULL, "recorded_at" TIMESTAMP WITH TIME ZONE NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_5cf58c1e9d8befed44b3a09aa03" PRIMARY KEY ("id"))`);
+        await queryRunner.query(`CREATE INDEX "IDX_2805045ac0ade973b30a01e6cd" ON "truck_location_logs" ("truck_id") `);
+        await queryRunner.query(`ALTER TABLE "waste_categories" ADD "description" text`);
+        await queryRunner.query(`ALTER TABLE "waste_categories" ADD "is_active" boolean NOT NULL DEFAULT true`);
+        await queryRunner.query(`ALTER TABLE "waste_categories" ADD "odoo_category_id" integer`);
+        await queryRunner.query(`CREATE TYPE "public"."waste_categories_odoo_sync_status_enum" AS ENUM('PENDING', 'SYNCED', 'FAILED')`);
+        await queryRunner.query(`ALTER TABLE "waste_categories" ADD "odoo_sync_status" "public"."waste_categories_odoo_sync_status_enum" NOT NULL DEFAULT 'PENDING'`);
+        await queryRunner.query(`ALTER TABLE "warehouses" ADD "latitude" numeric(10,7)`);
+        await queryRunner.query(`ALTER TABLE "warehouses" ADD "longitude" numeric(10,7)`);
+        await queryRunner.query(`ALTER TABLE "warehouses" ADD "address" character varying`);
+        await queryRunner.query(`ALTER TABLE "warehouses" ADD "capacity" integer`);
+        await queryRunner.query(`ALTER TABLE "warehouses" ADD "current_load" numeric(14,3) NOT NULL DEFAULT '0'`);
+        await queryRunner.query(`ALTER TABLE "warehouses" ADD "is_active" boolean NOT NULL DEFAULT true`);
+        await queryRunner.query(`ALTER TABLE "warehouses" ADD "last_odoo_sync" TIMESTAMP WITH TIME ZONE`);
+        await queryRunner.query(`ALTER TABLE "product_pricing" ADD CONSTRAINT "FK_bf55ac56eaa6394e8dfca101d2c" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "offers" ADD CONSTRAINT "FK_07d9a626265f252fc5c743c42b5" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "products" ADD CONSTRAINT "FK_9a5f6868c96e0069e699f33e124" FOREIGN KEY ("category_id") REFERENCES "waste_categories"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "product_suggestions" ADD CONSTRAINT "FK_6ce0723951137293df5e7c737e2" FOREIGN KEY ("account_id") REFERENCES "accounts"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "product_suggestions" ADD CONSTRAINT "FK_22eb207167ce112e837d52e9929" FOREIGN KEY ("category_id") REFERENCES "waste_categories"("id") ON DELETE SET NULL ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "cart_items" ADD CONSTRAINT "FK_6385a745d9e12a89b859bb25623" FOREIGN KEY ("cart_id") REFERENCES "carts"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "cart_items" ADD CONSTRAINT "FK_30e89257a105eab7648a35c7fce" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "cart_items" ADD CONSTRAINT "FK_53d597384719e04ff18d02f5a9f" FOREIGN KEY ("offer_id") REFERENCES "offers"("id") ON DELETE SET NULL ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "carts" ADD CONSTRAINT "FK_e0f5c205a0bf214c883893bdca1" FOREIGN KEY ("account_id") REFERENCES "accounts"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "category_requests" ADD CONSTRAINT "FK_909aed95a4d48de40c875365459" FOREIGN KEY ("account_id") REFERENCES "accounts"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "warehouse_inventory" ADD CONSTRAINT "FK_1463feee3049bd06551f0eca191" FOREIGN KEY ("warehouse_id") REFERENCES "warehouses"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "truck_location_logs" ADD CONSTRAINT "FK_2805045ac0ade973b30a01e6cda" FOREIGN KEY ("truck_id") REFERENCES "trucks"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+    }
+
+    public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`ALTER TABLE "truck_location_logs" DROP CONSTRAINT "FK_2805045ac0ade973b30a01e6cda"`);
+        await queryRunner.query(`ALTER TABLE "warehouse_inventory" DROP CONSTRAINT "FK_1463feee3049bd06551f0eca191"`);
+        await queryRunner.query(`ALTER TABLE "category_requests" DROP CONSTRAINT "FK_909aed95a4d48de40c875365459"`);
+        await queryRunner.query(`ALTER TABLE "carts" DROP CONSTRAINT "FK_e0f5c205a0bf214c883893bdca1"`);
+        await queryRunner.query(`ALTER TABLE "cart_items" DROP CONSTRAINT "FK_53d597384719e04ff18d02f5a9f"`);
+        await queryRunner.query(`ALTER TABLE "cart_items" DROP CONSTRAINT "FK_30e89257a105eab7648a35c7fce"`);
+        await queryRunner.query(`ALTER TABLE "cart_items" DROP CONSTRAINT "FK_6385a745d9e12a89b859bb25623"`);
+        await queryRunner.query(`ALTER TABLE "product_suggestions" DROP CONSTRAINT "FK_22eb207167ce112e837d52e9929"`);
+        await queryRunner.query(`ALTER TABLE "product_suggestions" DROP CONSTRAINT "FK_6ce0723951137293df5e7c737e2"`);
+        await queryRunner.query(`ALTER TABLE "products" DROP CONSTRAINT "FK_9a5f6868c96e0069e699f33e124"`);
+        await queryRunner.query(`ALTER TABLE "offers" DROP CONSTRAINT "FK_07d9a626265f252fc5c743c42b5"`);
+        await queryRunner.query(`ALTER TABLE "product_pricing" DROP CONSTRAINT "FK_bf55ac56eaa6394e8dfca101d2c"`);
+        await queryRunner.query(`ALTER TABLE "warehouses" DROP COLUMN "last_odoo_sync"`);
+        await queryRunner.query(`ALTER TABLE "warehouses" DROP COLUMN "is_active"`);
+        await queryRunner.query(`ALTER TABLE "warehouses" DROP COLUMN "current_load"`);
+        await queryRunner.query(`ALTER TABLE "warehouses" DROP COLUMN "capacity"`);
+        await queryRunner.query(`ALTER TABLE "warehouses" DROP COLUMN "address"`);
+        await queryRunner.query(`ALTER TABLE "warehouses" DROP COLUMN "longitude"`);
+        await queryRunner.query(`ALTER TABLE "warehouses" DROP COLUMN "latitude"`);
+        await queryRunner.query(`ALTER TABLE "waste_categories" DROP COLUMN "odoo_sync_status"`);
+        await queryRunner.query(`DROP TYPE "public"."waste_categories_odoo_sync_status_enum"`);
+        await queryRunner.query(`ALTER TABLE "waste_categories" DROP COLUMN "odoo_category_id"`);
+        await queryRunner.query(`ALTER TABLE "waste_categories" DROP COLUMN "is_active"`);
+        await queryRunner.query(`ALTER TABLE "waste_categories" DROP COLUMN "description"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_2805045ac0ade973b30a01e6cd"`);
+        await queryRunner.query(`DROP TABLE "truck_location_logs"`);
+        await queryRunner.query(`DROP TYPE "public"."truck_location_logs_reason_enum"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_1463feee3049bd06551f0eca19"`);
+        await queryRunner.query(`DROP TABLE "warehouse_inventory"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_14cd6310accd537b624de68224"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_909aed95a4d48de40c87536545"`);
+        await queryRunner.query(`DROP TABLE "category_requests"`);
+        await queryRunner.query(`DROP TYPE "public"."category_requests_status_enum"`);
+        await queryRunner.query(`DROP TYPE "public"."category_requests_role_enum"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_ea9ba3dfb39050f831ee3be40d"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_bd2726fd31b35443f2245b93ba"`);
+        await queryRunner.query(`DROP TABLE "audit_logs"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_e0f5c205a0bf214c883893bdca"`);
+        await queryRunner.query(`DROP TABLE "carts"`);
+        await queryRunner.query(`DROP TABLE "cart_items"`);
+        await queryRunner.query(`DROP TYPE "public"."cart_items_unit_type_enum"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_171ecfa116bf322640af5a09c0"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_6ce0723951137293df5e7c737e"`);
+        await queryRunner.query(`DROP TABLE "product_suggestions"`);
+        await queryRunner.query(`DROP TYPE "public"."product_suggestions_status_enum"`);
+        await queryRunner.query(`DROP TYPE "public"."product_suggestions_unit_type_enum"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_9a5f6868c96e0069e699f33e12"`);
+        await queryRunner.query(`DROP TABLE "products"`);
+        await queryRunner.query(`DROP TYPE "public"."products_odoo_sync_status_enum"`);
+        await queryRunner.query(`DROP TYPE "public"."products_unit_type_enum"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_07d9a626265f252fc5c743c42b"`);
+        await queryRunner.query(`DROP TABLE "offers"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_d45b0c01802c065a35ac11dcc7"`);
+        await queryRunner.query(`DROP TABLE "product_pricing"`);
+        await queryRunner.query(`DROP TYPE "public"."product_pricing_tier_enum"`);
+    }
+
+}

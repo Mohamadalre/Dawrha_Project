@@ -177,7 +177,6 @@ async createWarehouse(
       ),
     );
 
-    // إذا Odoo رجع خطأ
     if (response.data?.error) {
 
       const message =
@@ -185,7 +184,6 @@ async createWarehouse(
         response.data.error?.message ||
         'Odoo warehouse creation failed';
 
-      // الاسم مكرر
       if (
         message.includes('must be unique')
       ) {
@@ -388,5 +386,129 @@ async createManager(dto: {
         error,
       );
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Generic JSON-RPC helper + catalogue (category / product) operations
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Generic Odoo `call_kw` wrapper. Authenticates, performs the call, and
+   * surfaces Odoo-side errors as exceptions so callers (Bull jobs) can retry.
+   */
+  private async callKw<T = any>(
+    model: string,
+    method: string,
+    args: any[],
+    kwargs: Record<string, any> = {},
+  ): Promise<T> {
+    const auth = await this.authenticate();
+
+    const response = await firstValueFrom(
+      this.httpService.post(
+        `${this.url}/web/dataset/call_kw`,
+        {
+          jsonrpc: '2.0',
+          params: { model, method, args, kwargs },
+        },
+        {
+          headers: {
+            Cookie: Array.isArray(auth.sessionId)
+              ? auth.sessionId.join('; ')
+              : auth.sessionId,
+          },
+        },
+      ),
+    );
+
+    if (response.data?.error) {
+      const message =
+        response.data.error?.data?.message ||
+        response.data.error?.message ||
+        `Odoo ${model}.${method} failed`;
+      throw new InternalServerErrorException(message);
+    }
+
+    return response.data?.result as T;
+  }
+
+  // NOTE: this backend integrates with the custom `recycle_warehouse` Odoo addon,
+  // so all catalogue/warehouse calls target its `recycle.*` models (not the
+  // standard product.template / stock.warehouse / stock.quant models).
+
+  async createProductCategory(name: string): Promise<number> {
+    const id = await this.callKw<number>('recycle.product.category', 'create', [{ name }]);
+    if (!id) throw new InternalServerErrorException('Odoo did not return category id');
+    return id;
+  }
+
+  async updateProductCategory(odooId: number, values: Record<string, any>): Promise<void> {
+    await this.callKw('recycle.product.category', 'write', [[odooId], values]);
+  }
+
+  async deleteProductCategory(odooId: number): Promise<void> {
+    await this.callKw('recycle.product.category', 'unlink', [[odooId]]);
+  }
+
+  async createProduct(values: {
+    name: string;
+    categoryOdooId: number;
+    price?: number;
+  }): Promise<number> {
+    const payload: Record<string, any> = {
+      name: values.name,
+      category_id: values.categoryOdooId,
+      price: values.price ?? 0,
+    };
+    const id = await this.callKw<number>('recycle.product', 'create', [payload]);
+    if (!id) throw new InternalServerErrorException('Odoo did not return product id');
+    return id;
+  }
+
+  async updateProduct(odooId: number, values: Record<string, any>): Promise<void> {
+    await this.callKw('recycle.product', 'write', [[odooId], values]);
+  }
+
+  async deleteProduct(odooId: number): Promise<void> {
+    await this.callKw('recycle.product', 'unlink', [[odooId]]);
+  }
+
+  /** Lists warehouses from the custom recycle_warehouse addon. */
+  async fetchWarehouses(): Promise<any[]> {
+    return this.callKw<any[]>(
+      'recycle.warehouse',
+      'search_read',
+      [[]],
+      { fields: ['id', 'name', 'code', 'manager_user_id'] },
+    );
+  }
+
+  /** Reads the manager (res.users) assigned to a recycle.warehouse. */
+  async fetchWarehouseManager(odooWarehouseId: number): Promise<any | null> {
+    const warehouses = await this.callKw<any[]>(
+      'recycle.warehouse',
+      'read',
+      [[odooWarehouseId], ['manager_user_id']],
+    );
+    const managerRef = warehouses?.[0]?.manager_user_id;
+    const managerId = Array.isArray(managerRef) ? managerRef[0] : managerRef;
+    if (!managerId) return null;
+
+    const users = await this.callKw<any[]>(
+      'res.users',
+      'read',
+      [[managerId], ['name', 'login', 'email', 'phone']],
+    );
+    return users?.[0] ?? null;
+  }
+
+  /** Reads per-warehouse stock lines (recycle.stock) for a warehouse. */
+  async fetchWarehouseInventory(odooWarehouseId: number): Promise<any[]> {
+    return this.callKw<any[]>(
+      'recycle.stock',
+      'search_read',
+      [[['warehouse_id', '=', odooWarehouseId]]],
+      { fields: ['product_id', 'quantity'] },
+    );
   }
 }

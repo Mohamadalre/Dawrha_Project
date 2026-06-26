@@ -1,6 +1,19 @@
-import { Injectable, Inject, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  Logger,
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import Redis from 'ioredis';
 import * as crypto from 'crypto';
+
+/** OTP policy (single source of truth). */
+export const OTP_TTL_SECONDS = 600; // code lifetime: 10 min
+export const OTP_COOLDOWN_SECONDS = 120; // min gap between sends
+export const OTP_MAX_ATTEMPTS = 5; // wrong tries before lockout
+export const OTP_MAX_DAILY_RESENDS = 10; // resend cap per email per day
 
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -28,14 +41,17 @@ export class MailService {
   }
 
   async generateAndSendOtp(email: string) {
-    const otp = Math.floor(10000 + Math.random() * 90000).toString();
+    // Cryptographically secure 5-digit code (not Math.random).
+    const otp = crypto.randomInt(10000, 100000).toString();
     const hashed = this.hash(otp);
     const redisKey = `otp:${email}`;
-    // console.log(otp);
+    const cooldownKey = `otp:cooldown:${email}`;
 
     try {
-      await this.redis.set(redisKey, hashed, 'EX', 600);
-      await this.redis.set(`otp:cooldown:${email}`, 'locked', 'EX', 60)
+      await this.redis.set(redisKey, hashed, 'EX', OTP_TTL_SECONDS);
+      await this.redis.set(cooldownKey, 'locked', 'EX', OTP_COOLDOWN_SECONDS);
+      // A freshly issued code resets the wrong-attempt counter.
+      await this.redis.del(`otp:attempts:${email}`);
       await this.mailQueue.add(MAIL_SEND_OTP_JOB_NAME, {
         email,
         otp
@@ -54,7 +70,9 @@ export class MailService {
     } catch (error: any) {
       this.logger.log(`Failed to generate of queue OTP : ${error.message}`)
 
+      // Roll back BOTH keys so the user isn't cooled-down without a valid code.
       await this.redis.del(redisKey);
+      await this.redis.del(cooldownKey);
       throw error;
     }
   }
@@ -103,13 +121,36 @@ export class MailService {
   }
 
   async verifyOtp(email: string, inputOtp: string): Promise<boolean> {
+    const attemptsKey = `otp:attempts:${email}`;
+
+    // Brute-force guard: lock after too many wrong tries.
+    const attempts = Number((await this.redis.get(attemptsKey)) ?? 0);
+    if (attempts >= OTP_MAX_ATTEMPTS) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          message: 'Too many invalid attempts. Please request a new code.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const storedOtp = await this.redis.get(`otp:${email}`);
     if (!storedOtp) return false;
-    const hashedInput = this.hash(inputOtp)
-    if (hashedInput === storedOtp) {
+
+    const hashedInput = this.hash(inputOtp);
+    const match =
+      hashedInput.length === storedOtp.length &&
+      crypto.timingSafeEqual(Buffer.from(hashedInput), Buffer.from(storedOtp));
+
+    if (match) {
       await this.clearOtp(email);
+      await this.redis.del(attemptsKey);
       return true;
     }
+
+    await this.redis.incr(attemptsKey);
+    await this.redis.expire(attemptsKey, OTP_TTL_SECONDS);
     return false;
   }
 
