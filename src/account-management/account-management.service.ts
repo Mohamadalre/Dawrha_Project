@@ -25,44 +25,73 @@ export class AccountManagementService {
     private readonly statusNotifier: AccountStatusNotifier,
   ) {}
 //DOTO  remove id media in getprofile just
-  async getProfiles(
-    role: Role,
-    page: number,
-    limit: number,
-  ): Promise<{ items: AccountDetailsDto[]; total: number; page: number; limit: number }> {
+  /**
+   * Lists a role's accounts, optionally filtered by status — newest first,
+   * paginated. Returns ONLY the account + its profile id (no profile details).
+   * When `status` is omitted, accounts of every status are returned.
+   */
+  async getProfiles(role: Role, page: number, limit: number, status?: AccountStatus) {
+    if (status && !Object.values(AccountStatus).includes(status)) {
+      throw new BadRequestException('Invalid account status');
+    }
+
     const repo = this.profileResolver.getRepo(role);
 
     const [profiles, total] = await repo.findAndCount({
-      relations: this.profileDataProvider.getRelations(role),
-      where: { account: { accountStatus: AccountStatus.PENDING_APPROVAL } },
+      where: status ? { account: { accountStatus: status } } : {},
+      relations: ['account'],
+      order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
 
-    if (total === 0) {
-      throw new NotFoundException(`No ${role.toLowerCase().replace('_', ' ')} accounts pending approval`);
-    }
-
-    const mediaMap = await this.buildMediaMap(profiles.map((p: any) => p.id));
-
-    const items = profiles.map((profile: any) => {
-      const { account, province, address, coordinates, DesscriptLocation, ...profileFields } = profile;
-      const materialKey = this.profileDataProvider.getMaterialKey(role);
-      const materials = materialKey ? profile[materialKey] : undefined;
-      const location = province
-        ? { province, address, coordinates, description: DesscriptLocation }
-        : undefined;
-
-      return {
-        account,
-        profile: profileFields,
-        materials,
-        location,
-        mediaIds: mediaMap.get(profile.id) ?? [],
-      };
-    });
+    const items = profiles.map((p: any) => ({
+      profileId: p.id,
+      account: p.account,
+    }));
 
     return { items, total, page, limit };
+  }
+
+  /**
+   * Full detail of a single profile (account + profile fields + materials +
+   * location) plus ONLY the image ids of its media — no image details.
+   */
+  async getProfileDetails(profileId: string) {
+    const { role } = await this.resolveProfile(profileId);
+    const repo = this.profileResolver.getRepo(role);
+
+    const profile: any = await repo.findOne({
+      where: { id: profileId },
+      relations: this.profileDataProvider.getRelations(role),
+    });
+    if (!profile) throw new NotFoundException('Profile not found');
+
+    const { account, province, address, coordinates, DesscriptLocation, ...profileFields } = profile;
+    const materialKey = this.profileDataProvider.getMaterialKey(role);
+    const materials = materialKey ? profile[materialKey] : undefined;
+    const location = province
+      ? { province, address, coordinates, description: DesscriptLocation }
+      : undefined;
+    const mediaMap = await this.buildMediaMap([profileId]);
+
+    return {
+      profileId,
+      role,
+      account,
+      profile: profileFields,
+      materials,
+      location,
+      imageIds: mediaMap.get(profileId) ?? [],
+    };
+  }
+
+  /** Full details of a single media/image record. */
+  async getMediaDetails(mediaId: string) {
+    if (!isUUID(mediaId)) throw new BadRequestException('Invalid media ID');
+    const media = await this.mediaRepo.findOne({ where: { id: mediaId } });
+    if (!media) throw new NotFoundException('Media not found');
+    return media;
   }
 
   async updateMediaStatus(mediaId: string, dto: UpdateMediaStatusDto) {
@@ -76,36 +105,35 @@ export class AccountManagementService {
       throw new NotFoundException('Media not found');
     }
 
+    // Only pending media can be reviewed.
+    if (media.status !== statusMedia.PENDING) {
+      throw new ConflictException(
+        `Media is already ${media.status.toLowerCase()}. Only pending media can be reviewed`,
+      );
+    }
+
     const { profile } = await this.resolveProfile(media.ownerId);
     const account = profile.account;
 
-    let movedToNeedChanges = false;
-    if (account.accountStatus === AccountStatus.PENDING_APPROVAL) {
+    if (dto.status === statusMedia.REJECTED) {
+      // Reject the image → owner account needs changes + notify with the reason.
+      await this.mediaRepo.update(mediaId, { status: statusMedia.REJECTED });
       await this.accountRepo.update(account.id, { accountStatus: AccountStatus.NEED_CHANGES });
-      movedToNeedChanges = true;
-    } else if (account.accountStatus !== AccountStatus.NEED_CHANGES) {
-      throw new ConflictException(
-        `Account is ${account.accountStatus.toLowerCase().replace('_', ' ')}. Media status can only be updated for pending approval or accounts needing changes`,
-      );
-    }
-
-    if (media.status !== statusMedia.PENDING) {
-      throw new ConflictException(
-        `Media is already ${media.status.toLowerCase()}. Only pending media can be updated`,
-      );
-    }
-
-    await this.mediaRepo.update(mediaId, { status: dto.status });
-
-    if (movedToNeedChanges) {
       await this.statusNotifier.notifyStatusDecision(
         account.id,
         AccountStatus.NEED_CHANGES,
-        'بعض المستندات تحتاج إلى تعديل وإعادة الرفع',
+        dto.description ?? 'يلزم تعديل أحد المستندات وإعادة رفعه',
       );
+      return { message: 'Media rejected successfully' };
     }
 
-    return { message: `Media ${dto.status.toLowerCase()} successfully` };
+    await this.mediaRepo.update(mediaId, { status: dto.status });
+    return {
+      message:
+        dto.status === statusMedia.APPROVED
+          ? 'Media approved successfully'
+          : 'Media status updated successfully',
+    };
   }
 
   async getProfileMedia(profileId: string) {

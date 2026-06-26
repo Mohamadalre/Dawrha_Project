@@ -1,8 +1,9 @@
-import { Controller, Get, Patch, Param, Body, Query, UseGuards, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Body, Query, UseGuards, DefaultValuePipe, ParseIntPipe, ParseUUIDPipe } from '@nestjs/common';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '@src/auth/guards/roles.guard';
 import { Roles } from '@src/auth/decorators/roles.decorator';
 import { Role } from '@src/user/enums/role.enum';
+import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { AccountManagementService } from './account-management.service';
 import { BlockedAccountStatusDto, UpdateAccountStatusDto } from './dto/update-account-status.dto';
 import { UpdateMediaStatusDto } from './dto/update-media-status.dto';
@@ -31,6 +32,20 @@ export class AccountManagementController {
     return this.accountManagementService.getProfileMedia(profileId);
   }
 
+  /** Full profile detail (profile + materials + image ids only). */
+  @Get('profile/:profileId')
+  async getProfileDetails(@Param('profileId', ParseUUIDPipe) profileId: string) {
+    const result = await this.accountManagementService.getProfileDetails(profileId);
+    return { message: 'Profile fetched successfully', result };
+  }
+
+  /** Full details of a single image. */
+  @Get('media/:mediaId')
+  async getMediaDetails(@Param('mediaId', ParseUUIDPipe) mediaId: string) {
+    const result = await this.accountManagementService.getMediaDetails(mediaId);
+    return { message: 'Media fetched successfully', result };
+  }
+
   @Patch(':accountId/status')
   async updateAccountStatus(
     @Param('accountId') accountId: string,
@@ -51,31 +66,35 @@ export class AccountManagementController {
   async getFactories(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('status') status?: AccountStatus,
   ) {
-    return this.accountManagementService.getProfiles(Role.FACTORY, page, limit);
+    return this.accountManagementService.getProfiles(Role.FACTORY, page, limit, status);
   }
 
   @Get('institution')
   async getInstitutions(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('status') status?: AccountStatus,
   ) {
-    return this.accountManagementService.getProfiles(Role.INSTITUTIONS, page, limit);
+    return this.accountManagementService.getProfiles(Role.INSTITUTIONS, page, limit, status);
   }
 
   @Get('collector')
   async getCollectors(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('status') status?: AccountStatus,
   ) {
-    return this.accountManagementService.getProfiles(Role.COLLECTOR, page, limit);
+    return this.accountManagementService.getProfiles(Role.COLLECTOR, page, limit, status);
   }
 
   @Get('external-partner')
   async getExternalPartners(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('status') status?: AccountStatus,
   ) {
-    return this.accountManagementService.getProfiles(Role.EXTERNAL_PARTNER, page, limit);
+    return this.accountManagementService.getProfiles(Role.EXTERNAL_PARTNER, page, limit, status);
   }
 }

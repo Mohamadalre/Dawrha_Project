@@ -11,6 +11,8 @@ import { winstonConfig } from './winston.config';
 })
 export class LoggerModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(MorganMiddleware).forRoutes({ path: '*', method: RequestMethod.ALL });
+    // Express 5 / path-to-regexp v8 require named wildcards ('*' is invalid).
+    // '{*path}' is the catch-all that matches every route (incl. root).
+    consumer.apply(MorganMiddleware).forRoutes({ path: '{*path}', method: RequestMethod.ALL });
   }
 }
