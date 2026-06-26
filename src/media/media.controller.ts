@@ -1,6 +1,7 @@
 import {
   Controller,
   Put,
+  Patch,
   Delete,
   Get,
   UseGuards,
@@ -8,8 +9,6 @@ import {
   UploadedFile,
   Body,
   Param,
-  
-  
   BadRequestException,
   Logger,
 } from '@nestjs/common';
@@ -123,6 +122,23 @@ export class MediaController {
    * curl -X DELETE http://localhost:3000/media/123e4567-e89b-12d3-a456-426614174000 \
    *   -H "Authorization: Bearer <token>"
    */
+  /**
+   * Re-upload a REJECTED image (owner only). Image → PENDING, account →
+   * PENDING_APPROVAL. Only works for images whose status is REJECTED.
+   */
+  @Patch(':id/reupload')
+  @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
+  async reuploadImage(
+    @Param('id') mediaId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: Account,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file provided');
+    }
+    return this.mediaService.reuploadRejectedImage(file, mediaId, user.id, (user as any).role);
+  }
+
   @Delete(':id')
   async deleteImage(
     @Param('id') mediaId: string,

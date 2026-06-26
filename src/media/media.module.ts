@@ -5,17 +5,15 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Media } from './entities/media.entity';
 import { Account } from '@src/user/entities/account.entity';
 import { CommonModule } from '@src/common/common.module';
-//import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
-
 import { CoreModule } from '@src/core/core.module';
+import { UserModule } from '@src/user/user.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Media, Account]),
     CommonModule,
     CoreModule,
-    // CloudinaryModule
-    
+    UserModule,
   ],
   controllers: [MediaController],
   providers: [MediaService],

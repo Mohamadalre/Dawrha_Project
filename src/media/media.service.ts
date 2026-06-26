@@ -8,6 +8,8 @@ import { CommonService } from '@src/common/common.service';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { UploadImageDto } from './dto/upload-image.dto';
+import { ProfileResolver } from '@src/user/providers/profile-resolver.privder';
+import { Role } from '@src/user/enums/role.enum';
 
 
 /**
@@ -37,7 +39,64 @@ export class MediaService {
     private readonly cloudinaryService: CloudinaryService,
     private readonly commonService: CommonService,
     private readonly dataSource: DataSource,
+    private readonly profileResolver: ProfileResolver,
   ) { }
+
+  /**
+   * Re-upload a REJECTED image by its owner. Sets the image back to PENDING and
+   * the owner account back to PENDING_APPROVAL. Only the owner of the image (the
+   * account whose profile owns it) may re-upload, and only rejected images.
+   */
+  async reuploadRejectedImage(
+    file: Express.Multer.File,
+    mediaId: string,
+    userId: string,
+    role: Role,
+  ): Promise<{ status: string; image: string }> {
+    const media = await this.mediaRepository.findOne({ where: { id: mediaId } });
+    if (!media) {
+      throw new BadRequestException('Media not found');
+    }
+    if (media.status !== statusMedia.REJECTED) {
+      throw new BadRequestException('Only rejected images can be re-uploaded');
+    }
+
+    // Ownership: the caller's profile (of its role) must own this media.
+    const profile = await this.profileResolver
+      .getRepo(role)
+      .findOne({ where: { account: { id: userId } } });
+    if (!profile || profile.id !== media.ownerId) {
+      throw new ForbiddenException('This image does not belong to your account');
+    }
+
+    const oldPublicId = media.publicId;
+    const uploadResult = await this.cloudinaryService.uploadFile(
+      file,
+      media.ownerId,
+      media.ownerType,
+      media.fileType,
+    );
+
+    await this.mediaRepository.update(mediaId, {
+      url: uploadResult.imageUrl,
+      publicId: uploadResult.publicId,
+      status: statusMedia.PENDING,
+    });
+
+    // The account goes back to pending review.
+    await this.accountRepository.update(userId, {
+      accountStatus: AccountStatus.PENDING_APPROVAL,
+    });
+
+    // Remove the old Cloudinary file (non-critical).
+    try {
+      await this.cloudinaryService.deleteFile(oldPublicId);
+    } catch (deleteError) {
+      this.logger.warn(`Failed to delete old image ${oldPublicId}:`, deleteError);
+    }
+
+    return { status: 'Image re-uploaded successfully', image: uploadResult.imageUrl };
+  }
 
   /**
    * Upload image and save to database
