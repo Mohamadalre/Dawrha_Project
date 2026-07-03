@@ -55,6 +55,31 @@ describe('CatalogService', () => {
     expect(res).toBe(cached);
   });
 
+  it('getCategories serves a GUEST (null caller) without category scoping', async () => {
+    cache.get.mockResolvedValue(null);
+
+    const res: any = await service.getCategories(
+      null,
+      { page: 1, limit: 10, sort: 'name', order: 'asc' } as any,
+    );
+
+    // Guests are never scoped to assigned categories.
+    expect(assigned.getAssignedCategoryIds).not.toHaveBeenCalled();
+    expect(res.categories).toEqual([]);
+  });
+
+  it('getOffers serves a GUEST (null caller) without scoping', async () => {
+    cache.get.mockResolvedValue(null);
+
+    const res: any = await service.getOffers(
+      null,
+      { page: 1, limit: 10, active_only: true, sort: 'discount' } as any,
+    );
+
+    expect(assigned.getAssignedCategoryIds).not.toHaveBeenCalled();
+    expect(res.offers).toEqual([]);
+  });
+
   it('getCategories returns empty for an institution with no assigned categories', async () => {
     cache.get.mockResolvedValue(null);
     assigned.getAssignedCategoryIds.mockResolvedValue([]); // restricted, none assigned

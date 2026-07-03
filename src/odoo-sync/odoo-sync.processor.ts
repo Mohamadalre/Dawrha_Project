@@ -1,5 +1,4 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Job } from 'bullmq';
@@ -15,7 +14,9 @@ import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { NotificationService } from '@src/notification/notification.service';
 import { NotificationType } from '@src/notification/enums/notification-type.enum';
+import { winstonLogger } from '@src/core/logger-config/winston.config';
 import {
+  CreateWarehousePayload,
   DeleteCategoryPayload,
   DeleteProductPayload,
   ODOO_JOBS,
@@ -26,10 +27,11 @@ import {
   UpdatePricingPayload,
 } from './odoo-sync.constants';
 
+/** Unified logging context/channel for all Odoo-sync worker output. */
+const LOG_META = { context: 'OdooSyncProcessor', channel: 'jobs' } as const;
+
 @Processor(ODOO_SYNC_QUEUE)
 export class OdooSyncProcessor extends WorkerHost {
-  private readonly logger = new Logger(OdooSyncProcessor.name);
-
   constructor(
     private readonly odoo: OdooService,
     private readonly notifications: NotificationService,
@@ -63,17 +65,25 @@ export class OdooSyncProcessor extends WorkerHost {
           return await this.deleteProduct(job.data as DeleteProductPayload);
         case ODOO_JOBS.UPDATE_PRICING:
           return await this.updatePricing(job.data as UpdatePricingPayload);
+        case ODOO_JOBS.CREATE_WAREHOUSE:
+          return await this.createWarehouse(job.data as CreateWarehousePayload);
         case ODOO_JOBS.SYNC_WAREHOUSE:
           return await this.syncWarehouse(job.data as SyncWarehousePayload);
         default:
-          this.logger.warn(`Unknown Odoo job: ${job.name}`);
+          winstonLogger.warn(`Unknown Odoo job: ${job.name}`, LOG_META);
           return null;
       }
     } catch (error) {
-      this.logger.error(`Job ${job.name} failed (attempt ${job.attemptsMade + 1})`, error as Error);
+      winstonLogger.error(
+        `Job ${job.name} failed (attempt ${job.attemptsMade + 1}): ${(error as Error).message}`,
+        { ...LOG_META, stack: (error as Error).stack },
+      );
       if (isLastAttempt) {
         await this.compensate(job).catch((e) =>
-          this.logger.error('Compensation failed', e as Error),
+          winstonLogger.error(`Compensation failed: ${(e as Error).message}`, {
+            ...LOG_META,
+            stack: (e as Error).stack,
+          }),
         );
       }
       throw error;
@@ -124,6 +134,9 @@ export class OdooSyncProcessor extends WorkerHost {
     }
     product.odooSyncStatus = OdooSyncStatus.SYNCED;
     await this.productRepo.save(product);
+
+    // Whenever the product is (re)synced, keep its tier prices in Odoo current.
+    await this.pushTierPrices(product);
   }
 
   private async deleteProduct(payload: DeleteProductPayload) {
@@ -131,21 +144,75 @@ export class OdooSyncProcessor extends WorkerHost {
   }
 
   // --- Pricing --------------------------------------------------------------
+  /**
+   * Pushes the factory & free-facility tier prices to Odoo. Only these two tiers
+   * place warehouse orders, so Odoo invoices with them — the other tiers live in
+   * the backend only.
+   */
   private async updatePricing(payload: UpdatePricingPayload) {
     const product = await this.productRepo.findOne({ where: { id: payload.productId } });
     if (!product?.odooProductId) return;
+    await this.pushTierPrices(product);
+  }
 
-    const price = await this.pricingRepo
+  private async pushTierPrices(product: Product): Promise<void> {
+    if (!product.odooProductId) return;
+
+    const [factory, freeFacility] = await Promise.all([
+      this.currentTierPrice(product.id, PricingTier.FACTORY),
+      this.currentTierPrice(product.id, PricingTier.FREE_FACILITY),
+    ]);
+
+    const values: Record<string, number> = {};
+    if (factory != null) values.price_factory = factory;
+    if (freeFacility != null) values.price_free_facility = freeFacility;
+
+    if (Object.keys(values).length > 0) {
+      await this.odoo.updateProduct(product.odooProductId, values);
+    }
+  }
+
+  /** Current effective price of a product for a given tier (or null). */
+  private async currentTierPrice(productId: string, tier: PricingTier): Promise<number | null> {
+    const row = await this.pricingRepo
       .createQueryBuilder('pp')
-      .where('pp.productId = :id', { id: payload.productId })
-      .andWhere('pp.tier = :tier', { tier: PricingTier.INDIVIDUAL })
+      .where('pp.productId = :productId', { productId })
+      .andWhere('pp.tier = :tier', { tier })
+      .andWhere('pp.effectiveFrom <= NOW()')
+      .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())')
       .orderBy('pp.effectiveFrom', 'DESC')
       .getOne();
+    return row ? Number(row.price) : null;
+  }
 
-    if (price) {
-      // recycle.product uses `price` (not the standard `list_price`).
-      await this.odoo.updateProduct(product.odooProductId, { price: Number(price.price) });
+  // --- Warehouse creation (backend → Odoo) ----------------------------------
+  /**
+   * Pushes a backend-created warehouse to Odoo (recycle.warehouse + zones).
+   * On final failure the compensation step removes the orphan backend row.
+   */
+  private async createWarehouse(payload: CreateWarehousePayload) {
+    const warehouse = await this.warehouseRepo.findOne({ where: { id: payload.warehouseId } });
+    if (!warehouse) return;
+
+    // Idempotent: if a previous attempt already created it in Odoo, just finish.
+    if (warehouse.odooWarehouseId) {
+      warehouse.odooSyncStatus = OdooSyncStatus.SYNCED;
+      await this.warehouseRepo.save(warehouse);
+      return;
     }
+
+    const odooId = await this.odoo.createRecycleWarehouse({
+      name: warehouse.name,
+      code: warehouse.code,
+      latitude: warehouse.latitude != null ? Number(warehouse.latitude) : undefined,
+      longitude: warehouse.longitude != null ? Number(warehouse.longitude) : undefined,
+      zones: warehouse.zones ?? undefined,
+    });
+
+    warehouse.odooWarehouseId = odooId;
+    warehouse.odooSyncStatus = OdooSyncStatus.SYNCED;
+    warehouse.lastOdooSync = new Date();
+    await this.warehouseRepo.save(warehouse);
   }
 
   // --- Warehouse inventory --------------------------------------------------
@@ -184,7 +251,13 @@ export class OdooSyncProcessor extends WorkerHost {
       const category = await this.categoryRepo.findOne({ where: { id: categoryId } });
       if (category && !category.odooCategoryId) {
         await this.categoryRepo.delete(categoryId);
-        await this.notifyAdmins('فشل مزامنة التصنيف', `تعذّرت مزامنة التصنيف "${category.name}" مع Odoo وتمت إزالته.`);
+        await this.notifyAdmins({
+          title: 'Category sync failed',
+          body: `The category "${category.name}" could not be synced to Odoo and was removed.`,
+          titleKey: 'notifications.categorySyncFailed.title',
+          bodyKey: 'notifications.categorySyncFailed.body',
+          args: { name: category.name },
+        });
       } else if (category) {
         category.odooSyncStatus = OdooSyncStatus.FAILED;
         await this.categoryRepo.save(category);
@@ -196,28 +269,65 @@ export class OdooSyncProcessor extends WorkerHost {
       const product = await this.productRepo.findOne({ where: { id: productId } });
       if (product && !product.odooProductId) {
         await this.productRepo.delete(productId);
-        await this.notifyAdmins('فشل مزامنة المنتج', `تعذّرت مزامنة المنتج "${product.name}" مع Odoo وتمت إزالته.`);
+        await this.notifyAdmins({
+          title: 'Product sync failed',
+          body: `The product "${product.name}" could not be synced to Odoo and was removed.`,
+          titleKey: 'notifications.productSyncFailed.title',
+          bodyKey: 'notifications.productSyncFailed.body',
+          args: { name: product.name },
+        });
       } else if (product) {
         product.odooSyncStatus = OdooSyncStatus.FAILED;
         await this.productRepo.save(product);
       }
     }
+
+    if (job.name === ODOO_JOBS.CREATE_WAREHOUSE) {
+      const { warehouseId } = job.data as CreateWarehousePayload;
+      const warehouse = await this.warehouseRepo.findOne({ where: { id: warehouseId } });
+      if (warehouse && !warehouse.odooWarehouseId) {
+        // Never created in Odoo → remove the orphan backend row.
+        await this.warehouseRepo.delete(warehouseId);
+        await this.notifyAdmins({
+          title: 'Warehouse creation failed',
+          body: `The warehouse "${warehouse.name}" could not be created in Odoo and was removed.`,
+          titleKey: 'notifications.warehouseCreateFailed.title',
+          bodyKey: 'notifications.warehouseCreateFailed.body',
+          args: { name: warehouse.name },
+        });
+      } else if (warehouse) {
+        warehouse.odooSyncStatus = OdooSyncStatus.FAILED;
+        await this.warehouseRepo.save(warehouse);
+      }
+    }
   }
 
-  private async notifyAdmins(title: string, body: string): Promise<void> {
+  private async notifyAdmins(content: {
+    title: string;
+    body: string;
+    titleKey: string;
+    bodyKey: string;
+    args?: Record<string, unknown>;
+  }): Promise<void> {
     try {
       const admins = await this.accountRepo.find({ where: { role: Role.ADMIN } });
       for (const admin of admins) {
         const n = await this.notifications.createNotification({
           userId: admin.id,
-          title,
-          body,
+          title: content.title,
+          body: content.body,
+          titleKey: content.titleKey,
+          bodyKey: content.bodyKey,
+          args: content.args,
           type: NotificationType.ODOO,
         });
         await this.notifications.enqueueNotification(n.id);
       }
     } catch (error) {
-      this.logger.warn('Failed to notify admins of Odoo failure', error as Error);
+      winstonLogger.warn(`Failed to notify admins of Odoo failure: ${(error as Error).message}`, {
+        ...LOG_META,
+        stack: (error as Error).stack,
+      });
     }
   }
 }

@@ -15,6 +15,8 @@ import { JwtTemporaryGuard } from './guards/jwt-temporary.guard';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { LoginGoogleDto } from './dto/logoin-google.dto';
 import { VerifyResetOtpDto } from './dto/verifyReset-otp.dto';
+import { UpdateDeviceLanguageDto } from './dto/update-device-language.dto';
+
 
 
 
@@ -129,7 +131,7 @@ export class AuthController {
   }
 
   /**
-   * Login as collector_app.
+   * Login as collector-app.
    * @param loginDto body payload containing email and password
    * @returns JWT tokens if credentials and type-app match
    */
@@ -144,7 +146,7 @@ export class AuthController {
 
 
   /**
-   * Login as factory_app.
+   * Login as factory-app.
    * @param loginDto body payload containing email and password
    * @returns JWT tokens if credentials and type-app match
    */
@@ -167,36 +169,46 @@ export class AuthController {
   @Post('login/user-app/google')
   @HttpCode(200)
   async loginUserGoogle(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'user-app')
+    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'user_app')
     return { message: 'Login with Google successful', result: tokens };
   }
 
   /**
-   * Google login for collector app.
+   * Google login for collector-app.
    * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken and remember is true
    * @returns JWT tokens if the Google token is valid and type app matches
    */
   @Post('login/collector-app/google')
   @HttpCode(200)
   async LoginCollectorGoogle(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'collector-app')
+    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'collector_app')
     return { message: 'Login with Google successful', result: tokens };
   }
 
   @Post('login/factory-app/google')
   @HttpCode(200)
   async LoginFactoryGoogle(@Body() dto: LoginGoogleDto) {
-    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'factory-app')
+    const tokens = await this.authService.loginWithGoogle({ ...dto, rememberMy: true }, 'factory_app')
     return { message: 'Login with Google successful', result: tokens };
   }
 
 
 
-  @Put('FCMToken')
+
+
+  /**
+   * Update the notification language of the caller's device. Subsequent push
+   * notifications to this device are localized accordingly.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Patch('device/language')
   @HttpCode(200)
-  async addFCMToken(@Body() dto:DeviceDto,@CurrentUser() user:any){
-    const result = await this.authService.addFCMToken(dto, user.id)
-    return result.message;
+  async updateDeviceLanguage(
+    @CurrentUser() user: any,
+    @Body() dto: UpdateDeviceLanguageDto,
+  ) {
+    const result = await this.authService.updateDeviceLanguage(user.id, dto.deviceId, dto.language);
+    return { message: result.message, result };
   }
 
 
@@ -302,6 +314,15 @@ export class AuthController {
     return { message: 'Logout successfully' }
   }
 
+
+  @UseGuards(JwtAuthGuard)
+  @Put('FCMToken')
+  @HttpCode(200)
+  async addFCMToken(@CurrentUser() user: any,@Body() dto:DeviceDto){
+  
+    const result = await this.authService.addFCMToken(dto,user.id)
+    return result.message;
+  }
 
 
 

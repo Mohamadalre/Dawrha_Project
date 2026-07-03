@@ -7,6 +7,7 @@ import { Queue } from 'bullmq';
 import { Notification } from './entities/notification.entity';
 import { UserDevice } from '@src/auth/entities/user-device.entity';
 import { Account } from '@src/user/entities/account.entity';
+import { Language } from '@src/common/enums/language.enum';
 import { NotificationQueryDto } from './dto/notification-query.dto';
 import { NotificationJobPayload } from './interfaces/notification-payload.interface';
 import {
@@ -34,12 +35,27 @@ export class NotificationService {
   ) {}
 
   async createNotification(payload: NotificationPayload): Promise<Notification> {
+    // When i18n keys are supplied, keep them on the notification so each device
+    // can be served the push in its own language at send time. title/body stay
+    // as the default (English) text used for the in-app list and as a fallback.
+    const metadata =
+      payload.titleKey || payload.bodyKey
+        ? {
+            ...payload.metadata,
+            i18n: {
+              titleKey: payload.titleKey,
+              bodyKey: payload.bodyKey,
+              args: payload.args,
+            },
+          }
+        : payload.metadata;
+
     const notification = this.notificationRepository.create({
       userId: payload.userId,
       title: payload.title,
       body: payload.body,
       type: payload.type,
-      metadata: payload.metadata,
+      metadata,
       status: NotificationStatus.PENDING,
       user: { id: payload.userId } as Account,
     });
@@ -187,6 +203,19 @@ export class NotificationService {
     });
 
     return devices.map((device) => device.fcmToken).filter(Boolean);
+  }
+
+  /**
+   * Registered devices (token + chosen language) for a user. Used by the sender
+   * to localize each push to the device's language.
+   */
+  async getUserDevices(userId: string): Promise<{ fcmToken: string; language: Language }[]> {
+    const devices = await this.userDeviceRepository.find({
+      where: { accountId: userId },
+    });
+    return devices
+      .filter((device) => !!device.fcmToken)
+      .map((device) => ({ fcmToken: device.fcmToken, language: device.language ?? Language.EN }));
   }
 
   async markAsSent(notificationId: string): Promise<void> {

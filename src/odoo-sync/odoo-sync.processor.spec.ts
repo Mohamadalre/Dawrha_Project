@@ -25,6 +25,7 @@ describe('OdooSyncProcessor', () => {
     odoo = {
       createProductCategory: jest.fn(),
       updateProductCategory: jest.fn(),
+      createRecycleWarehouse: jest.fn(),
     };
     notifications = {
       createNotification: jest.fn().mockResolvedValue({ id: 'n1' }),
@@ -38,7 +39,11 @@ describe('OdooSyncProcessor', () => {
     productRepo = { findOne: jest.fn(), save: jest.fn(), delete: jest.fn() };
     pricingRepo = { createQueryBuilder: jest.fn() };
     accountRepo = { find: jest.fn().mockResolvedValue([{ id: 'admin1' }]) };
-    warehouseRepo = { findOne: jest.fn(), save: jest.fn() };
+    warehouseRepo = {
+      findOne: jest.fn(),
+      save: jest.fn((x) => Promise.resolve(x)),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
     inventoryRepo = { findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
 
     processor = new OdooSyncProcessor(
@@ -102,5 +107,40 @@ describe('OdooSyncProcessor', () => {
 
     await expect(processor.process(job)).rejects.toThrow('temporary');
     expect(categoryRepo.delete).not.toHaveBeenCalled();
+  });
+
+  it('creates the warehouse in Odoo and marks it SYNCED on success', async () => {
+    warehouseRepo.findOne.mockResolvedValue({ id: 'w1', name: 'Hub', code: 'H1', zones: [] });
+    odoo.createRecycleWarehouse.mockResolvedValue(55);
+
+    const job: any = {
+      name: ODOO_JOBS.CREATE_WAREHOUSE,
+      data: { warehouseId: 'w1' },
+      attemptsMade: 0,
+      opts: { attempts: 3 },
+    };
+
+    await processor.process(job);
+
+    const saved = warehouseRepo.save.mock.calls[0][0];
+    expect(saved.odooWarehouseId).toBe(55);
+    expect(saved.odooSyncStatus).toBe(OdooSyncStatus.SYNCED);
+    expect(warehouseRepo.delete).not.toHaveBeenCalled();
+  });
+
+  it('compensates by deleting the backend warehouse when Odoo create fails on the last attempt', async () => {
+    warehouseRepo.findOne.mockResolvedValue({ id: 'w1', name: 'Hub', code: 'H1' }); // no odooWarehouseId
+    odoo.createRecycleWarehouse.mockRejectedValue(new Error('Odoo down'));
+
+    const job: any = {
+      name: ODOO_JOBS.CREATE_WAREHOUSE,
+      data: { warehouseId: 'w1' },
+      attemptsMade: 2, // final attempt
+      opts: { attempts: 3 },
+    };
+
+    await expect(processor.process(job)).rejects.toThrow('Odoo down');
+    expect(warehouseRepo.delete).toHaveBeenCalledWith('w1');
+    expect(notifications.createNotification).toHaveBeenCalled();
   });
 });

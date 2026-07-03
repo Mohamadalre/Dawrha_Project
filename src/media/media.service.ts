@@ -176,7 +176,6 @@ export class MediaService {
         const account = await queryRunner.manager.findOne(Account, { where: { id: userId } });
         if (account) {
           const check = await this.areAllImagesApproved(ownerId, ownerType);
-          console.log(check);
 
           // Step 7: Check if ready for approval
           if (check) {
@@ -260,8 +259,8 @@ export class MediaService {
     file: Express.Multer.File,
     mediaId: string,
     oldPublicId: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     userId: string,
+    role: Role,
   ): Promise<{ status: string; image: string }> {
     this.logger.debug(`Starting image update for media ${mediaId}`);
 
@@ -271,6 +270,9 @@ export class MediaService {
       if (!currentMedia) {
         throw new BadRequestException('Media not found');
       }
+
+      // Ownership: only the media's owner may update it.
+      await this.assertOwnership(currentMedia, userId, role);
 
       // Step 1: Upload new image
       const uploadResult = await this.cloudinaryService.uploadFile(
@@ -317,7 +319,7 @@ export class MediaService {
    * @param mediaId - Media record ID
    * @returns Confirmation message
    */
-  async deleteImage(mediaId: string): Promise<{ status: string }> {
+  async deleteImage(mediaId: string, userId: string, role: Role): Promise<{ status: string }> {
     this.logger.debug(`Starting image deletion for media ${mediaId}`);
 
     try {
@@ -326,6 +328,9 @@ export class MediaService {
       if (!media) {
         throw new BadRequestException('Media not found');
       }
+
+      // Ownership: only the media's owner may delete it.
+      await this.assertOwnership(media, userId, role);
 
       const { publicId } = media;
 
@@ -352,6 +357,22 @@ export class MediaService {
 
 
 
+
+  /**
+   * Ensures the media belongs to the caller's profile. The caller's role selects
+   * the profile repository (same resolution used by re-upload); the profile id
+   * must equal the media's ownerId.
+   *
+   * @throws ForbiddenException when the media is not owned by the caller
+   */
+  private async assertOwnership(media: Media, userId: string, role: Role): Promise<void> {
+    const profile = await this.profileResolver
+      .getRepo(role)
+      .findOne({ where: { account: { id: userId } } });
+    if (!profile || profile.id !== media.ownerId) {
+      throw new ForbiddenException('This image does not belong to your account');
+    }
+  }
 
   /**
    * Find all images for a specific owner
@@ -433,9 +454,6 @@ export class MediaService {
     };
 
     const requiredCount = requiredCounts[ownerType];
-    console.log(ownerType);
-    console.log(requiredCount);
-    console.log(images.length);
     return images.length === requiredCount ? true : false;
   }
 }

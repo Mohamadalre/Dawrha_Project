@@ -79,7 +79,6 @@ async function bootstrap() {
   } catch (error: any) {
     // Log critical system errors and exit process
     logger.error(`Critical System Failure : ${error.message}`, error.stack, 'SYSTEM');
-    console.log(`error ${error}`);
 
     process.exit(1);
   }

@@ -67,21 +67,27 @@ export class CatalogService {
    * restricted roles are cached per account because their assigned categories differ.
    * Derived from role alone so a cache HIT needs no DB lookup.
    */
-  private scopeFor(caller: Caller): string {
+  private scopeFor(caller: Caller | null): string {
     // Only INSTITUTIONS are scoped to their assigned categories; everyone else
-    // (citizen / factory / free-facility / admin) shares the full-catalogue cache.
-    return caller.role === Role.INSTITUTIONS ? `acc:${caller.id}` : 'all';
+    // (guest / citizen / factory / free-facility / admin) shares the full cache.
+    return caller?.role === Role.INSTITUTIONS ? `acc:${caller.id}` : 'all';
+  }
+
+  /** Assigned-category restriction for the caller, or null for guests/unrestricted. */
+  private async allowedCategoryIds(caller: Caller | null): Promise<string[] | null> {
+    if (!caller) return null; // guests see the whole (active) catalogue
+    return this.assignedCategories.getAssignedCategoryIds(caller.id, caller.role);
   }
 
   // ---------------------------------------------------------------------------
   // Categories
   // ---------------------------------------------------------------------------
-  async getCategories(caller: Caller, query: CategoryQueryDto) {
+  async getCategories(caller: Caller | null, query: CategoryQueryDto) {
     const cacheParts = `${this.scopeFor(caller)}:${query.page}:${query.limit}:${query.search ?? ''}:${query.sort}:${query.order}`;
     const cached = await this.cache.get<CategoryListResult>('categories', cacheParts);
     if (cached) return cached;
 
-    const allowed = await this.assignedCategories.getAssignedCategoryIds(caller.id, caller.role);
+    const allowed = await this.allowedCategoryIds(caller);
 
     const qb = this.categoryRepo
       .createQueryBuilder('c')
@@ -191,12 +197,12 @@ export class CatalogService {
   // ---------------------------------------------------------------------------
   // Offers
   // ---------------------------------------------------------------------------
-  async getOffers(caller: Caller, query: OfferQueryDto) {
+  async getOffers(caller: Caller | null, query: OfferQueryDto) {
     const cacheParts = `${this.scopeFor(caller)}:${query.page}:${query.limit}:${query.active_only}:${query.sort}`;
     const cached = await this.cache.get<OfferListResult>('offers', cacheParts);
     if (cached) return cached;
 
-    const allowed = await this.assignedCategories.getAssignedCategoryIds(caller.id, caller.role);
+    const allowed = await this.allowedCategoryIds(caller);
     if (allowed && allowed.length === 0) {
       return this.emptyList('offers', query.page, query.limit);
     }
@@ -220,8 +226,8 @@ export class CatalogService {
     return result;
   }
 
-  async searchOffers(caller: Caller, query: OfferSearchQueryDto) {
-    const allowed = await this.assignedCategories.getAssignedCategoryIds(caller.id, caller.role);
+  async searchOffers(caller: Caller | null, query: OfferSearchQueryDto) {
+    const allowed = await this.allowedCategoryIds(caller);
     if (allowed && allowed.length === 0) {
       return this.emptyList('offers', query.page, query.limit);
     }

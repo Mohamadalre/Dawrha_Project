@@ -32,13 +32,13 @@ export class FactoryProfile extends LocationBase {
 
 
 
-  @Column({  nullable: false, unique:true })
+  @Column({unique:true })
   factoryPhone: string;
 
-  @Column({  nullable: false , unique:true })
+  @Column({unique:true })
   commercialRecord: string;
 
-  @Column({  nullable: false,unique:true })
+  @Column({unique:true })
   industrialRecord: string;
 
   @Column({ nullable: true })

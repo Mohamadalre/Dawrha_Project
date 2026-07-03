@@ -90,12 +90,24 @@ describe('MediaService', () => {
   describe('deleteImage', () => {
     it('throws when media is missing', async () => {
       mediaRepo.findOne.mockResolvedValue(null);
-      await expect(service.deleteImage('m1')).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.deleteImage('m1', 'u1', Role.FACTORY)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     });
 
-    it('deletes from DB then Cloudinary', async () => {
-      mediaRepo.findOne.mockResolvedValue({ id: 'm1', publicId: 'pub' });
-      const res = await service.deleteImage('m1');
+    it('forbids deleting an image the caller does not own', async () => {
+      mediaRepo.findOne.mockResolvedValue({ id: 'm1', publicId: 'pub', ownerId: 'p1' });
+      profileRepo.findOne.mockResolvedValue({ id: 'OTHER' }); // not p1
+      await expect(service.deleteImage('m1', 'u1', Role.FACTORY)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(mediaRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('deletes from DB then Cloudinary when the caller owns the image', async () => {
+      mediaRepo.findOne.mockResolvedValue({ id: 'm1', publicId: 'pub', ownerId: 'p1' });
+      profileRepo.findOne.mockResolvedValue({ id: 'p1' });
+      const res = await service.deleteImage('m1', 'u1', Role.FACTORY);
       expect(mediaRepo.delete).toHaveBeenCalledWith('m1');
       expect(cloudinary.deleteFile).toHaveBeenCalledWith('pub');
       expect(res.status).toBe('Image deleted successfully');

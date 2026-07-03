@@ -3,13 +3,14 @@ import {
   PrimaryGeneratedColumn,
   Column,
   OneToOne,
+  ManyToOne,
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { Account } from '../account.entity';
 import { LocationBase } from '@src/common/entities/location-base.entity';
-import { Shift } from '@src/user/enums/shift.enum';
+import { Shift } from '@src/shift/entities/shift.entity';
 import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
 
 
@@ -26,8 +27,12 @@ export class CollectorProfile extends LocationBase {
   @Column({ unique: true, nullable: false })
   NationalID: string;
 
-  @Column({ type: 'enum', enum: Shift })
+  @ManyToOne(() => Shift, { nullable: false })
+  @JoinColumn({ name: 'shift_id' })
   shift: Shift;
+
+  @Column({ name: 'shift_id' })
+  shiftId: string;
 
   @OneToOne(() => TruckAssignmentEntity, (assignment) => assignment.driver)
   assignment: TruckAssignmentEntity;

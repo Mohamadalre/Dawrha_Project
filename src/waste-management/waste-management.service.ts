@@ -40,8 +40,6 @@ export class WasteManagementService {
       });
       return await this.repo.save(category);
     } catch (error: any) {
-      console.log(error.message);
-
       throw error;
     }
   }

@@ -15,7 +15,9 @@ export class ExternalPartnerWasteCategory {
     @JoinColumn({ name: 'material_id' })
     externalPartnerMaterial: ExternalPartnerMaterial;
 
-    @ManyToOne(() => WasteCategory, (wt) => wt.institutions, {
+    // No inverse side: WasteCategory.institutions is the InstitutionWasteCategory
+    // collection only — this external-partner link must not reuse it.
+    @ManyToOne(() => WasteCategory, {
         nullable: true,
     })
     @JoinColumn({ name: 'waste_category_id' })

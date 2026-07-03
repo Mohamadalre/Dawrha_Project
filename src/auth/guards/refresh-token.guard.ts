@@ -23,7 +23,9 @@ export class RefreshTokenGuard implements CanActivate {
                     secret: this.configService.get<string>("JWT_REFRESH_SECRET")
                 })
                 const account = await this.userService.findById(payload.id || payload.sub)
-    
+                if (!account) {
+                    throw new UnauthorizedException("invalid token")
+                }
                 request['user'] = token;
                 request['id'] = account.id
             // eslint-disable-next-line @typescript-eslint/no-unused-vars

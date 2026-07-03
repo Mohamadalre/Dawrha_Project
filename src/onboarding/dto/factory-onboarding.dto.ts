@@ -1,6 +1,8 @@
 
+import { normalizeSyrianPhoneNumber } from "@src/common/utils/phone-normalization.provider";
 import { CollectionFrequeny } from "@src/user/enums/collectionFrequeny.enum";
 import { DeliverySchedule } from "@src/user/enums/delivery-schedule.enum";
+import { Transform } from 'class-transformer';
 import { IsNotEmpty, IsString, IsOptional, Matches, IsArray, ArrayNotEmpty, IsEnum, IsBoolean } from "class-validator";
 
 
@@ -21,12 +23,14 @@ export class InformationFactoryDto {
     @IsOptional()
     taxNumber?: string;
 
+    @IsNotEmpty({message:'The phone number is required'})
     @IsString()
-    @IsNotEmpty()
-    @Matches(/^011[0-9][0-9]{6}$/, {
-        message: 'The phone number must be a Syrian number',
-    })
-    landlinePhone: string;
+    @Transform(({ value }) => normalizeSyrianPhoneNumber(value)) 
+    @Matches(/^9639[3-9][0-9]{7}$/, {
+    message: 'The phone number must be a Syrian number',
+  })
+   phoneNumber: string;
+
 }
 
 

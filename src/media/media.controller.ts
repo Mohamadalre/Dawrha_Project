@@ -91,7 +91,7 @@ export class MediaController {
     }
 
     try {
-      const result = await this.mediaService.updateImage(file, mediaId, oldPublicId, user.id);
+      const result = await this.mediaService.updateImage(file, mediaId, oldPublicId, user.id, (user as any).role);
       this.logger.log(`Image updated successfully: ${mediaId}`);
       return result;
     } catch (error:any) {
@@ -147,7 +147,7 @@ export class MediaController {
     this.logger.log(`Image deletion initiated by user ${user.id} for media ${mediaId}`);
 
     try {
-      const result = await this.mediaService.deleteImage(mediaId);
+      const result = await this.mediaService.deleteImage(mediaId, user.id, (user as any).role);
       this.logger.log(`Image deleted successfully: ${mediaId}`);
       return result;
     } catch (error:any) {

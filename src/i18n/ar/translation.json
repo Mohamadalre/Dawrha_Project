@@ -1,6 +1,33 @@
 {
   "OPERATION_SUCCESS": "تمت العملية بنجاح",
 
+  "notifications": {
+    "categorySyncFailed": {
+      "title": "فشل مزامنة التصنيف",
+      "body": "تعذّرت مزامنة التصنيف \"{name}\" مع Odoo وتمت إزالته."
+    },
+    "productSyncFailed": {
+      "title": "فشل مزامنة المنتج",
+      "body": "تعذّرت مزامنة المنتج \"{name}\" مع Odoo وتمت إزالته."
+    },
+    "warehouseCreateFailed": {
+      "title": "فشل إنشاء المستودع",
+      "body": "تعذّر إنشاء المستودع \"{name}\" في Odoo وتمت إزالته من النظام."
+    },
+    "truckAssigned": {
+      "title": "تم تعيين سيارة",
+      "body": "تم تعيينك للسيارة \"{plate}\"."
+    },
+    "shiftChangeAccepted": {
+      "title": "قُبل طلب تغيير الوردية",
+      "body": "تمت الموافقة على طلب تغيير ورديتك، وأصبحت على السيارة \"{plate}\"."
+    },
+    "shiftChangeRejected": {
+      "title": "رُفض طلب تغيير الوردية",
+      "body": "رُفض طلب تغيير ورديتك. السبب: {reason}"
+    }
+  },
+
   "Categories fetched successfully": "تم جلب التصنيفات بنجاح",
   "Products fetched successfully": "تم جلب المنتجات بنجاح",
   "Search completed successfully": "تم البحث بنجاح",

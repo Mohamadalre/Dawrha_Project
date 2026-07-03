@@ -9,7 +9,9 @@ import {
 } from 'typeorm';
 import { TruckEntity } from './truck.entity';
 import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
+import { Shift } from '@src/shift/entities/shift.entity';
 
+/** One driver per (truck, shift). The "kasr" assignment table. */
 @Unique('UQ_TRUCK_SHIFT', ['truck', 'shift'])
 @Entity({ name: 'truck_assignments' })
 export class TruckAssignmentEntity {
@@ -20,17 +22,23 @@ export class TruckAssignmentEntity {
   @JoinColumn({ name: 'truck_id' })
   truck: TruckEntity;
 
+  @Column({ name: 'truck_id' })
+  truckId: string;
+
   @OneToOne(() => CollectorProfile, (driver) => driver.assignment, { nullable: false, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'driver_id' })
   driver: CollectorProfile;
 
-  @Column({
-    type: 'enum',
-    enum: ['morning', 'evening'],
-    nullable: false,
-  })
-  shift: string;
+  @Column({ name: 'driver_id' })
+  driverId: string;
 
-  @Column({ type: 'date' })
+  @ManyToOne(() => Shift, { nullable: false })
+  @JoinColumn({ name: 'shift_id' })
+  shift: Shift;
+
+  @Column({ name: 'shift_id' })
+  shiftId: string;
+
+  @Column({ type: 'timestamptz' })
   assignedAt: Date;
 }

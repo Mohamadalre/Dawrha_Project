@@ -28,9 +28,11 @@ import { PermissionsModule }
 from '../permission/permissions.module';
 
 /**
- * Warehouses and their managers are created INSIDE Odoo, not via this backend.
- * This module only mirrors them locally (import-odoo) and exposes read + sync
- * APIs — there is intentionally no warehouse/manager creation endpoint here.
+ * Warehouses are authored in THIS backend (POST /admin/warehouses) and pushed to
+ * Odoo by a background job; if the Odoo creation fails the job compensates by
+ * removing the local row. Managers are still assigned inside Odoo and mirrored
+ * back here (sync-manager / import-odoo). The module also exposes read + inventory
+ * sync APIs.
  */
 @Module({
   imports: [

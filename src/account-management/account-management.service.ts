@@ -182,6 +182,15 @@ export class AccountManagementService {
       updateData.description = dto.description;
     }
 
+    const profile = await this.profileResolver.getRepo(account.role).findOne({ where: { account: { id: accountId } } });
+    const media = await this.mediaRepo.find({ where: { ownerId: profile.id } });
+    if (media.map(t => t.status).some(s => s === statusMedia.PENDING)) {
+      throw new ConflictException('All media must be pending to approve/reject the account');
+    }
+
+ 
+    
+
     await this.accountRepo.update(account.id, updateData);
 
     // Tell the user the decision (approved / rejected / needs changes) and why.

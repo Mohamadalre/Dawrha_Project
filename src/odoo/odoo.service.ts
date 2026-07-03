@@ -86,7 +86,6 @@ export class OdooService {
           'Authentication failed',
         );
       }
-console.log(response.data);
 
       return {
         uid,
@@ -209,7 +208,6 @@ async createWarehouse(
 
   } catch (error) {
 
-    // إذا الخطأ جاهز (409 مثلاً) لا تغلفه
     if (
       error instanceof ConflictException ||
       error instanceof InternalServerErrorException
@@ -471,6 +469,40 @@ async createManager(dto: {
 
   async deleteProduct(odooId: number): Promise<void> {
     await this.callKw('recycle.product', 'unlink', [[odooId]]);
+  }
+
+  /**
+   * Creates a warehouse in the custom recycle_warehouse addon (recycle.warehouse)
+   * together with its zones. Warehouses are authored in the backend and pushed
+   * here; the admin only assigns a manager inside Odoo afterwards.
+   */
+  async createRecycleWarehouse(values: {
+    name: string;
+    code: string;
+    latitude?: number;
+    longitude?: number;
+    governorate?: string;
+    zones?: { name: string; type: string }[];
+  }): Promise<number> {
+    const payload: Record<string, any> = {
+      name: values.name,
+      code: values.code,
+    };
+    if (values.latitude != null) payload.latitude = values.latitude;
+    if (values.longitude != null) payload.longitude = values.longitude;
+    if (values.governorate) payload.governorate = values.governorate;
+    if (values.zones?.length) {
+      // Odoo One2many "create" commands: (0, 0, {values}) per zone.
+      payload.zone_ids = values.zones.map((z) => [
+        0,
+        0,
+        { name: z.name, zone_type: z.type },
+      ]);
+    }
+
+    const id = await this.callKw<number>('recycle.warehouse', 'create', [payload]);
+    if (!id) throw new InternalServerErrorException('Odoo did not return warehouse id');
+    return id;
   }
 
   /** Lists warehouses from the custom recycle_warehouse addon. */

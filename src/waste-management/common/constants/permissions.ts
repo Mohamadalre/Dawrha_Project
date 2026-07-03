@@ -22,8 +22,14 @@ export const WASTE_PERMISSIONS = {
   'admin.waste.delete': 'Delete categories/products',
   'admin.pricing.manage': 'Set product pricing',
   'admin.warehouse.view': 'View warehouse data',
+  'admin.warehouse.manage': 'Create and manage warehouses',
   'admin.warehouse.sync': 'Sync warehouse with Odoo',
   'admin.reports.view': 'View reports and statistics',
+  'admin.accounts.view': 'View accounts and onboarding profiles',
+  'admin.accounts.manage': 'Manage account status and media moderation',
+  'admin.trucks.view': 'View trucks and live tracking',
+  'admin.trucks.manage': 'Create and manage trucks',
+  'admin.shifts.manage': 'Edit work shift times',
 } as const;
 
 export type WastePermissionKey = keyof typeof WASTE_PERMISSIONS;

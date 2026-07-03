@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { TruckAssignmentEntity } from './truck-assignment.entity';
+import { TruckStatus } from '../enums/truck-status.enum';
 
 @Entity({ name: 'trucks' })
 export class TruckEntity {
@@ -42,10 +43,10 @@ export class TruckEntity {
 
   @Column({
     type: 'enum',
-    enum: ['active', 'maintenance', 'inactive'],
-    default: 'active',
+    enum: TruckStatus,
+    default: TruckStatus.ACTIVE,
   })
-  status: string;
+  status: TruckStatus;
 
   @OneToMany(() => TruckAssignmentEntity, (assignment) => assignment.truck)
   assignments: TruckAssignmentEntity[];

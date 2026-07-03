@@ -26,17 +26,21 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   async validate(payload: any) {
     const account = await this.accountRepository.findOne({ where: { id: payload.id || payload.sub } });
-
+    if (!account) {
+      throw new UnauthorizedException('Account not found');
+    }
     const key = `blackListToken:${account.id}`;
     const isBlackListed = await this.redisService.getRedisByKey(key);
-    if(isBlackListed) 
+ 
+    if(isBlackListed === payload.jti) 
       throw new UnauthorizedException('Token is invalidated, please login again');
-    if (!account || account.accountStatus == AccountStatus.INACTIVE || !account.isEmailVerified) {
+    if (account.accountStatus == AccountStatus.INACTIVE || !account.isEmailVerified) {
       throw new UnauthorizedException('Account is disabled or not found');
     }
     if (account.accountStatus == AccountStatus.BLOCKED) {
       throw new UnauthorizedException('Account is blocked ');
     }
+
 
 
     return { id: account.id, role: payload.role, email: account.email, accountStatus: account.accountStatus ,jti:payload.jti};

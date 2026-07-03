@@ -24,16 +24,23 @@ export class JwtTemporaryStrategy extends PassportStrategy(Strategy, 'jwtTempora
     });
   }
 
+  
   async validate(payload: any) {
     const account = await this.accountRepository.findOne({ where: { id: payload.id || payload.sub } });
+    if (!account) {
+      throw new UnauthorizedException('Account not found');
+    }
     const key = `blackListTokenTemp:${account.id}`;
     const isBlackListed = await this.redisService.getRedisByKey(key);
-    if (isBlackListed)
+    if (isBlackListed === payload.jti)
       throw new UnauthorizedException('Token temporary is invalidated');
-    if (!account || account.accountStatus !== AccountStatus.INACTIVE) {
-      throw new UnauthorizedException('Token is invalid or not found');
+    if (account.accountStatus !== AccountStatus.INACTIVE) {
+      throw new UnauthorizedException('Account is disabled or not found');
     }
 
-    return { id: account.id, role: payload.role, email: account.email };
+    return { id: account.id, role: payload.role, email: account.email,jti:payload.jti };
+
   }
+  
+  
 }

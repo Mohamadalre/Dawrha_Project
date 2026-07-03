@@ -3,6 +3,7 @@ import { seedAdmin } from './admin-seed';
 import { seedProvince } from './province-seed';
 import { seedPermissions } from './permissions-seed';
 import { seedInstitutionTypes } from './institution-type-seed';
+import { seedShifts } from './shift-seed';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 
 async function run() {
@@ -21,6 +22,7 @@ async function run() {
     await seedAdmin(AppDataSource);
     await seedProvince(AppDataSource);
     await seedInstitutionTypes(AppDataSource);
+    await seedShifts(AppDataSource);
 
     winstonLogger.info('Seed completed successfully', {
       context: 'SeedRunner',

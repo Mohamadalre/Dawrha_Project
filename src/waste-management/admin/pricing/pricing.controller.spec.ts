@@ -6,6 +6,7 @@ import { PricingController } from './pricing.controller';
 import { PricingService } from './pricing.service';
 import { Product } from '@src/waste-management/entities/product.entity';
 import { ProductPricing } from '@src/waste-management/entities/product-pricing.entity';
+import { ProductPricingHistory } from '@src/waste-management/entities/product-pricing-history.entity';
 import { CartItem } from '@src/waste-management/entities/cart-item.entity';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { AuditService } from '@src/waste-management/common/providers/audit.service';
@@ -38,6 +39,11 @@ describe('PricingController (integration)', () => {
     save: jest.fn((x) => Promise.resolve(x)),
     find: jest.fn().mockResolvedValue([]),
   };
+  const historyRepo = {
+    create: jest.fn((x) => x),
+    save: jest.fn((x) => Promise.resolve(x)),
+    find: jest.fn().mockResolvedValue([]),
+  };
   const cartItemRepo = { find: jest.fn().mockResolvedValue([]), save: jest.fn() };
   const odooSync = { enqueueUpdatePricing: jest.fn().mockResolvedValue(undefined) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
@@ -49,6 +55,7 @@ describe('PricingController (integration)', () => {
         PricingService,
         { provide: getRepositoryToken(Product), useValue: productRepo },
         { provide: getRepositoryToken(ProductPricing), useValue: pricingRepo },
+        { provide: getRepositoryToken(ProductPricingHistory), useValue: historyRepo },
         { provide: getRepositoryToken(CartItem), useValue: cartItemRepo },
         { provide: OdooSyncService, useValue: odooSync },
         { provide: AuditService, useValue: audit },
@@ -108,7 +115,7 @@ describe('PricingController (integration)', () => {
       .expect(400);
   });
 
-  it('GET /admin/waste/products/:id/pricing returns the grouped history', async () => {
+  it('GET /admin/waste/products/:id/pricing returns the current live prices', async () => {
     pricingRepo.find.mockResolvedValueOnce([
       {
         tier: 'INDIVIDUAL',
@@ -124,6 +131,46 @@ describe('PricingController (integration)', () => {
       .expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(res.body.data.tiers.individual.current).toBe(0.3);
+    expect(res.body.data.pricing.individual).toBe(0.3);
+    expect(res.body.data.pricing.company).toBeNull();
+  });
+
+  it('GET /admin/waste/products/:id/pricing/history returns archived prices per tier', async () => {
+    historyRepo.find.mockResolvedValueOnce([
+      {
+        tier: 'FACTORY',
+        price: '0.25',
+        currency: 'JOD',
+        effectiveFrom: new Date(Date.now() - 2000),
+        archivedAt: new Date(Date.now() - 1000),
+        archivedReason: 'UPDATED',
+      },
+    ]);
+
+    const res = await request(app.getHttpServer())
+      .get(`/admin/waste/products/${PRODUCT_ID}/pricing/history`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.tiers.factory).toHaveLength(1);
+    expect(res.body.data.tiers.factory[0].archived_reason).toBe('UPDATED');
+  });
+
+  it('PATCH /admin/waste/products/:id/pricing/:tier edits a single tier', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/admin/waste/products/${PRODUCT_ID}/pricing/FACTORY`)
+      .send({ price: 0.5 })
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.tier).toBe('factory');
+    expect(res.body.data.price).toBe(0.5);
+  });
+
+  it('PATCH rejects an unknown tier (400)', async () => {
+    await request(app.getHttpServer())
+      .patch(`/admin/waste/products/${PRODUCT_ID}/pricing/PLATINUM`)
+      .send({ price: 0.5 })
+      .expect(400);
   });
 });

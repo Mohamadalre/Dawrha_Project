@@ -5,7 +5,7 @@ import { Role } from '@src/user/enums/role.enum';
 import { MediaService } from '@src/media/media.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Account } from '@src/user/entities/account.entity';
-import { MediaDto } from '../dto/media.dto';
+import { FactoryMediaDto } from '../dto/media.dto';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { AccountStatusGuard } from '@src/auth/guards/account-status.guard';
 import { AccountsStatus } from '@src/auth/decorators/account-status.decorator';
@@ -13,7 +13,6 @@ import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { InformationFactoryDto, WasteFactoryDto } from '../dto/factory-onboarding.dto';
 import { ProfileOwnerGuard } from '../gurads/profile-owner.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { MediaType } from '@src/media/entities/media.entity';
 import { imageMemoryStorage } from '@src/common/config/multer/image-memory.config';
 import { Repository } from 'typeorm';
 import { CommonService } from '@src/common/common.service';
@@ -55,7 +54,7 @@ export class FactoryOnboardingController {
     @Body() dto: InformationFactoryDto,
     @Req() req,
   ) {
-    const data = await this.factoryOnboardingService.addFactoryInformation(dto, req.user, file);
+    const data = await this.factoryOnboardingService.addFactoryInformation(dto, req.user.id, file);
     return { message: 'Factory information added successfully', status: data };
   }
 
@@ -92,7 +91,7 @@ export class FactoryOnboardingController {
   @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
   async uploadFileFactory(
     @UploadedFile() file: Express.Multer.File,
-    @Body() dto: MediaDto,
+    @Body() dto: FactoryMediaDto,
     @Req() req,
   ) {
     const role = req.user.role;
@@ -104,9 +103,7 @@ export class FactoryOnboardingController {
     if (step !== 'documents') {
       throw new ForbiddenException('You cannot add documents data, you must complete the previous stage');
     }
-    if (role === Role.FACTORY && dto.fileType !== MediaType.INDUSTRIAL_REG && dto.fileType !== MediaType.LICENSE) {
-      throw new ForbiddenException(`You cannot add image of a type ${dto.fileType}`);
-    }
+    // fileType is restricted to LICENSE + INDUSTRIAL_REG by FactoryMediaDto.
     const data = await this.mediaService.uploadImage(file, { ownerId: req.profile.id, ownerType: role, fileType: dto.fileType }, req.user.id);
     return { message: 'Upload image successfully', data };
   }

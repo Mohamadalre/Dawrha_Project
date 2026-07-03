@@ -1,8 +1,10 @@
-import { IsString, IsNotEmpty, IsNumber, IsOptional, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsNumber, IsOptional, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
-const TRUCK_STATUSES = ['active', 'maintenance', 'inactive'] as const;
-
+/**
+ * Create a truck. New trucks always start ACTIVE; status is managed afterwards.
+ * Only the mechanics image is accepted (driving-license & truck images removed).
+ */
 export class CreateTruckDto {
   @IsString()
   @IsNotEmpty()
@@ -19,20 +21,18 @@ export class CreateTruckDto {
   @IsOptional()
   @IsNumber()
   @Type(() => Number)
+  @Min(0)
   maxPayloadKg?: number;
 
   @IsOptional()
   @IsNumber()
   @Type(() => Number)
+  @Min(0)
   lengthM?: number;
 
   @IsOptional()
   @IsNumber()
   @Type(() => Number)
+  @Min(0)
   widthM?: number;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(TRUCK_STATUSES)
-  status?: string;
 }

@@ -36,6 +36,7 @@ import { WarehouseModule } from './warehouse/warehouse.module';
 import { OdooSyncModule } from './odoo-sync/odoo-sync.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
 import { ReportsModule } from './reports/reports.module';
+import { ShiftModule } from './shift/shift.module';
 
 
 
@@ -88,7 +89,8 @@ import { ReportsModule } from './reports/reports.module';
     WarehouseModule,
     OdooSyncModule,
     MaintenanceModule,
-    ReportsModule
+    ReportsModule,
+    ShiftModule
   ],
   controllers: [AppController],
   providers: [
