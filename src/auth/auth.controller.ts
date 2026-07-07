@@ -15,6 +15,8 @@ import { JwtTemporaryGuard } from './guards/jwt-temporary.guard';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { LoginGoogleDto } from './dto/logoin-google.dto';
 import { VerifyResetOtpDto } from './dto/verifyReset-otp.dto';
+import { UpdateDeviceLanguageDto } from './dto/update-device-language.dto';
+
 
 
 
@@ -129,7 +131,7 @@ export class AuthController {
   }
 
   /**
-   * Login as collector_app.
+   * Login as collector-app.
    * @param loginDto body payload containing email and password
    * @returns JWT tokens if credentials and type-app match
    */
@@ -144,7 +146,7 @@ export class AuthController {
 
 
   /**
-   * Login as factory_app.
+   * Login as factory-app.
    * @param loginDto body payload containing email and password
    * @returns JWT tokens if credentials and type-app match
    */
@@ -160,7 +162,7 @@ export class AuthController {
 
 
   /**
-   * Google login for user app.
+   * Google login for user-app.
    * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken ant remember is true
    * @returns JWT tokens if the Google token is valid and type app matches
    */
@@ -172,7 +174,7 @@ export class AuthController {
   }
 
   /**
-   * Google login for collector app.
+   * Google login for collector-app.
    * @param dto body payload containing Tokenid, deviceId, deviceType and optional fcmToken and remember is true
    * @returns JWT tokens if the Google token is valid and type app matches
    */
@@ -192,11 +194,21 @@ export class AuthController {
 
 
 
-  @Put('FCMToken')
+
+
+  /**
+   * Update the notification language of the caller's device. Subsequent push
+   * notifications to this device are localized accordingly.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Patch('device/language')
   @HttpCode(200)
-  async addFCMToken(@Body() dto:DeviceDto,@CurrentUser() user:any){
-    const result = await this.authService.addFCMToken(dto, user.id)
-    return result.message;
+  async updateDeviceLanguage(
+    @CurrentUser() user: any,
+    @Body() dto: UpdateDeviceLanguageDto,
+  ) {
+    const result = await this.authService.updateDeviceLanguage(user.id, dto.deviceId, dto.language);
+    return { message: result.message, result };
   }
 
 
@@ -302,6 +314,15 @@ export class AuthController {
     return { message: 'Logout successfully' }
   }
 
+
+  @UseGuards(JwtAuthGuard)
+  @Put('FCMToken')
+  @HttpCode(200)
+  async addFCMToken(@CurrentUser() user: any,@Body() dto:DeviceDto){
+  
+    const result = await this.authService.addFCMToken(dto,user.id)
+    return result.message;
+  }
 
 
 

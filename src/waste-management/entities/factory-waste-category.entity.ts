@@ -14,7 +14,9 @@ export class FactoryWasteCategory {
     @JoinColumn({ name: 'material_id' })
     factoryMaterial: FactoryMaterial;
 
-    @ManyToOne(() => WasteCategory, (wt) => wt.institutions, {
+    // No inverse side: WasteCategory.institutions is the InstitutionWasteCategory
+    // collection only — this factory link must not reuse it.
+    @ManyToOne(() => WasteCategory, {
         nullable: true,
     })
     @JoinColumn({ name: 'waste_category_id' })

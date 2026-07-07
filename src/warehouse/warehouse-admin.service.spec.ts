@@ -1,5 +1,11 @@
-import { Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { WarehouseAdminService } from './warehouse-admin.service';
+import { WarehouseZoneType } from './enums/warehouse-zone-type.enum';
 
 describe('WarehouseAdminService', () => {
   let service: WarehouseAdminService;
@@ -22,9 +28,67 @@ describe('WarehouseAdminService', () => {
     managerRepo = { findOne: jest.fn(), create: jest.fn((x) => x), save: jest.fn((x) => x) };
     inventoryRepo = { find: jest.fn().mockResolvedValue([]), findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
     odoo = { fetchWarehouses: jest.fn(), fetchWarehouseManager: jest.fn() };
-    odooSync = { enqueueSyncWarehouse: jest.fn().mockResolvedValue(undefined) };
+    odooSync = {
+      enqueueSyncWarehouse: jest.fn().mockResolvedValue(undefined),
+      enqueueCreateWarehouse: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new WarehouseAdminService(warehouseRepo, managerRepo, inventoryRepo, odoo, odooSync);
+  });
+
+  describe('create', () => {
+    const dto = {
+      name: 'North Hub',
+      code: 'NH1',
+      latitude: 33.5,
+      longitude: 36.3,
+      zones: [{ name: 'Main', type: WarehouseZoneType.STORAGE }],
+    };
+
+    it('rejects a duplicate code', async () => {
+      warehouseRepo.findOne.mockResolvedValue({ id: 'w0', code: 'NH1' });
+      await expect(service.create(dto)).rejects.toBeInstanceOf(ConflictException);
+      expect(odooSync.enqueueCreateWarehouse).not.toHaveBeenCalled();
+    });
+
+    it('saves locally (PENDING) and queues the Odoo create job', async () => {
+      warehouseRepo.findOne.mockResolvedValue(null);
+      warehouseRepo.save.mockResolvedValue({ id: 'w1', name: 'North Hub', code: 'NH1', odooSyncStatus: 'PENDING', zones: dto.zones });
+
+      const res = await service.create(dto);
+
+      expect(warehouseRepo.save).toHaveBeenCalled();
+      expect(odooSync.enqueueCreateWarehouse).toHaveBeenCalledWith({ warehouseId: 'w1' });
+      expect(res.status).toBe('QUEUED');
+      expect(res.odoo_sync_status).toBe('PENDING');
+    });
+  });
+
+  describe('syncManagerFromOdoo', () => {
+    it('throws NotFound for an unknown warehouse', async () => {
+      warehouseRepo.findOne.mockResolvedValue(null);
+      await expect(service.syncManagerFromOdoo('w1')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws BadRequest when the warehouse is not yet in Odoo', async () => {
+      warehouseRepo.findOne.mockResolvedValue({ id: 'w1', odooWarehouseId: null });
+      await expect(service.syncManagerFromOdoo('w1')).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('mirrors the Odoo-assigned manager into the backend', async () => {
+      warehouseRepo.findOne.mockResolvedValue({ id: 'w1', odooWarehouseId: 7 });
+      odoo.fetchWarehouseManager.mockResolvedValue({ id: 99, name: 'Sara', login: 'sara@x.com', email: 'sara@x.com', phone: '123' });
+      // first findOne (in syncManager) → not existing; final findOne → the saved manager
+      managerRepo.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'm1', fullName: 'Sara', email: 'sara@x.com', phone: '123' });
+
+      const res = await service.syncManagerFromOdoo('w1');
+
+      expect(managerRepo.save).toHaveBeenCalled();
+      expect(res.manager?.name).toBe('Sara');
+      expect(res.message).toContain('synced');
+    });
   });
 
   describe('sync', () => {

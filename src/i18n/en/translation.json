@@ -1,3 +1,30 @@
 {
-  "OPERATION_SUCCESS": "Operation completed successfully"
+  "OPERATION_SUCCESS": "Operation completed successfully",
+
+  "notifications": {
+    "categorySyncFailed": {
+      "title": "Category sync failed",
+      "body": "The category \"{name}\" could not be synced to Odoo and was removed."
+    },
+    "productSyncFailed": {
+      "title": "Product sync failed",
+      "body": "The product \"{name}\" could not be synced to Odoo and was removed."
+    },
+    "warehouseCreateFailed": {
+      "title": "Warehouse creation failed",
+      "body": "The warehouse \"{name}\" could not be created in Odoo and was removed."
+    },
+    "truckAssigned": {
+      "title": "Truck assigned",
+      "body": "You have been assigned to truck \"{plate}\"."
+    },
+    "shiftChangeAccepted": {
+      "title": "Shift change accepted",
+      "body": "Your shift-change request was accepted; you are now on truck \"{plate}\"."
+    },
+    "shiftChangeRejected": {
+      "title": "Shift change rejected",
+      "body": "Your shift-change request was rejected. Reason: {reason}"
+    }
+  }
 }

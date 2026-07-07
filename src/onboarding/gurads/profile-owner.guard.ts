@@ -22,6 +22,9 @@ export class ProfileOwnerGuard implements CanActivate {
         const req = context.switchToHttp().getRequest();
 
         const account = req.user;
+        const accountProfile = await this.accountRep.findOne({ where: { id: account.id } })
+        if(!accountProfile)
+            throw new NotFoundException('Account not found');
 
         if (account.accountStatus !== AccountStatus.PENDING_PROFILE)
             throw new UnauthorizedException('Account is not pending profile completion');
@@ -30,15 +33,14 @@ export class ProfileOwnerGuard implements CanActivate {
             throw new ForbiddenException('You are not allowed');
         }
         const repo = this.resolver.getRepo(account.role);
-        const accountProfile = await this.accountRep.findOne({ where: { id: account.id } })
+
 
 
         const profile = await repo.findOne({
             where: {account: { id: account.id }},
             relations: ['account']
         });
-        console.log(profile);
-        
+
         if (!profile) {
             throw new NotFoundException('Profile not found');
         }

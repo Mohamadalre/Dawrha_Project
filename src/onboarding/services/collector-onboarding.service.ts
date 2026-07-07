@@ -14,6 +14,7 @@ import { WasteCategory } from '@src/waste-management/entities/waste-category.ent
 import { CommonService } from '@src/common/common.service';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { AccountStatusNotifier } from '@src/notification/account-status.notifier';
+import { ShiftService } from '@src/shift/shift.service';
 
 @Injectable()
 export class CollectorOnboardingService extends OnboardingService {
@@ -31,7 +32,8 @@ export class CollectorOnboardingService extends OnboardingService {
     cloudinaryService: CloudinaryService,
     statusNotifier: AccountStatusNotifier,
     @InjectRepository(CollectorProfile)
-    private readonly collectorRepo: Repository<CollectorProfile>
+    private readonly collectorRepo: Repository<CollectorProfile>,
+    private readonly shiftService: ShiftService,
   ) {
     super(progressRepo, resolver, provinceRepo, acccountRepo, wasteCategoryRepo, commonService, cloudinaryService, statusNotifier);
   }
@@ -57,8 +59,10 @@ export class CollectorOnboardingService extends OnboardingService {
     if (exist) {
       throw new ForbiddenException('You cannot add the information again,please move to the next stage')
     }
+    // Validate the chosen shift exists (throws NotFound otherwise).
+    await this.shiftService.getOrThrow(dto.shiftId);
     const information = this.collectorRepo.create({
-      shift: dto.shift,
+      shiftId: dto.shiftId,
       NationalID: dto.NationalID,
       account: account
     })

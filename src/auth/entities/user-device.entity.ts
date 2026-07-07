@@ -1,5 +1,6 @@
 import { Account } from '@src/user/entities/account.entity';
 import { DeviceType } from '@src/user/enums/deviec-type.enum';
+import { Language } from '@src/common/enums/language.enum';
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, JoinColumn, ManyToOne, Unique } from 'typeorm';
 
 
@@ -35,6 +36,14 @@ export class UserDevice {
     nullable: true
   })
   deviceType: DeviceType;
+
+  /** Preferred language for push notifications sent to this device. */
+  @Column({
+    type: 'enum',
+    enum: Language,
+    default: Language.EN,
+  })
+  language: Language;
 
   @Column({ type: 'timestamp', nullable: true })
   lastLogin: Date;

@@ -1,6 +1,5 @@
 
-import { Shift } from "@src/user/enums/shift.enum";
-import { IsNotEmpty, IsString, IsOptional, Matches, IsEnum, IsUUID } from "class-validator";
+import { IsNotEmpty, IsString, IsOptional, Matches, IsUUID } from "class-validator";
 
 export class InformationCollectorDto {
     @IsNotEmpty()
@@ -9,10 +8,11 @@ export class InformationCollectorDto {
     })
     NationalID: string;
 
+    // The chosen work shift (from GET /shifts) — id, not an enum value.
     @IsNotEmpty()
     @IsString()
-    @IsEnum(Shift)
-    shift: Shift;
+    @IsUUID()
+    shiftId: string;
 
 }
 

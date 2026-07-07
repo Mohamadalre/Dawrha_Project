@@ -1,12 +1,20 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { Warehouse } from './entities/warehouse.entity';
 import { WarehouseManager } from './entities/warehouse-manager.entity';
 import { WarehouseInventory } from './entities/warehouse-inventory.entity';
+import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { OdooService } from '@src/odoo/odoo.service';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
+import { OdooSyncStatus } from '@src/waste-management/enums/odoo-sync-status.enum';
 import { buildPagination, PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 import { StockStatus } from '@src/waste-management/enums/stock-status.enum';
 
@@ -24,6 +32,74 @@ export class WarehouseAdminService {
     private readonly odoo: OdooService,
     private readonly odooSync: OdooSyncService,
   ) {}
+
+  /**
+   * Creates a warehouse FROM the backend. It is saved locally as PENDING and a
+   * background job pushes it to Odoo (recycle.warehouse + zones). If the Odoo
+   * creation ultimately fails, the job's compensation removes this row, so a
+   * warehouse never lingers in the backend without its Odoo counterpart.
+   * The admin assigns a manager later inside Odoo (synced via sync-manager).
+   */
+  async create(dto: CreateWarehouseDto) {
+    const existing = await this.warehouseRepo.findOne({ where: { code: dto.code } });
+    if (existing) throw new ConflictException('Warehouse code already exists');
+
+    const warehouse = this.warehouseRepo.create({
+      name: dto.name,
+      code: dto.code,
+      latitude: dto.latitude != null ? String(dto.latitude) : undefined,
+      longitude: dto.longitude != null ? String(dto.longitude) : undefined,
+      address: dto.address,
+      zones: dto.zones?.map((z) => ({ name: z.name, type: z.type })),
+      odooSyncStatus: OdooSyncStatus.PENDING,
+      isActive: true,
+    });
+    const saved = await this.warehouseRepo.save(warehouse);
+
+    await this.odooSync.enqueueCreateWarehouse({ warehouseId: saved.id });
+
+    return {
+      warehouse_id: saved.id,
+      name: saved.name,
+      code: saved.code,
+      zones: saved.zones ?? [],
+      odoo_sync_status: saved.odooSyncStatus,
+      status: 'QUEUED',
+      message: 'Warehouse created and queued for Odoo sync',
+    };
+  }
+
+  /**
+   * Pulls the manager the admin assigned to this warehouse in Odoo and mirrors
+   * it into the backend (warehouse_managers).
+   */
+  async syncManagerFromOdoo(warehouseId: string) {
+    const warehouse = await this.warehouseRepo.findOne({ where: { id: warehouseId } });
+    if (!warehouse) throw new NotFoundException('Warehouse not found');
+    if (!warehouse.odooWarehouseId) {
+      throw new BadRequestException('Warehouse is not synced to Odoo yet');
+    }
+
+    await this.syncManager(warehouse);
+
+    const manager = await this.managerRepo.findOne({
+      where: { warehouse: { id: warehouse.id } },
+      relations: ['warehouse'],
+    });
+
+    return {
+      warehouse_id: warehouse.id,
+      manager: manager
+        ? {
+            manager_id: manager.id,
+            name: manager.fullName,
+            email: manager.email,
+            phone: manager.phone,
+          }
+        : null,
+      message: manager ? 'Manager synced from Odoo' : 'No manager assigned in Odoo yet',
+    };
+  }
 
   /**
    * Imports warehouses (and their managers) FROM Odoo into the local DB.

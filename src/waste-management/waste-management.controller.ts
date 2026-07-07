@@ -5,6 +5,8 @@ import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '@src/auth/guards/roles.guard';
 import { Roles } from '@src/auth/decorators/roles.decorator';
 import { Role } from '@src/user/enums/role.enum';
+import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
+import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { imageMemoryStorage } from '@src/common/config/multer/image-memory.config';
 
@@ -12,7 +14,7 @@ import { imageMemoryStorage } from '@src/common/config/multer/image-memory.confi
  * Controller for waste management operations
  * Handles waste category creation and retrieval
  */
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller({
   path: 'waste-management',
   version: '1'
@@ -26,8 +28,8 @@ export class WasteManagementController {
    * @param dto - Waste category data
    * @returns Success message with created category data
    */
-  @Roles(Role.ADMIN)
-  @UseInterceptors(FileInterceptor('file', imageMemoryStorage)) 
+  @Permissions('admin.waste.create')
+  @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
   @Post('waste-category')
   async create(@Body() dto: CreateWasteCategory,@UploadedFile() file: Express.Multer.File,) {
     const data = await this.wasteManagementService.create(dto, file)

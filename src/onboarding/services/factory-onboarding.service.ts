@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { OnboardingService } from '../onboarding.service';
@@ -48,6 +48,9 @@ export class FactoryOnboardingService extends OnboardingService {
    */
   async addFactoryInformation(dto: InformationFactoryDto, userId: string, file?: Express.Multer.File) {
     const account = await this.acccountRepo.findOne({ where: { id: userId } })
+    if (!account) {
+    throw new NotFoundException('Account not found');
+}
     const step = await this.commonService.getCurrentStep(account)
     if (step !== 'information') {
       throw new ForbiddenException('You cannot add information data,you must add data from the previous');
@@ -58,7 +61,7 @@ export class FactoryOnboardingService extends OnboardingService {
     }
 
     // Check for unique fields
-    const phoneExists = await this.factoryRepo.findOne({ where: { factoryPhone: dto.landlinePhone } });
+    const phoneExists = await this.factoryRepo.findOne({ where: { factoryPhone: dto.phoneNumber } });
     if (phoneExists) {
       throw new BadRequestException('Factory phone number already exists');
     }
@@ -79,17 +82,18 @@ export class FactoryOnboardingService extends OnboardingService {
         throw new BadRequestException('Tax number already exists');
       }
     }
-
+  
     const information = this.factoryRepo.create({
       factoryName: dto.factoryName,
-      factoryPhone: dto.landlinePhone,
+      factoryPhone: dto.phoneNumber,
       factorySlogo: '', // temporary
       taxNumber: dto.taxNumber,
       commercialRecord: dto.commercialRecord,
       industrialRecord: dto.industrialRecord,
-      account: account
+      account:account
     })
     const profile = await this.factoryRepo.save(information);
+
 
     // Upload logo if file provided
     if (file) {

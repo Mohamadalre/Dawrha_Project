@@ -30,6 +30,7 @@ import { ExternalPartnerProfile } from '@src/user/entities/profile/external-part
 import { InstitutionMaterial } from '@src/user/entities/material/institution-material.entity';
 import { CoreModule } from '@src/core/core.module';
 import { NotificationModule } from '@src/notification/notification.module';
+import { ShiftModule } from '@src/shift/shift.module';
 
 
 
@@ -52,7 +53,7 @@ import { NotificationModule } from '@src/notification/notification.module';
     MediaModule,
     CommonModule,
     CoreModule,
-  
+    ShiftModule,
   ],
   controllers: [OnboardingController, InstitutionOnboardingController, FactoryOnboardingController, ExternalPartnerOnboardingController, CollectorOnboardingController],
   providers: [

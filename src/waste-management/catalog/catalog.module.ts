@@ -7,14 +7,14 @@ import { ProductPricing } from '../entities/product-pricing.entity';
 import { Offer } from '../entities/offer.entity';
 import { WasteCommonModule } from '../common/waste-common.module';
 import { CatalogController } from './catalog.controller';
+import { PublicCatalogController } from './public-catalog.controller';
 import { CatalogService } from './catalog.service';
-import { HomeController } from './home.controller';
-import { HomeService } from './home.service';
 
 /**
- * Buyer-facing read side: categories, products, search, offers and the home
- * aggregator. Category restriction per role comes from AssignedCategoryProvider
- * (WasteCommonModule).
+ * Buyer-facing read side: each concern (categories, products, search, offers)
+ * has its own route in CatalogController; PublicCatalogController exposes the
+ * guest-accessible subset. Category restriction per role comes from
+ * AssignedCategoryProvider (WasteCommonModule).
  */
 @Module({
   imports: [
@@ -22,7 +22,7 @@ import { HomeService } from './home.service';
     PermissionsModule,
     WasteCommonModule,
   ],
-  controllers: [CatalogController, HomeController],
-  providers: [CatalogService, HomeService],
+  controllers: [CatalogController, PublicCatalogController],
+  providers: [CatalogService],
 })
 export class CatalogModule {}

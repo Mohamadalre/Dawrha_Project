@@ -25,7 +25,7 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import Redis from 'ioredis';
 import { AuthProvider } from '@src/user/enums/auth-provider.enum';
 import { LoginGoogleDto } from './dto/logoin-google.dto';
-import { verifyGoogleToken } from './utils/google.provider';
+import { verifyGoogleToken } from './utils/providers/google.provider';
 import { LoginHandler } from './handlers/login.handler';
 import { ActiveHandler } from './handlers/active.handler';
 import { PendingProfileHandler } from './handlers/pending-profile.handler';
@@ -36,8 +36,8 @@ import { InactiveHandler } from './handlers/inactive.handler';
 import { NeedChangeHandler } from './handlers/needChange.handler';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 import { VerifyResetOtpDto } from './dto/verifyReset-otp.dto';
+import { Language } from '@src/common/enums/language.enum';
 import { AllowedAccountType } from './utils/constants/AllowedAccountType';
-
 
 
 
@@ -215,7 +215,9 @@ export class AuthService {
 
     const cdKey = `forgotPassword:cooldown:${email}`;
     const ttl = await this.redis.ttl(cdKey);
-
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
     if (ttl > 0) {
       throw new HttpException(
         {
@@ -241,6 +243,8 @@ export class AuthService {
           task: 'auth',
         },
       });
+      throw new NotFoundException("Account not found");
+
     }
 
     return { message: 'If this email exists, an OTP has been sent.' };
@@ -412,7 +416,7 @@ export class AuthService {
    * @returns object containing a temporary token
    */
   async generateTemporaryTokens(accountId: string, role: Role, accountStatus: AccountStatus) {
-    const payload = { id: accountId, role: role, accountStatus, jti: randomBytes(16).toString('base64url') };
+    const payload = { id: accountId, role: role, accountStatus: accountStatus, jti: randomBytes(16).toString('base64url') };
     const TemporaryToken = await this.jwtService.signAsync(payload,
       {
         secret: this.configService.get<string>('JWT_TEMPORARY_SECRET'),
@@ -469,8 +473,9 @@ export class AuthService {
    * @returns accessToken, refreshToken, accountStatus, role
    */
   async loginWithGoogle({ TokenId, deviceId, deviceType, fcmToken, rememberMy }: LoginGoogleDto, role: string) {
-    const { email, googleId, } = await verifyGoogleToken(TokenId);
+    const { email, googleId } = await verifyGoogleToken(TokenId);
     const allowed = AllowedAccountType[role];
+
     const account = await this.accountRepository.findOne({
       where: { email: email },
     });
@@ -480,9 +485,9 @@ export class AuthService {
       throw new NotFoundException('Account not found. Please register first.');
     }
 
-
     if (!allowed || !allowed.includes(account.role)) {
-      throw new UnauthorizedException('This account is not authorized for this application')
+      throw new UnauthorizedException('This account is not authorized for this application');
+
     }
 
     if (!account.googleId) {
@@ -493,19 +498,21 @@ export class AuthService {
 
     const handler = this.handlers[account.accountStatus];
     const details = await handler.handle(account, { deviceId, fcmToken, deviceType, rememberMy });
-    return { details: details, role: account.role }
+
+    return { details, role: account.role };
+
   }
 
 
   async registerWithGoogle({ TokenId, deviceId, deviceType, fcmToken }: LoginGoogleDto, role: Role) {
     const { name, email, googleId, picture } = await verifyGoogleToken(TokenId);
 
-    const account = await this.accountRepository.findOne({
+
+    const existing = await this.accountRepository.findOne({
       where: { email: email },
     });
 
-
-    if (account) {
+    if (existing) {
       throw new BadRequestException('The email already exists. Please login instead.');
     }
 
@@ -528,12 +535,13 @@ export class AuthService {
     const handler = this.handlers[accountCreated.accountStatus];
     const details = await handler.handle(accountCreated, { deviceId, fcmToken, deviceType });
     return { details: details, role: accountCreated.role }
+
   }
 
 
   async addFCMToken({ deviceId, deviceType, fcmToken }: DeviceDto, userId: string) {
 
-    let account = await this.accountRepository.findOne({
+    const account = await this.accountRepository.findOne({
       where: { id: userId },
     });
 
@@ -549,10 +557,24 @@ export class AuthService {
 
 
     return { message: 'FCM token updated successfully.' }
+
   }
 
+  /**
+   * Updates the notification language of one of the caller's devices. Push
+   * notifications to that device are then localized to the chosen language.
+   */
+  async updateDeviceLanguage(userId: string, deviceId: string, language: Language) {
+    const device = await this.userDeviceRepository.findOne({
+      where: { accountId: userId, deviceId },
+    });
+    if (!device) {
+      throw new NotFoundException('Device not found.');
+    }
 
-
+    await this.userDeviceRepository.update({ accountId: userId, deviceId }, { language });
+    return { message: 'Device language updated successfully', language };
+  }
 
 
 

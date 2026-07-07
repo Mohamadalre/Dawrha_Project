@@ -5,7 +5,7 @@ import { Role } from '@src/user/enums/role.enum';
 import { MediaService } from '@src/media/media.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Account } from '@src/user/entities/account.entity';
-import { MediaDto } from '../dto/media.dto';
+import { CollectorMediaDto } from '../dto/media.dto';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { AccountStatusGuard } from '@src/auth/guards/account-status.guard';
 import { AccountsStatus } from '@src/auth/decorators/account-status.decorator';
@@ -13,7 +13,6 @@ import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { InformationCollectorDto, LocationCollectorDto } from '../dto/collector-onboarding.dto';
 import { ProfileOwnerGuard } from '../gurads/profile-owner.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { MediaType } from '@src/media/entities/media.entity';
 import { imageMemoryStorage } from '@src/common/config/multer/image-memory.config';
 import { Repository } from 'typeorm';
 import { CommonService } from '@src/common/common.service';
@@ -71,13 +70,12 @@ export class CollectorOnboardingController {
   @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
   async uploadFileCollector(
     @UploadedFile() file: Express.Multer.File,
-    @Body() dto: MediaDto,
+    @Body() dto: CollectorMediaDto,
     @Req() req,
   ) {
     const role = req.user.role;
     const account = await this.accountRepo.findOne({ where: { id: req.user.id } });
-  
-    
+
     if (!file) {
       throw new BadRequestException('file is required');
     }
@@ -86,9 +84,7 @@ export class CollectorOnboardingController {
       throw new ForbiddenException('You cannot add documents data, you must complete the previous stage');
     }
 
-    if (dto.fileType !== MediaType.ID_CARD_BACK && dto.fileType !== MediaType.ID_CARD_FRONT) {
-      throw new ForbiddenException(`You cannot add image of a type ${dto.fileType}`);
-    }
+    // fileType is restricted to the collector's document types by CollectorMediaDto.
     const data = await this.mediaService.uploadImage(file, { ownerId: req.profile.id, ownerType: role, fileType: dto.fileType }, req.user.id);
     return { message: 'Upload image successfully', data };
   }

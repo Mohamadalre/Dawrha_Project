@@ -1,15 +1,14 @@
 import { Controller, Get, Patch, Param, Body, Query, UseGuards, DefaultValuePipe, ParseIntPipe, ParseUUIDPipe } from '@nestjs/common';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
-import { RolesGuard } from '@src/auth/guards/roles.guard';
-import { Roles } from '@src/auth/decorators/roles.decorator';
+import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
+import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { Role } from '@src/user/enums/role.enum';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { AccountManagementService } from './account-management.service';
 import { BlockedAccountStatusDto, UpdateAccountStatusDto } from './dto/update-account-status.dto';
 import { UpdateMediaStatusDto } from './dto/update-media-status.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller({
   path: 'account-management',
   version: '1',
@@ -20,6 +19,7 @@ export class AccountManagementController {
   ) {}
 
   @Patch('media/:mediaId/status')
+  @Permissions('admin.accounts.manage')
   async updateMediaStatus(
     @Param('mediaId') mediaId: string,
     @Body() dto: UpdateMediaStatusDto,
@@ -28,12 +28,14 @@ export class AccountManagementController {
   }
 
   @Get(':profileId/media')
+  @Permissions('admin.accounts.view')
   async getProfileMedia(@Param('profileId') profileId: string) {
     return this.accountManagementService.getProfileMedia(profileId);
   }
 
   /** Full profile detail (profile + materials + image ids only). */
   @Get('profile/:profileId')
+  @Permissions('admin.accounts.view')
   async getProfileDetails(@Param('profileId', ParseUUIDPipe) profileId: string) {
     const result = await this.accountManagementService.getProfileDetails(profileId);
     return { message: 'Profile fetched successfully', result };
@@ -41,12 +43,14 @@ export class AccountManagementController {
 
   /** Full details of a single image. */
   @Get('media/:mediaId')
+  @Permissions('admin.accounts.view')
   async getMediaDetails(@Param('mediaId', ParseUUIDPipe) mediaId: string) {
     const result = await this.accountManagementService.getMediaDetails(mediaId);
     return { message: 'Media fetched successfully', result };
   }
 
   @Patch(':accountId/status')
+  @Permissions('admin.accounts.manage')
   async updateAccountStatus(
     @Param('accountId') accountId: string,
     @Body() dto: UpdateAccountStatusDto,
@@ -55,6 +59,7 @@ export class AccountManagementController {
   }
 
   @Patch(':accountId/block-status')
+  @Permissions('admin.accounts.manage')
   async blockAccountStatus(
     @Param('accountId') accountId: string,
     @Body() dto: BlockedAccountStatusDto,
@@ -63,38 +68,46 @@ export class AccountManagementController {
   }
 
   @Get('factory')
+  @Permissions('admin.accounts.view')
   async getFactories(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
     @Query('status') status?: AccountStatus,
   ) {
-    return this.accountManagementService.getProfiles(Role.FACTORY, page, limit, status);
+    const data = await this.accountManagementService.getProfiles(Role.FACTORY, page, limit, status);
+    return {message:'Factory fetch sueessfully'}
   }
 
   @Get('institution')
+  @Permissions('admin.accounts.view')
   async getInstitutions(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
     @Query('status') status?: AccountStatus,
   ) {
-    return this.accountManagementService.getProfiles(Role.INSTITUTIONS, page, limit, status);
+    const data = await this.accountManagementService.getProfiles(Role.INSTITUTIONS, page, limit, status);
+    return { message: 'Institutions fetched successfully', result: data };
   }
 
   @Get('collector')
+  @Permissions('admin.accounts.view')
   async getCollectors(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
     @Query('status') status?: AccountStatus,
   ) {
-    return this.accountManagementService.getProfiles(Role.COLLECTOR, page, limit, status);
+    const data = await this.accountManagementService.getProfiles(Role.COLLECTOR, page, limit, status);
+    return { message: 'Collectors fetched successfully', result: data };
   }
 
   @Get('external-partner')
+  @Permissions('admin.accounts.view')
   async getExternalPartners(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
     @Query('status') status?: AccountStatus,
   ) {
-    return this.accountManagementService.getProfiles(Role.EXTERNAL_PARTNER, page, limit, status);
+    const data = await this.accountManagementService.getProfiles(Role.EXTERNAL_PARTNER, page, limit, status);
+    return { message:'External-partner fetch successfully',result:data}
   }
 }

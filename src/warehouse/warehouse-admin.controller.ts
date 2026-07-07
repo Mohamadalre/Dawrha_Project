@@ -12,6 +12,7 @@ import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { WarehouseAdminService } from './warehouse-admin.service';
+import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 import { IsIn, IsOptional } from 'class-validator';
 
@@ -36,6 +37,22 @@ export class WarehouseAdminController {
   async list(@Query() query: WarehouseListQuery) {
     const result = await this.warehouseAdmin.list(query);
     return { message: 'Warehouses fetched successfully', result };
+  }
+
+  /** Create a warehouse from the backend (pushed to Odoo by a background job). */
+  @Post()
+  @Permissions('admin.warehouse.manage')
+  async create(@Body() dto: CreateWarehouseDto) {
+    const result = await this.warehouseAdmin.create(dto);
+    return { message: result.message, result };
+  }
+
+  /** Mirror the manager the admin assigned to this warehouse inside Odoo. */
+  @Post(':warehouseId/sync-manager')
+  @Permissions('admin.warehouse.sync')
+  async syncManager(@Param('warehouseId', ParseUUIDPipe) warehouseId: string) {
+    const result = await this.warehouseAdmin.syncManagerFromOdoo(warehouseId);
+    return { message: result.message, result };
   }
 
   /** Pull warehouses + managers FROM Odoo (they are created inside Odoo). */

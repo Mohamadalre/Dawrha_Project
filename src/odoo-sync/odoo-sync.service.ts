@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
+  CreateWarehousePayload,
   DeleteCategoryPayload,
   DeleteProductPayload,
   ODOO_JOB_OPTIONS,
@@ -52,6 +53,14 @@ export class OdooSyncService {
 
   enqueueUpdatePricing(payload: UpdatePricingPayload) {
     return this.queue.add(ODOO_JOBS.UPDATE_PRICING, payload, this.opts(ODOO_JOBS.UPDATE_PRICING));
+  }
+
+  enqueueCreateWarehouse(payload: CreateWarehousePayload) {
+    return this.queue.add(
+      ODOO_JOBS.CREATE_WAREHOUSE,
+      payload,
+      this.opts(ODOO_JOBS.CREATE_WAREHOUSE),
+    );
   }
 
   async enqueueSyncWarehouse(payload: SyncWarehousePayload) {
