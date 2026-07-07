@@ -2,7 +2,6 @@ import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/com
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { OnboardingService } from '../onboarding.service';
-import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { InformationExternalPartnerDto, WasteExternalPartnerDto } from '../dto/external-partner-onboarding.dto';
 import { ExternalPartnerProfile } from '@src/user/entities/profile/external-partner-profile.entity';
 import { ExternalPartnerMaterial } from '@src/user/entities/material/external-partner-material.entity';

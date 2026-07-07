@@ -25,7 +25,7 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import Redis from 'ioredis';
 import { AuthProvider } from '@src/user/enums/auth-provider.enum';
 import { LoginGoogleDto } from './dto/logoin-google.dto';
-import { verifyGoogleToken } from './google.provider';
+import { verifyGoogleToken } from './utils/google.provider';
 import { LoginHandler } from './handlers/login.handler';
 import { ActiveHandler } from './handlers/active.handler';
 import { PendingProfileHandler } from './handlers/pending-profile.handler';
@@ -36,7 +36,7 @@ import { InactiveHandler } from './handlers/inactive.handler';
 import { NeedChangeHandler } from './handlers/needChange.handler';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 import { VerifyResetOtpDto } from './dto/verifyReset-otp.dto';
-import { AllowedAccountType } from './AllowedAccountType';
+import { AllowedAccountType } from './utils/constants/AllowedAccountType';
 
 
 

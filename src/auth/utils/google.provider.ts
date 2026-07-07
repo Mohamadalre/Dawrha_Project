@@ -30,7 +30,7 @@ export async function verifyGoogleToken(idToken: string) {
 
     winstonLogger.error('Google Error', {
       context: 'GoogleProvider',
-      channel: 'error',
+      channel: 'errors',
       stack: error?.stack,
       metadata: {
         message: error?.message,
