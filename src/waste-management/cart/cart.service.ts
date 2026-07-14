@@ -12,8 +12,14 @@ import { CartItem } from '../entities/cart-item.entity';
 import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
 import { Offer } from '../entities/offer.entity';
-import { tierForRole } from '../enums/pricing-tier.enum';
-import { UnitType } from '../enums/unit-type.enum';
+import { PricingTier, tierForRole } from '../enums/pricing-tier.enum';
+import { UnitsService } from '../common/providers/units.service';
+import { ConditionsService } from '../common/providers/conditions.service';
+import {
+  ConditionRequiredException,
+  OfferNotAvailableException,
+  ProductNotFoundException,
+} from '../exceptions/waste.exceptions';
 import { cartLimitsFor } from './cart.config';
 import { AddOfferToCartDto, AddToCartDto, UpdateCartItemDto } from './dto/cart.dto';
 
@@ -35,6 +41,8 @@ export class CartService {
     private readonly pricingRepo: Repository<ProductPricing>,
     @InjectRepository(Offer)
     private readonly offerRepo: Repository<Offer>,
+    private readonly units: UnitsService,
+    private readonly conditionsService: ConditionsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -44,7 +52,7 @@ export class CartService {
     const product = await this.productRepo.findOne({
       where: { id: dto.product_id, isActive: true },
     });
-    if (!product) throw new NotFoundException('Product not found');
+    if (!product) throw new ProductNotFoundException();
 
     await this.enforceDailyMax(caller, dto.quantity);
 
@@ -52,13 +60,19 @@ export class CartService {
     let offer: Offer | null = null;
     let isOffer = false;
 
+    let conditionCode = dto.condition
+      ? await this.conditionsService.validateActiveCode(dto.condition)
+      : null;
+
     if (dto.add_offer) {
-      offer = await this.currentOfferForProduct(product.id);
+      offer = await this.currentOfferForProduct(product.id, caller.role);
       if (!offer) throw new BadRequestException('No active offer for this product');
       unitPrice = Number(offer.offerPrice);
       isOffer = true;
+      // A condition-targeted offer fixes the grade being bought.
+      conditionCode = offer.conditionCode ?? conditionCode;
     } else {
-      unitPrice = await this.tierPrice(product.id, caller.role);
+      unitPrice = await this.tierPrice(product.id, caller.role, conditionCode);
     }
 
     const cart = await this.getOrCreateCart(caller.id);
@@ -70,7 +84,8 @@ export class CartService {
         productId: product.id,
         offerId: offer?.id,
         quantity: String(dto.quantity),
-        unitType: dto.unit_type,
+        conditionCode,
+        unitType: await this.units.validateActiveCode(dto.unit_type),
         unitPrice: String(unitPrice),
         subtotal: String(subtotal),
         isOffer,
@@ -105,6 +120,9 @@ export class CartService {
     if (offer.validUntil && new Date(offer.validUntil).getTime() < Date.now()) {
       throw new BadRequestException('Offer has expired');
     }
+    if (offer.targetRoles?.length && !offer.targetRoles.includes(caller.role)) {
+      throw new OfferNotAvailableException();
+    }
 
     await this.enforceDailyMax(caller, dto.quantity);
 
@@ -118,7 +136,8 @@ export class CartService {
         productId: offer.productId,
         offerId: offer.id,
         quantity: String(dto.quantity),
-        unitType: dto.unit_type,
+        conditionCode: offer.conditionCode ?? null,
+        unitType: await this.units.validateActiveCode(dto.unit_type),
         unitPrice: String(unitPrice),
         subtotal: String(subtotal),
         isOffer: true,
@@ -137,7 +156,9 @@ export class CartService {
 
     const unitPrice = Number(item.unitPrice);
     item.quantity = String(dto.quantity);
-    if (dto.unit_type) item.unitType = dto.unit_type;
+    if (dto.unit_type) {
+      item.unitType = await this.units.validateActiveCode(dto.unit_type);
+    }
     item.subtotal = String(+(unitPrice * dto.quantity).toFixed(3));
     await this.itemRepo.save(item);
 
@@ -186,6 +207,7 @@ export class CartService {
         product_image: it.product?.imageURL ?? null,
         quantity: Number(it.quantity),
         unit_type: it.unitType,
+        condition: it.conditionCode ?? null,
         unit_price: Number(it.unitPrice),
         subtotal: Number(it.subtotal),
         is_offer: it.isOffer,
@@ -217,27 +239,42 @@ export class CartService {
     return item;
   }
 
-  private async tierPrice(productId: string, role: Role): Promise<number> {
+  private async tierPrice(
+    productId: string,
+    role: Role,
+    conditionCode: string | null = null,
+  ): Promise<number> {
     const tier = tierForRole(role);
-    const price = await this.pricingRepo
+    const isConditionTier = tier === PricingTier.FACTORY || tier === PricingTier.FREE_FACILITY;
+
+    const qb = this.pricingRepo
       .createQueryBuilder('pp')
       .where('pp.productId = :productId', { productId })
       .andWhere('pp.tier = :tier', { tier })
       .andWhere('pp.effectiveFrom <= NOW()')
-      .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())')
-      .orderBy('pp.effectiveFrom', 'DESC')
-      .getOne();
+      .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())');
 
+    if (isConditionTier) {
+      // FACTORY / FREE_FACILITY prices are per material condition — the buyer
+      // must say which grade they are ordering.
+      if (!conditionCode) throw new ConditionRequiredException();
+      qb.andWhere('pp.conditionCode = :conditionCode', { conditionCode });
+    } else {
+      qb.andWhere('pp.conditionCode IS NULL');
+    }
+
+    const price = await qb.orderBy('pp.effectiveFrom', 'DESC').getOne();
     if (!price) {
       throw new BadRequestException('Product is not priced for your account type');
     }
     return Number(price.price);
   }
 
-  private async currentOfferForProduct(productId: string): Promise<Offer | null> {
+  private async currentOfferForProduct(productId: string, callerRole: Role): Promise<Offer | null> {
     return this.offerRepo
       .createQueryBuilder('o')
       .where('o.productId = :productId', { productId })
+      .andWhere('(o.targetRoles IS NULL OR :callerRole = ANY(o.targetRoles))', { callerRole })
       .andWhere('o.isActive = true')
       .andWhere('o.validFrom <= NOW()')
       .andWhere('(o.validUntil IS NULL OR o.validUntil > NOW())')
@@ -276,8 +313,11 @@ export class CartService {
 
     const subtotal = items.reduce((s, it) => s + Number(it.subtotal), 0);
     const totalUnits = items.reduce((s, it) => s + Number(it.quantity), 0);
+    // Weight-based minimum: sum quantities of items whose unit is flagged
+    // is_weight in measurement_units (KG by default; admin can add TON, ...).
+    const weightCodes = await this.units.weightCodes();
     const totalWeight = items
-      .filter((it) => it.unitType === UnitType.KG)
+      .filter((it) => weightCodes.has(it.unitType))
       .reduce((s, it) => s + Number(it.quantity), 0);
 
     const meetsMinimum = totalUnits >= limits.minQuantity;

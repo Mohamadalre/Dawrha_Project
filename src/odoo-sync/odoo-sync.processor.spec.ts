@@ -16,6 +16,13 @@ describe('OdooSyncProcessor', () => {
   let accountRepo: any;
   let warehouseRepo: any;
   let inventoryRepo: any;
+  let unitRepo: any;
+  let conditionRepo: any;
+  let truckRepo: any;
+  let assignmentRepo: any;
+  let shiftRepo: any;
+  let collectorRepo: any;
+  let shiftChangeRepo: any;
 
   beforeEach(() => {
     // The compensation tests deliberately trigger failures; silence the logger.
@@ -45,6 +52,33 @@ describe('OdooSyncProcessor', () => {
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     inventoryRepo = { findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
+    unitRepo = {
+      findOne: jest.fn(),
+      save: jest.fn((x) => Promise.resolve(x)),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    conditionRepo = {
+      findOne: jest.fn(),
+      save: jest.fn((x) => Promise.resolve(x)),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    const mkRepo = () => ({
+      findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+      create: jest.fn((x: any) => x),
+      save: jest.fn((x: any) => Promise.resolve(x)),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      createQueryBuilder: jest.fn(() => ({
+        where: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      })),
+    });
+    truckRepo = mkRepo();
+    assignmentRepo = mkRepo();
+    shiftRepo = mkRepo();
+    collectorRepo = mkRepo();
+    shiftChangeRepo = mkRepo();
 
     processor = new OdooSyncProcessor(
       odoo,
@@ -55,6 +89,13 @@ describe('OdooSyncProcessor', () => {
       accountRepo,
       warehouseRepo,
       inventoryRepo,
+      unitRepo,
+      conditionRepo,
+      truckRepo,
+      assignmentRepo,
+      shiftRepo,
+      collectorRepo,
+      shiftChangeRepo,
     );
   });
 

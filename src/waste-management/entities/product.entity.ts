@@ -12,7 +12,6 @@ import {
 import { WasteCategory } from './waste-category.entity';
 import { ProductPricing } from './product-pricing.entity';
 import { Offer } from './offer.entity';
-import { UnitType } from '../enums/unit-type.enum';
 import { OdooSyncStatus } from '../enums/odoo-sync-status.enum';
 
 @Entity('products')
@@ -39,8 +38,9 @@ export class Product {
   @Column({ nullable: true })
   imageURL?: string;
 
-  @Column({ type: 'enum', enum: UnitType, default: UnitType.PIECE })
-  unitType: UnitType;
+  /** Measurement-unit code — validated against the admin-managed `measurement_units` table. */
+  @Column({ length: 20, default: 'PIECE' })
+  unitType: string;
 
   @Column({ default: true })
   isActive: boolean;

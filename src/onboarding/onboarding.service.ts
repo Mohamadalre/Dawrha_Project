@@ -13,6 +13,7 @@ import { CommonService } from '@src/common/common.service';
 import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { AccountStatusNotifier } from '@src/notification/account-status.notifier';
+import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 
 @Injectable()
 export class OnboardingService {
@@ -29,6 +30,7 @@ export class OnboardingService {
     protected readonly commonService: CommonService,
     protected readonly cloudinaryService: CloudinaryService,
     protected readonly statusNotifier: AccountStatusNotifier,
+    protected readonly odooSync: OdooSyncService,
   ) { }
 
   /**
@@ -38,6 +40,14 @@ export class OnboardingService {
   protected async markPendingApproval(accountId: string): Promise<void> {
     await this.acccountRepo.update(accountId, { accountStatus: AccountStatus.PENDING_APPROVAL });
     await this.statusNotifier.notifyPendingApproval(accountId);
+
+    // Driver (collector) requests are reviewed by the ODOO admin, not here:
+    // push the request so it appears in Odoo; the decision comes back through
+    // the driver-decision webhook (approval + optional truck assignment).
+    const account = await this.acccountRepo.findOne({ where: { id: accountId } });
+    if (account?.role === Role.COLLECTOR) {
+      await this.odooSync.enqueuePushDriverRequest({ accountId });
+    }
   }
 
   /**

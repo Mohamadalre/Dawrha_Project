@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException, Inject, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Inject, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -26,6 +26,18 @@ import Redis from 'ioredis';
 import { AuthProvider } from '@src/user/enums/auth-provider.enum';
 import { LoginGoogleDto } from './dto/logoin-google.dto';
 import { verifyGoogleToken } from './utils/providers/google.provider';
+import {
+  AccountNotFoundException,
+  AppNotAuthorizedException,
+  DeviceNotFoundException,
+  EmailAlreadyExistsException,
+  InvalidCredentialsException,
+  InvalidOtpException,
+  InvalidResetTicketException,
+  InvalidTokenException,
+  PasswordMismatchException,
+  PhoneAlreadyExistsException,
+} from './exceptions/auth.exceptions';
 import { LoginHandler } from './handlers/login.handler';
 import { ActiveHandler } from './handlers/active.handler';
 import { PendingProfileHandler } from './handlers/pending-profile.handler';
@@ -88,11 +100,11 @@ export class AuthService {
     if (existAccount && !existAccount.isEmailVerified) {
       await this.mailService.generateAndSendOtp(existAccount.email);
       const token = await this.generateTemporaryTokens(existAccount.id, existAccount.role, existAccount.accountStatus);
-      return { message: 'Your account is not confirmed , please make sure that the verification code has reached your email', data: token }
+      return { message: 'Your account is not confirmed , please make sure that the verification code has reached your email', result: token }
     }
-    if (existAccount && existAccount.isEmailVerified) throw new BadRequestException('The email already exists');
+    if (existAccount && existAccount.isEmailVerified) throw new EmailAlreadyExistsException();
     const existPhone = await this.accountRepository.findOne({ where: { phone: phoneNumber } });
-    if (existPhone) throw new BadRequestException('The phone already exists');
+    if (existPhone) throw new PhoneAlreadyExistsException();
 
     const hashPassword = await argon2.hash(password);
 
@@ -109,7 +121,7 @@ export class AuthService {
     await this.mailService.generateAndSendOtp(saveAccount.email);
 
     const token = await this.generateTemporaryTokens(saveAccount.id, saveAccount.role, saveAccount.accountStatus);
-    return { message: 'An account has been created,please ensure that a verification code has been sent to your email .', data: token }
+    return { message: 'An account has been created,please ensure that a verification code has been sent to your email .', result: token }
   }
 
   /**
@@ -122,15 +134,15 @@ export class AuthService {
     const account = await this.accountRepository.findOne({ where: { email: email } });
     const allowed = AllowedAccountType[role];
     if (!account) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new InvalidCredentialsException();
     }
 
     if (!allowed || !allowed.includes(account.role)) {
-      throw new UnauthorizedException('This account is not authorized for this application')
+      throw new AppNotAuthorizedException();
     }
     const isPasswordValid = await argon2.verify(account.passwordHash, password);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new InvalidCredentialsException();
     }
 
     const handler = this.handlers[account.accountStatus];
@@ -149,7 +161,7 @@ export class AuthService {
     let account = await this.userService.findById(userId);
     const existVerify = await this.mailService.verifyOtp(account.email, otpCode)
     if (!existVerify) {
-      throw new BadRequestException('The verification code is incorrect or expired')
+      throw new InvalidOtpException()
     }
 
     await this.userService.update(userId, {
@@ -209,15 +221,10 @@ export class AuthService {
    * @returns success message after sending the reset URL
    */
   async forgotPassword({ email }: ForgotPasswordDto) {
-    // Always behave the same whether the account exists or not,
-    // to avoid leaking which emails are registered.
-    const account = await this.userService.findByEmail(email);
-
+    // Uniform behaviour whether or not the account exists — never reveal which
+    // emails are registered (anti-enumeration). Same response, same timing.
     const cdKey = `forgotPassword:cooldown:${email}`;
     const ttl = await this.redis.ttl(cdKey);
-    if (!account) {
-      throw new NotFoundException('Account not found');
-    }
     if (ttl > 0) {
       throw new HttpException(
         {
@@ -229,56 +236,93 @@ export class AuthService {
       );
     }
 
-    // Set cooldown immediately, even if account doesn't exist,
-    // so the response timing/behavior looks identical either way.
-    await this.redis.set(cdKey, 'locked', 'EX', 60);
+    // Set the cooldown up-front (existent or not) so timing is indistinguishable.
+    await this.redis.set(cdKey, 'locked', 'EX', OTP_COOLDOWN_SECONDS);
 
+    const account = await this.accountRepository.findOne({ where: { email } });
     if (account) {
       await this.mailService.generateAndSendOtpForgot(account.email);
     } else {
-      winstonLogger.warn('Forgot-password requested for non-existent email: ${email}', {
+      winstonLogger.warn(`Forgot-password requested for non-existent email: ${email}`, {
         context: 'ForgotPassword',
         channel: 'app',
-        metadata: {
-          task: 'auth',
-        },
+        metadata: { task: 'auth' },
       });
-      throw new NotFoundException("Account not found");
-
     }
 
     return { message: 'If this email exists, an OTP has been sent.' };
   }
 
+  /**
+   * Resends the forgot-password OTP with the same cooldown + daily cap used by
+   * the registration resend. Keeps the anti-enumeration behaviour: the response
+   * and timing are identical whether or not the email is registered.
+   */
+  async resendForgotPasswordOtp({ email }: ForgotPasswordDto) {
+    const cooldownKey = `forgotPassword:cooldown:${email}`;
+    const ttl = await this.redis.ttl(cooldownKey);
+    if (ttl > 0) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          message: 'Please wait before requesting again',
+          remainingSeconds: ttl,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    // Anti email-bombing: cap resends per email per day.
+    const dailyKey = `forgotPassword:resend:count:${email}`;
+    const count = await this.redis.incr(dailyKey);
+    if (count === 1) await this.redis.expire(dailyKey, 86400);
+    if (count > OTP_MAX_DAILY_RESENDS) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          message: 'Daily resend limit reached. Please try again later.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    await this.redis.set(cooldownKey, 'locked', 'EX', OTP_COOLDOWN_SECONDS);
+
+    const account = await this.accountRepository.findOne({ where: { email } });
+    if (account) {
+      await this.mailService.generateAndSendOtpForgot(account.email);
+    }
+
+    return { cooldownSeconds: OTP_COOLDOWN_SECONDS };
+  }
+
   async verifyResetOtp({ email, otpCode }: VerifyResetOtpDto) {
     const account = await this.userService.findByEmail(email);
-    if (!account) throw new BadRequestException('email not found')
-    const attempts = Number((await this.redis.get(`forgot password:attempts:${email}`)) || 0);
-    if (attempts >= 5) {
-      await this.redis.del(`forgotPassword:Otp${email}`)
-      await this.redis.del(`forgotPassword:attempts:${email}`)
-      throw new BadRequestException('Too many failed attempts. Please try again later.');
-    }
-    await this.mailService.verifyOtp(account.email, otpCode)
-    const ticket = this.mailService.hash(`${email}: ${Date.now()}: ${Math.random()}`);
+
+    // Validates against the forgot-password OTP key and throws (with attempt
+    // lockout) on a wrong/expired code — the reset ticket is issued ONLY when
+    // this passes.
+    await this.mailService.verifyResetOtp(account.email, otpCode);
+
+    // Single-use, cryptographically-random ticket authorising the actual reset.
+    const ticket = randomBytes(32).toString('hex');
     await this.redis.set(`forgotPassword:reset:${email}`, ticket, 'EX', 600);
 
-    return { message: 'Code verified', resetTicket: ticket };
-
+    return { message: 'Code verified', result: { resetTicket: ticket } };
   }
 
 
   async resetPassword({ newPassword, confirmPassword, resetTicket, email }: ResetPasswordDto,) {
 
-    if (newPassword !== confirmPassword) throw new BadRequestException('Passwords do not match');
+    if (newPassword !== confirmPassword) throw new PasswordMismatchException();
     const storedTicket = await this.redis.get(`forgotPassword:reset:${email}`);
     if (!storedTicket || storedTicket !== resetTicket) {
-      throw new BadRequestException('Invalid or expired token');
+      throw new InvalidResetTicketException();
     } const account = await this.userService.findByEmail(email);
     if (!account) {
       // Should not normally happen if email was valid during step 1/2,
       // but guard anyway.
-      throw new BadRequestException('Invalid or expired token');
+      throw new InvalidResetTicketException();
     }
 
     const hashedPassword = await argon2.hash(newPassword);
@@ -350,12 +394,11 @@ export class AuthService {
     const hashedRefreshToken = await argon2.hash(refreshTokenRaw);
 
 
+    // A (accountId, deviceId) pair is unique (see UserDevice entity). The same
+    // physical deviceId may belong to different accounts (e.g. shared device
+    // after logout), so we scope the lookup by accountId — never globally.
     let device = await this.userDeviceRepository.findOne({ where: { accountId, deviceId } });
     if (!device) {
-      // const exist = await this.userDeviceRepository.findOne({ where: { deviceId: deviceId } })
-      // if (exist) {
-      //   throw new BadRequestException('Device ID already exists for another user');
-      // }
       device = this.userDeviceRepository.create({
         accountId,
         deviceType,
@@ -398,12 +441,12 @@ export class AuthService {
       });
 
       const account = await this.userService.findById(payload.sub || payload.id);
-      if (account.accountStatus !== AccountStatus.INACTIVE) throw new UnauthorizedException('Invaild Token')
+      if (account.accountStatus !== AccountStatus.INACTIVE) throw new InvalidTokenException();
 
 
       return await this.generateTemporaryTokens(account.id, account.role, account.accountStatus);
     } catch {
-      throw new UnauthorizedException('Invaild Token');
+      throw new InvalidTokenException();
     }
   }
 
@@ -423,7 +466,9 @@ export class AuthService {
         expiresIn: this.configService.get<string>('JWT_TEMPORARY_EXPIRATION') as any,
       });
 
-    return { Token: TemporaryToken };
+    // Unified key casing (was `Token` — FIXES.md #36): frontend reads data.token.
+    return { token: TemporaryToken };
+    
   }
 
   /**
@@ -437,23 +482,24 @@ export class AuthService {
     try {
 
       const account = await this.userService.findById(accountId);
-      let existRedis: any;
-      existRedis = await this.redisService.getRedisByKey(`refreshToken:${deviceId}`);
+      let hashedRefreshToken = await this.redisService.getRedisByKey(`refreshToken:${deviceId}`);
 
-      if (!existRedis) {
+      if (!hashedRefreshToken) {
         const device = await this.userDeviceRepository.findOne({
           where: { accountId: account.id, deviceId: deviceId }
         });
 
-
         if (!device || !device.refreshToken) {
           throw new UnauthorizedException('Access denied, invalid token');
         }
-        existRedis = await this.redisService.setRedisKey({ redisKey: `refreshToken:${device.deviceId}`, redisValue: device.refreshToken, date: 1000 });
+
+        // Source of truth is the DB; repopulate the cache from it (do NOT reuse
+        // setRedisKey's void return — that was silently breaking refresh).
+        hashedRefreshToken = device.refreshToken;
+        await this.redisService.setRedisKey({ redisKey: `refreshToken:${device.deviceId}`, redisValue: device.refreshToken, date: 1000 });
       }
 
-
-      const isRefreshTokenValid = await argon2.verify(existRedis, token);
+      const isRefreshTokenValid = await argon2.verify(hashedRefreshToken, token);
       if (!isRefreshTokenValid) {
         throw new UnauthorizedException('Access denied');
       }
@@ -482,11 +528,11 @@ export class AuthService {
 
 
     if (!account) {
-      throw new NotFoundException('Account not found. Please register first.');
+      throw new AccountNotFoundException('Account not found. Please register first.');
     }
 
     if (!allowed || !allowed.includes(account.role)) {
-      throw new UnauthorizedException('This account is not authorized for this application');
+      throw new AppNotAuthorizedException();
 
     }
 
@@ -513,7 +559,7 @@ export class AuthService {
     });
 
     if (existing) {
-      throw new BadRequestException('The email already exists. Please login instead.');
+      throw new EmailAlreadyExistsException('The email already exists. Please login instead.');
     }
 
 
@@ -547,11 +593,11 @@ export class AuthService {
 
 
     if (!account) {
-      throw new NotFoundException('Account not found.');
+      throw new AccountNotFoundException();
     }
     const device = await this.userDeviceRepository.findOne({ where: { accountId: userId, deviceId } });
     if (!device) {
-      throw new NotFoundException('Device not found.');
+      throw new DeviceNotFoundException();
     }
     await this.userDeviceRepository.update({ accountId: userId, deviceId }, { fcmToken, deviceType });
 
@@ -569,7 +615,7 @@ export class AuthService {
       where: { accountId: userId, deviceId },
     });
     if (!device) {
-      throw new NotFoundException('Device not found.');
+      throw new DeviceNotFoundException();
     }
 
     await this.userDeviceRepository.update({ accountId: userId, deviceId }, { language });

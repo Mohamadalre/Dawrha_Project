@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Media } from './entities/media.entity';
 import { Account } from '@src/user/entities/account.entity';
 import { CommonModule } from '@src/common/common.module';
+import { OdooSyncModule } from '@src/odoo-sync/odoo-sync.module';
 import { CoreModule } from '@src/core/core.module';
 import { UserModule } from '@src/user/user.module';
 
@@ -14,6 +15,7 @@ import { UserModule } from '@src/user/user.module';
     CommonModule,
     CoreModule,
     UserModule,
+    OdooSyncModule,
   ],
   controllers: [MediaController],
   providers: [MediaService],

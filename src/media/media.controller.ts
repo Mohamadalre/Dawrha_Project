@@ -18,6 +18,7 @@ import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { imageMemoryStorage } from '@src/common/config/multer/image-memory.config';
 import { Account } from '@src/user/entities/account.entity';
+import { MediaNotFoundException } from './exceptions/media.exceptions';
 
 /**
  * Media Controller - Handle image upload/update/delete endpoints
@@ -93,7 +94,7 @@ export class MediaController {
     try {
       const result = await this.mediaService.updateImage(file, mediaId, oldPublicId, user.id, (user as any).role);
       this.logger.log(`Image updated successfully: ${mediaId}`);
-      return result;
+      return { message: 'Image updated successfully', result };
     } catch (error:any) {
       this.logger.error(`Update failed:`, error.message);
       throw error;
@@ -149,7 +150,7 @@ export class MediaController {
     try {
       const result = await this.mediaService.deleteImage(mediaId, user.id, (user as any).role);
       this.logger.log(`Image deleted successfully: ${mediaId}`);
-      return result;
+      return { message: 'Image deleted successfully', result };
     } catch (error:any) {
       this.logger.error(`Deletion failed:`, error.message);
       throw error;
@@ -171,10 +172,7 @@ export class MediaController {
     @Body('ownerType') ownerType: string,
   ) {
     const images = await this.mediaService.findByOwner(ownerId, ownerType as any);
-    return {
-      count: images.length,
-      data: images,
-    };
+    return { message: 'Images fetched successfully', result: { count: images.length, images } };
   }
 
   /**
@@ -190,8 +188,8 @@ export class MediaController {
   async getImage(@Param('id') mediaId: string) {
     const media = await this.mediaService.findById(mediaId);
     if (!media) {
-      throw new BadRequestException('Media not found');
+      throw new MediaNotFoundException();
     }
-    return media;
+    return { message: 'Media fetched successfully', result: media };
   }
 }

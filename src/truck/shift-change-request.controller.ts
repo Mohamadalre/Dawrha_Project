@@ -19,11 +19,7 @@ import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { Role } from '@src/user/enums/role.enum';
 import { PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 import { ShiftChangeRequestService } from './shift-change-request.service';
-import {
-  CreateShiftChangeRequestDto,
-  ProcessRequestDto,
-  UpdateRequestStatusDto,
-} from './dto/shift-change-request.dto';
+import { CreateShiftChangeRequestDto } from './dto/shift-change-request.dto';
 
 /** Driver-facing shift-change requests (role: COLLECTOR). */
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -51,7 +47,8 @@ export class ShiftRequestController {
   }
 }
 
-/** Admin-facing shift-change request management. */
+/** Backend READ view only — the DECISION on these requests is made in ODOO
+ * (pushed via PUSH_SHIFT_CHANGE, decided back via the shift-change-decision webhook). */
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller({ path: 'admin/shift-change-requests', version: '1' })
 export class AdminShiftRequestController {
@@ -64,19 +61,4 @@ export class AdminShiftRequestController {
     return { message: 'Requests fetched successfully', result };
   }
 
-  /** Run the assignment swap for a driver's PROCESSING request. */
-  @Post('process')
-  @Permissions('admin.trucks.manage')
-  async process(@Body() dto: ProcessRequestDto) {
-    const result = await this.service.process(dto);
-    return { message: result.message, result };
-  }
-
-  /** Move a request to PROCESSING, or REJECT it (reason required). */
-  @Patch(':id/status')
-  @Permissions('admin.trucks.manage')
-  async setStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateRequestStatusDto) {
-    const result = await this.service.setStatus(id, dto);
-    return { message: result.message, result };
-  }
 }

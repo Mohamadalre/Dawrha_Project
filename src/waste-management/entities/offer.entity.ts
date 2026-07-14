@@ -23,6 +23,20 @@ export class Offer {
   @Column({ name: 'product_id' })
   productId: string;
 
+  /**
+   * Buyer roles the offer is visible to (e.g. only CITIZEN, or only
+   * INSTITUTIONS); null/empty = visible to every buyer role.
+   */
+  @Column({ name: 'target_roles', type: 'text', array: true, nullable: true })
+  targetRoles?: string[] | null;
+
+  /**
+   * Material condition the offer applies to (graded buyers: factory /
+   * free-facility); null = the offer is condition-agnostic.
+   */
+  @Column({ name: 'condition_code', length: 30, nullable: true, type: 'varchar' })
+  conditionCode?: string | null;
+
   @Column({ type: 'decimal', precision: 12, scale: 3 })
   offerPrice: string;
 

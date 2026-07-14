@@ -7,6 +7,8 @@ import {
 import { WarehouseAdminService } from './warehouse-admin.service';
 import { WarehouseZoneType } from './enums/warehouse-zone-type.enum';
 
+let conditionsService: any;
+let truckRepo: any;
 describe('WarehouseAdminService', () => {
   let service: WarehouseAdminService;
   let warehouseRepo: any;
@@ -33,7 +35,9 @@ describe('WarehouseAdminService', () => {
       enqueueCreateWarehouse: jest.fn().mockResolvedValue(undefined),
     };
 
-    service = new WarehouseAdminService(warehouseRepo, managerRepo, inventoryRepo, odoo, odooSync);
+    conditionsService = { labelMap: jest.fn(async () => new Map()) } as any;
+    truckRepo = { createQueryBuilder: jest.fn(() => ({ select: jest.fn().mockReturnThis(), addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), groupBy: jest.fn().mockReturnThis(), getRawMany: jest.fn().mockResolvedValue([]) })) } as any;
+    service = new WarehouseAdminService(warehouseRepo, managerRepo, inventoryRepo, truckRepo, odoo, odooSync, conditionsService);
   });
 
   describe('create', () => {

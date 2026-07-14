@@ -1,7 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { CartService } from './cart.service';
 import { Role } from '@src/user/enums/role.enum';
-import { UnitType } from '@src/waste-management/enums/unit-type.enum';
+
 
 /**
  * Unit tests for CartService — per-role limits and tier pricing.
@@ -13,6 +13,8 @@ describe('CartService', () => {
   let productRepo: any;
   let pricingRepo: any;
   let offerRepo: any;
+  let units: any;
+  let conditionsService: any;
   let priceQb: any;
 
   const citizen = { id: 'u1', role: Role.CITIZEN };
@@ -41,17 +43,24 @@ describe('CartService', () => {
     productRepo = { findOne: jest.fn().mockResolvedValue({ id: 'p1', isActive: true }) };
     pricingRepo = { createQueryBuilder: jest.fn().mockReturnValue(priceQb) };
     offerRepo = { createQueryBuilder: jest.fn(), findOne: jest.fn() };
+    units = {
+      validateActiveCode: jest.fn(async (code: string) => String(code).toUpperCase()),
+      weightCodes: jest.fn(async () => new Set(['KG'])),
+    };
+    conditionsService = {
+      validateActiveCode: jest.fn(async (code: string) => String(code).toUpperCase()),
+    };
 
-    service = new CartService(cartRepo, itemRepo, productRepo, pricingRepo, offerRepo);
+    service = new CartService(cartRepo, itemRepo, productRepo, pricingRepo, offerRepo, units, conditionsService);
   });
 
   it('adds a product priced at the buyer tier and returns a summary', async () => {
-    itemRepo.find.mockResolvedValueOnce([{ quantity: '5', subtotal: '1.5', unitType: UnitType.KG }]);
+    itemRepo.find.mockResolvedValueOnce([{ quantity: '5', subtotal: '1.5', unitType: 'KG' }]);
 
     const res = await service.addItem(citizen, {
       product_id: 'p1',
       quantity: 5,
-      unit_type: UnitType.KG,
+      unit_type: 'KG',
     });
 
     expect(res.cart_id).toBe('cart1');
@@ -67,25 +76,25 @@ describe('CartService', () => {
     itemRepo.find.mockResolvedValueOnce([{ quantity: '98' }]); // already 98 today
 
     await expect(
-      service.addItem(citizen, { product_id: 'p1', quantity: 5, unit_type: UnitType.KG }),
+      service.addItem(citizen, { product_id: 'p1', quantity: 5, unit_type: 'KG' }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('throws NotFound when the product is missing or inactive', async () => {
     productRepo.findOne.mockResolvedValueOnce(null);
     await expect(
-      service.addItem(citizen, { product_id: 'x', quantity: 1, unit_type: UnitType.KG }),
+      service.addItem(citizen, { product_id: 'x', quantity: 1, unit_type: 'KG' }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('has no daily cap for companies (dailyMax = null)', async () => {
     const company = { id: 'c1', role: Role.INSTITUTIONS };
-    itemRepo.find.mockResolvedValueOnce([{ quantity: '500', subtotal: '150', unitType: UnitType.KG }]);
+    itemRepo.find.mockResolvedValueOnce([{ quantity: '500', subtotal: '150', unitType: 'KG' }]);
 
     const res = await service.addItem(company, {
       product_id: 'p1',
       quantity: 500,
-      unit_type: UnitType.KG,
+      unit_type: 'KG',
     });
 
     expect(res.cart_summary.max_allowed).toBeNull();

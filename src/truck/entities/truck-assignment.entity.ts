@@ -18,6 +18,10 @@ export class TruckAssignmentEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** Odoo id of the assignment (driver-truck links are decided in Odoo). */
+  @Column({ type: 'int', nullable: true, unique: true })
+  odooAssignmentId?: number;
+
   @ManyToOne(() => TruckEntity, (truck) => truck.assignments, { nullable: false, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'truck_id' })
   truck: TruckEntity;

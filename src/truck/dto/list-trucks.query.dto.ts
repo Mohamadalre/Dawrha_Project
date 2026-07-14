@@ -11,4 +11,9 @@ export class ListTrucksQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   shiftId?: string;
+
+  /** Show the trucks of one warehouse (fleet is warehouse-scoped in Odoo). */
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
 }

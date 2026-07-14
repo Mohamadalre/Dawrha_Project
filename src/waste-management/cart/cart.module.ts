@@ -6,6 +6,7 @@ import { CartItem } from '../entities/cart-item.entity';
 import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
 import { Offer } from '../entities/offer.entity';
+import { WasteCommonModule } from '../common/waste-common.module';
 import { CartController } from './cart.controller';
 import { CartService } from './cart.service';
 
@@ -16,6 +17,7 @@ import { CartService } from './cart.service';
   imports: [
     TypeOrmModule.forFeature([Cart, CartItem, Product, ProductPricing, Offer]),
     PermissionsModule,
+    WasteCommonModule,
   ],
   controllers: [CartController],
   providers: [CartService],

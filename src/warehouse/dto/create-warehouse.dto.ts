@@ -59,6 +59,12 @@ export class CreateWarehouseDto {
   @MaxLength(255)
   address?: string;
 
+  /** Governorate of the warehouse (pushed to Odoo). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  governorate?: string;
+
   /** Optional custom zones. If omitted, Odoo provisions the default zones. */
   @IsOptional()
   @IsArray()

@@ -16,6 +16,7 @@ import { WasteCategory } from '@src/waste-management/entities/waste-category.ent
 import { CommonService } from '@src/common/common.service';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { AccountStatusNotifier } from '@src/notification/account-status.notifier';
+import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 
 @Injectable()
 export class InstitutionOnboardingService extends OnboardingService {
@@ -32,6 +33,7 @@ export class InstitutionOnboardingService extends OnboardingService {
     commonService: CommonService,
     cloudinaryService: CloudinaryService,
     statusNotifier: AccountStatusNotifier,
+    odooSync: OdooSyncService,
     @InjectRepository(InstitutionProfile)
     private readonly institutionRepo: Repository<InstitutionProfile>,
     @InjectRepository(InstitutionMaterial)
@@ -39,7 +41,7 @@ export class InstitutionOnboardingService extends OnboardingService {
     @InjectRepository(InstitutionType)
     private readonly institutionTypeRepo: Repository<InstitutionType>
   ) {
-    super(progressRepo, resolver, provinceRepo, acccountRepo, wasteCategoryRepo, commonService, cloudinaryService, statusNotifier);
+    super(progressRepo, resolver, provinceRepo, acccountRepo, wasteCategoryRepo, commonService, cloudinaryService, statusNotifier, odooSync);
   }
 
   /**

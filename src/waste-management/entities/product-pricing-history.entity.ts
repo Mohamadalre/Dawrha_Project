@@ -33,6 +33,10 @@ export class ProductPricingHistory {
   @Column({ type: 'enum', enum: PricingTier })
   tier: PricingTier;
 
+  /** Material condition of the archived price (null = tier-wide price). */
+  @Column({ name: 'condition_code', length: 30, nullable: true, type: 'varchar' })
+  conditionCode?: string | null;
+
   @Column({ type: 'decimal', precision: 12, scale: 3 })
   price: string;
 

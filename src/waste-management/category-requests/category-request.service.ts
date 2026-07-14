@@ -55,7 +55,7 @@ export class CategoryRequestService {
   // ---------------------------------------------------------------------------
   async create(caller: Caller, dto: CreateCategoryRequestDto) {
     if (!REQUESTABLE_ROLES.includes(caller.role)) {
-      throw new ForbiddenException('Only institutions, factories and free facilities can request categories');
+      throw new ForbiddenException('Only institutions can request additional categories');
     }
 
     const requested = [...new Set(dto.categoryIds)];

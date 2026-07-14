@@ -14,6 +14,7 @@ import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { LocationDto } from '@src/onboarding/dto/location.dto';
 import { UserService } from './user.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 /**
  * Self-service account endpoints. The role is resolved from the JWT, so a single
@@ -29,6 +30,12 @@ export class UserController {
   async getProfile(@CurrentUser() user) {
     const result = await this.userService.getProfile(user.id, user.role);
     return { message: 'Profile fetched successfully', result };
+  }
+
+  /** Edit basic account info (name/phone/description) — ACTIVE accounts only, any role. */
+  @Patch('profile')
+  async updateProfile(@CurrentUser() user, @Body() dto: UpdateProfileDto) {
+    return this.userService.updateProfile(user.id, dto);
   }
 
   @Patch('password')

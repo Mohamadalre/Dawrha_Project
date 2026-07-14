@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { CoreModule } from '@src/core/core.module';
 import { PermissionsModule } from '@src/permission/permissions.module';
 import { NotificationModule } from '@src/notification/notification.module';
+import { OdooSyncModule } from '@src/odoo-sync/odoo-sync.module';
 import { TruckEntity } from './entities/truck.entity';
 import { TruckAssignmentEntity } from './entities/truck-assignment.entity';
 import { TruckLocationLog } from './entities/truck-location-log.entity';
@@ -37,6 +38,7 @@ import { TruckTrackingController } from './tracking/truck-tracking.controller';
     JwtModule.register({}),
     PermissionsModule,
     NotificationModule,
+    OdooSyncModule,
   ],
   controllers: [
     TruckController,

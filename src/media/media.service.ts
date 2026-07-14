@@ -3,12 +3,19 @@ import { ForbiddenException, Injectable, InternalServerErrorException, BadReques
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Media, MediaType, OwnerType, statusMedia } from './entities/media.entity';
+import {
+  DuplicateImageTypeException,
+  MediaNotFoundException,
+  NotYourImageException,
+  OnlyRejectedReuploadException,
+} from './exceptions/media.exceptions';
 import { Account } from '@src/user/entities/account.entity';
 import { CommonService } from '@src/common/common.service';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { UploadImageDto } from './dto/upload-image.dto';
 import { ProfileResolver } from '@src/user/providers/profile-resolver.privder';
+import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { Role } from '@src/user/enums/role.enum';
 
 
@@ -40,6 +47,7 @@ export class MediaService {
     private readonly commonService: CommonService,
     private readonly dataSource: DataSource,
     private readonly profileResolver: ProfileResolver,
+    private readonly odooSync: OdooSyncService,
   ) { }
 
   /**
@@ -55,10 +63,10 @@ export class MediaService {
   ): Promise<{ status: string; image: string }> {
     const media = await this.mediaRepository.findOne({ where: { id: mediaId } });
     if (!media) {
-      throw new BadRequestException('Media not found');
+      throw new MediaNotFoundException();
     }
     if (media.status !== statusMedia.REJECTED) {
-      throw new BadRequestException('Only rejected images can be re-uploaded');
+      throw new OnlyRejectedReuploadException();
     }
 
     // Ownership: the caller's profile (of its role) must own this media.
@@ -66,7 +74,7 @@ export class MediaService {
       .getRepo(role)
       .findOne({ where: { account: { id: userId } } });
     if (!profile || profile.id !== media.ownerId) {
-      throw new ForbiddenException('This image does not belong to your account');
+      throw new NotYourImageException();
     }
 
     const oldPublicId = media.publicId;
@@ -87,6 +95,12 @@ export class MediaService {
     await this.accountRepository.update(userId, {
       accountStatus: AccountStatus.PENDING_APPROVAL,
     });
+
+    // Drivers are reviewed in ODOO: re-push the request so the updated
+    // documents show up there again for the Odoo admin to re-review.
+    if (role === Role.COLLECTOR) {
+      await this.odooSync.enqueuePushDriverRequest({ accountId: userId });
+    }
 
     // Remove the old Cloudinary file (non-critical).
     try {
@@ -268,7 +282,7 @@ export class MediaService {
       // Find current media record
       const currentMedia = await this.mediaRepository.findOne({ where: { id: mediaId } });
       if (!currentMedia) {
-        throw new BadRequestException('Media not found');
+        throw new MediaNotFoundException();
       }
 
       // Ownership: only the media's owner may update it.
@@ -326,7 +340,7 @@ export class MediaService {
       // Find media record
       const media = await this.mediaRepository.findOne({ where: { id: mediaId } });
       if (!media) {
-        throw new BadRequestException('Media not found');
+        throw new MediaNotFoundException();
       }
 
       // Ownership: only the media's owner may delete it.
@@ -370,7 +384,7 @@ export class MediaService {
       .getRepo(role)
       .findOne({ where: { account: { id: userId } } });
     if (!profile || profile.id !== media.ownerId) {
-      throw new ForbiddenException('This image does not belong to your account');
+      throw new NotYourImageException();
     }
   }
 
@@ -426,7 +440,7 @@ export class MediaService {
     });
 
     if (existing.length > 0) {
-      throw new ForbiddenException(`You already have a ${fileType} image. Update or delete it first.`);
+      throw new DuplicateImageTypeException(fileType);
     }
   }
 

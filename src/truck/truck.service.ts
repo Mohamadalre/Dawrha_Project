@@ -11,6 +11,12 @@ import { CollectorProfile } from '@src/user/entities/profile/collector-profile.e
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
 import { TruckEntity } from './entities/truck.entity';
 import { TruckStatus } from './enums/truck-status.enum';
+import {
+  MechanicsImageUploadException,
+  TruckHasDriversStatusException,
+  TruckNotFoundException,
+  TruckPlateExistsException,
+} from './exceptions/truck.exceptions';
 import { CreateTruckDto } from './dto/create-truck.dto';
 import { UpdateTruckDto } from './dto/update-truck.dto';
 import { ListTrucksQueryDto } from './dto/list-trucks.query.dto';
@@ -26,79 +32,19 @@ export class TruckService {
     private readonly cloudinaryService: CloudinaryService,
   ) {}
 
-  // ---------------------------------------------------------------------------
-  // Create (mechanics image only)
-  // ---------------------------------------------------------------------------
-  async create(dto: CreateTruckDto, files: { mechanicsImage?: Express.Multer.File[] }) {
-    const existing = await this.truckRepository.findOne({ where: { plateNumber: dto.plateNumber } });
-    if (existing) {
-      throw new ConflictException(`Truck with plate number "${dto.plateNumber}" already exists`);
-    }
 
-    let mechanicsUrl: string | null = null;
-    const mechanicsFile = files?.mechanicsImage?.[0];
-    if (mechanicsFile) {
-      try {
-        mechanicsUrl = await this.cloudinaryService.uploadLogo(
-          mechanicsFile,
-          `trucks/${dto.plateNumber}/mechanics`,
-        );
-      } catch {
-        throw new BadRequestException('Failed to upload the mechanics image');
-      }
-    }
-
-    const truck = this.truckRepository.create({
-      model: dto.model,
-      year: dto.year,
-      plateNumber: dto.plateNumber,
-      maxPayloadKg: dto.maxPayloadKg ?? null,
-      lengthM: dto.lengthM ?? null,
-      widthM: dto.widthM ?? null,
-      mechanicsImageUrl: mechanicsUrl,
-      status: TruckStatus.ACTIVE,
-    });
-    const saved = await this.truckRepository.save(truck);
-
-    return {
-      truck_id: saved.id,
-      plate_number: saved.plateNumber,
-      model: saved.model,
-      year: saved.year,
-      status: saved.status,
-      message: 'Truck created successfully',
-    };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Update info (never touches status)
-  // ---------------------------------------------------------------------------
-  async update(id: string, dto: UpdateTruckDto) {
-    const truck = await this.truckRepository.findOne({ where: { id } });
-    if (!truck) throw new NotFoundException('Truck not found');
-
-    if (dto.plateNumber && dto.plateNumber !== truck.plateNumber) {
-      const dup = await this.truckRepository.findOne({ where: { plateNumber: dto.plateNumber } });
-      if (dup) throw new ConflictException('Truck plate number already exists');
-    }
-
-    truck.model = dto.model ?? truck.model;
-    truck.year = dto.year ?? truck.year;
-    truck.plateNumber = dto.plateNumber ?? truck.plateNumber;
-    truck.maxPayloadKg = dto.maxPayloadKg ?? truck.maxPayloadKg;
-    truck.lengthM = dto.lengthM ?? truck.lengthM;
-    truck.widthM = dto.widthM ?? truck.widthM;
-
-    await this.truckRepository.save(truck);
-    return { truck_id: truck.id, message: 'Truck updated successfully' };
-  }
 
   // ---------------------------------------------------------------------------
   // List (by status / shift / both) — paginated summary
   // ---------------------------------------------------------------------------
   async list(query: ListTrucksQueryDto) {
-    const qb = this.truckRepository.createQueryBuilder('t');
+    const qb = this.truckRepository
+      .createQueryBuilder('t')
+      .leftJoinAndSelect('t.warehouse', 'w');
 
+    if (query.warehouseId) {
+      qb.andWhere('t.warehouseId = :warehouseId', { warehouseId: query.warehouseId });
+    }
     if (query.status) {
       qb.andWhere('t.status = :status', { status: query.status });
     }
@@ -122,6 +68,9 @@ export class TruckService {
         model: t.model,
         year: t.year,
         status: t.status,
+        warehouse: t.warehouse
+          ? { id: t.warehouse.id, name: t.warehouse.name, code: t.warehouse.code }
+          : null,
       })),
       pagination: buildPagination(total, query.page, query.limit),
     };
@@ -131,8 +80,8 @@ export class TruckService {
   // Single truck detail
   // ---------------------------------------------------------------------------
   async getById(id: string) {
-    const truck = await this.truckRepository.findOne({ where: { id } });
-    if (!truck) throw new NotFoundException('Truck not found');
+    const truck = await this.truckRepository.findOne({ where: { id }, relations: ['warehouse'] });
+    if (!truck) throw new TruckNotFoundException();
 
     return {
       truck_id: truck.id,
@@ -144,28 +93,13 @@ export class TruckService {
       width_m: truck.widthM != null ? Number(truck.widthM) : null,
       mechanics_image: truck.mechanicsImageUrl ?? null,
       status: truck.status,
+      warehouse: truck.warehouse
+        ? { id: truck.warehouse.id, name: truck.warehouse.name, code: truck.warehouse.code }
+        : null,
       created_at: truck.createdAt,
     };
   }
 
-  // ---------------------------------------------------------------------------
-  // Toggle status (active <-> disabled only)
-  // ---------------------------------------------------------------------------
-  async setStatus(id: string, dto: UpdateTruckStatusDto) {
-    const truck = await this.truckRepository.findOne({ where: { id } });
-    if (!truck) throw new NotFoundException('Truck not found');
-
-    // Busy statuses are derived from assignments and can't be toggled here.
-    if (truck.status === TruckStatus.BUSY_ONE_DRIVER || truck.status === TruckStatus.FULLY_BUSY) {
-      throw new BadRequestException(
-        'A truck with assigned drivers cannot change status; remove the assignment(s) first',
-      );
-    }
-
-    truck.status = dto.status;
-    await this.truckRepository.save(truck);
-    return { truck_id: truck.id, status: truck.status, message: 'Truck status updated successfully' };
-  }
 
   // ---------------------------------------------------------------------------
   // Drivers grouped by whether they are linked to a truck

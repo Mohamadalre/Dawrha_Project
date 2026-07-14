@@ -1,6 +1,5 @@
 {
   "OPERATION_SUCCESS": "تمت العملية بنجاح",
-
   "notifications": {
     "categorySyncFailed": {
       "title": "فشل مزامنة التصنيف",
@@ -14,6 +13,10 @@
       "title": "فشل إنشاء المستودع",
       "body": "تعذّر إنشاء المستودع \"{name}\" في Odoo وتمت إزالته من النظام."
     },
+    "unitSyncFailed": {
+      "title": "فشل مزامنة وحدة القياس",
+      "body": "تعذّرت مزامنة وحدة القياس \"{name}\" مع Odoo وتمت إزالتها."
+    },
     "truckAssigned": {
       "title": "تم تعيين سيارة",
       "body": "تم تعيينك للسيارة \"{plate}\"."
@@ -25,11 +28,30 @@
     "shiftChangeRejected": {
       "title": "رُفض طلب تغيير الوردية",
       "body": "رُفض طلب تغيير ورديتك. السبب: {reason}"
+    },
+    "conditionSyncFailed": {
+      "title": "فشل مزامنة حالة المادة",
+      "body": "تعذّرت مزامنة حالة المادة \"{name}\" مع Odoo وتمت إزالتها."
     }
   },
-
   "Categories fetched successfully": "تم جلب التصنيفات بنجاح",
   "Products fetched successfully": "تم جلب المنتجات بنجاح",
+  "Product availability fetched successfully": "تم جلب توافر المنتج في المستودعات بنجاح",
+  "Product not found": "المنتج غير موجود",
+  "Units fetched successfully": "تم جلب وحدات القياس بنجاح",
+  "My materials fetched successfully": "تم جلب موادك بنجاح",
+  "Only factories, free facilities and institutions have onboarding materials": "هذه الخدمة متاحة فقط للمعامل والجهات الحرة والمؤسسات",
+  "Unit created successfully": "تم إنشاء وحدة القياس بنجاح",
+  "Unit updated successfully": "تم تحديث وحدة القياس بنجاح",
+  "Unit deleted successfully": "تم حذف وحدة القياس بنجاح",
+  "Unit already exists": "وحدة القياس موجودة مسبقاً",
+  "Unit not found": "وحدة القياس غير موجودة",
+  "Cannot deactivate a unit that is used by active products": "لا يمكن تعطيل وحدة قياس مستخدمة في منتجات فعّالة",
+  "Cannot delete a unit that is used by products — deactivate it instead": "لا يمكن حذف وحدة قياس مستخدمة في منتجات — يمكنك تعطيلها بدلاً من ذلك",
+  "Inventory sync queued": "تمت جدولة مزامنة المخزون",
+  "Invalid webhook secret": "مفتاح الـ Webhook غير صحيح",
+  "Odoo webhook is not configured": "الـ Webhook الخاص بـ Odoo غير مُفعّل",
+  "Unknown Odoo warehouse id": "معرّف مستودع Odoo غير معروف",
   "Search completed successfully": "تم البحث بنجاح",
   "Offers fetched successfully": "تم جلب العروض بنجاح",
   "Home screen fetched successfully": "تم جلب الشاشة الرئيسية بنجاح",
@@ -52,7 +74,7 @@
   "Warehouses fetched successfully": "تم جلب المستودعات بنجاح",
   "Inventory fetched successfully": "تم جلب المخزون بنجاح",
   "Warehouse sync started": "جاري المزامنة مع نظام Odoo",
-  "Warehouses imported from Odoo": "تمت مزامنة المستودعات من Odoo",
+  "Warehouses imported from Odoo": "تم استيراد المستودعات من Odoo",
   "Statistics fetched successfully": "تم جلب الإحصائيات بنجاح",
   "Account statistics fetched successfully": "تم جلب إحصائيات الحسابات بنجاح",
   "Truck statistics fetched successfully": "تم جلب إحصائيات الشاحنات بنجاح",
@@ -71,7 +93,6 @@
   "Truck location fetched successfully": "تم جلب موقع الشاحنة بنجاح",
   "Truck history fetched successfully": "تم جلب سجل الشاحنة بنجاح",
   "Last stop fetched successfully": "تم جلب آخر توقف بنجاح",
-
   "No Permission": "لا تملك الصلاحية للقيام بهذا الإجراء",
   "Unauthorized": "غير مصرّح",
   "Unauthenticated": "غير موثّق",
@@ -82,7 +103,6 @@
   "Password confirmation does not match": "تأكيد كلمة المرور غير متطابق",
   "The new password must be different from the current one": "يجب أن تكون كلمة المرور الجديدة مختلفة عن الحالية",
   "This account has no password set (e.g. social login)": "لا توجد كلمة مرور لهذا الحساب",
-  "Product not found": "المنتج غير موجود",
   "Category not found": "التصنيف غير موجود",
   "Cart item not found": "عنصر السلة غير موجود",
   "Offer not found": "العرض غير موجود",
@@ -95,8 +115,7 @@
   "One or more categories are invalid or inactive": "تصنيف أو أكثر غير صالح أو غير مفعّل",
   "Only individual users can manage multiple locations": "إضافة أكثر من موقع متاحة للمستخدم العادي فقط",
   "This location does not belong to your account": "هذا الموقع لا يخص حسابك",
-  "Only institutions, factories and free facilities can request categories": "طلب التصنيفات متاح للمؤسسات فقط",
-
+  "Only institutions can request additional categories": "طلب التصنيفات متاح للمؤسسات فقط",
   "Login successful": "تم تسجيل الدخول بنجاح",
   "Login with Google successful": "تم تسجيل الدخول عبر Google بنجاح",
   "Registration with Google successful": "تم التسجيل عبر Google بنجاح",
@@ -134,7 +153,10 @@
   "Token is invalid or not found": "الرمز غير صالح أو غير موجود",
   "invalid token": "رمز غير صالح",
   "Invaild Token": "رمز غير صالح",
+  "Invalid Token": "رمز غير صالح",
   "Invalid or expired token": "رمز غير صالح أو منتهي الصلاحية",
+  "Invalid OTP. Please try again.": "رمز التحقق غير صحيح، حاول مجددًا",
+  "OTP has expired or is invalid. Please request a new one.": "انتهت صلاحية رمز التحقق أو أنه غير صحيح، اطلب رمزًا جديدًا",
   "access denied, invalid token": "تم رفض الوصول، رمز غير صالح",
   "Access denied, invalid token": "تم رفض الوصول، رمز غير صالح",
   "Access denied": "تم رفض الوصول",
@@ -153,7 +175,6 @@
   "The resetTicket is required": "بطاقة إعادة التعيين مطلوبة",
   "The password is very long(maximum 64 characters": "كلمة المرور طويلة جدًا (الحد الأقصى 64 حرفًا)",
   "The password is very short(minimum 8 characters": "كلمة المرور قصيرة جدًا (الحد الأدنى 8 أحرف)",
-
   "Fetch provinces successfully": "تم جلب المحافظات بنجاح",
   "Collector information added successfully": "تمت إضافة معلومات المُجمّع بنجاح",
   "Institution information added successfully": "تمت إضافة معلومات المؤسسة بنجاح",
@@ -189,7 +210,6 @@
   "National ID must be exactly 11 digits": "يجب أن يتكوّن الرقم الوطني من 11 رقمًا بالضبط",
   "The phone number must be a Syrian number": "يجب أن يكون رقم الهاتف سوريًا",
   "The landline phone number must be a Syrian number": "يجب أن يكون رقم الهاتف الأرضي سوريًا",
-
   "Account blocked successfully": "تم حظر الحساب بنجاح",
   "Account unblocked successfully": "تم رفع الحظر عن الحساب بنجاح",
   "Cannot block a pending approval account. Use the block-status endpoint": "لا يمكن حظر حساب قيد الموافقة، استخدم مسار تغيير حالة الحظر",
@@ -217,12 +237,81 @@
   "No stop recorded for this truck": "لا يوجد توقف مُسجّل لهذه الشاحنة",
   "Not assigned to this truck": "غير مُسنَد لهذه الشاحنة",
   "truckId is required": "معرّف الشاحنة مطلوب",
-  "Media fetched successfully": "تم جلب الصورة بنجاح",
+  "Media fetched successfully": "تم جلب الملف بنجاح",
   "Media rejected successfully": "تم رفض الصورة بنجاح",
   "Media approved successfully": "تمت الموافقة على الصورة بنجاح",
   "Media status updated successfully": "تم تحديث حالة الصورة بنجاح",
   "Image re-uploaded successfully": "تمت إعادة رفع الصورة بنجاح",
   "Only rejected images can be re-uploaded": "يمكن إعادة رفع الصور المرفوضة فقط",
   "This image does not belong to your account": "هذه الصورة لا تخص حسابك",
-  "Only pending media can be reviewed": "يمكن مراجعة الصور قيد الانتظار فقط"
+  "Only pending media can be reviewed": "يمكن مراجعة الصور قيد الانتظار فقط",
+  "All media must be reviewed before approving or rejecting the account": "يجب مراجعة جميع المستندات قبل قبول الحساب أو رفضه",
+  "Truck not found": "الشاحنة غير موجودة",
+  "Driver not found": "السائق غير موجود",
+  "Driver profile not found": "ملف السائق غير موجود",
+  "Shift not found": "الوردية غير موجودة",
+  "Truck is disabled and cannot take drivers": "الشاحنة معطّلة ولا يمكن إسناد سائقين لها",
+  "Truck is fully busy": "الشاحنة مشغولة بالكامل",
+  "Driver is already assigned to a truck": "السائق مُسنَد بالفعل لشاحنة",
+  "This truck already has a driver on the selected shift": "هذه الشاحنة لديها سائق بالفعل في الوردية المحددة",
+  "This driver has no truck assignment": "لا يوجد إسناد شاحنة لهذا السائق",
+  "Driver assigned to truck successfully": "تم إسناد السائق للشاحنة بنجاح",
+  "Driver assignment removed successfully": "تم إلغاء إسناد السائق بنجاح",
+  "You have not been assigned to a truck yet": "لم يتم إسنادك لأي شاحنة بعد",
+  "Assignment fetched successfully": "تم جلب الإسناد بنجاح",
+  "Truck created successfully": "تم إنشاء الشاحنة بنجاح",
+  "Truck updated successfully": "تم تحديث الشاحنة بنجاح",
+  "Failed to upload the mechanics image": "فشل رفع صورة الميكانيك",
+  "Truck plate number already exists": "رقم لوحة الشاحنة موجود بالفعل",
+  "Warehouse code already exists": "رمز المستودع موجود بالفعل",
+  "Warehouse created and queued for Odoo sync": "تم إنشاء المستودع وجدولته للمزامنة مع Odoo",
+  "Warehouse is not synced to Odoo yet": "لم تتم مزامنة المستودع مع Odoo بعد",
+  "Manager synced from Odoo": "تمت مزامنة المدير من Odoo",
+  "No manager assigned in Odoo yet": "لم يتم تعيين مدير في Odoo بعد",
+  "Failed to connect to Odoo": "فشل الاتصال بنظام Odoo",
+  "content": {
+    "about": {
+      "title": "حول تطبيق دورها",
+      "body": "دورها منصة وطنية لإعادة التدوير تربط المواطنين والمؤسسات والمعامل والجهات الحرة بمنظومة جمع وفرز النفايات القابلة للتدوير. عبر التطبيق يمكنك تصفح المواد والتصنيفات والأسعار حسب فئتك، وإضافة المواد إلى السلة وإتمام الطلبات، بينما تدير المنصة أسطول الشاحنات والمستودعات بتكامل مباشر مع نظام إدارة المخزون. هدفنا تحويل النفايات إلى موارد وتحقيق اقتصاد دائري مستدام.",
+      "lastUpdated": "2026-07-11"
+    },
+    "terms": {
+      "title": "شروط الاستخدام",
+      "body": "1) باستخدامك التطبيق فأنت توافق على هذه الشروط.\n2) يجب تقديم بيانات صحيحة عند التسجيل، وأي حساب ببيانات مضللة معرّض للإيقاف.\n3) الأسعار المعروضة تعتمد على فئة حسابك وقابلة للتغيير، وتُحفظ نسخة من كل تسعيرة سابقة.\n4) الحد الأدنى وسقوف الكميات في السلة تختلف حسب نوع الحساب.\n5) يلتزم مقدمو المواد بمطابقة الكميات المعلنة عند التسليم للوحدات غير المسموح فيها بفروق (مثل القطعة).\n6) تحتفظ إدارة المنصة بحق مراجعة الحسابات والمستندات والموافقة عليها أو رفضها.\n7) بياناتك تُعالَج وفق سياسة الخصوصية ولا تُشارَك مع طرف ثالث خارج نطاق تشغيل الخدمة.\n8) قد تُحدَّث هذه الشروط، وسيتم إشعارك بأي تغيير جوهري داخل التطبيق.",
+      "lastUpdated": "2026-07-11"
+    }
+  },
+  "Profile updated successfully": "تم تحديث معلومات الحساب بنجاح",
+  "Account must be active to update profile info": "يجب أن يكون الحساب فعالاً لتعديل معلوماته",
+  "Invalid phone number format": "صيغة رقم الهاتف غير صحيحة",
+  "About content fetched successfully": "تم جلب محتوى حول التطبيق بنجاح",
+  "Terms of use fetched successfully": "تم جلب شروط الاستخدام بنجاح",
+  "Image updated successfully": "تم تحديث الصورة بنجاح",
+  "Image deleted successfully": "تم حذف الصورة بنجاح",
+  "Images fetched successfully": "تم جلب الصور بنجاح",
+  "Factories fetched successfully": "تم جلب المعامل بنجاح",
+  "Conditions fetched successfully": "تم جلب حالات المواد بنجاح",
+  "Condition created successfully": "تم إنشاء حالة المادة بنجاح",
+  "Condition updated successfully": "تم تحديث حالة المادة بنجاح",
+  "Condition deleted successfully": "تم حذف حالة المادة بنجاح",
+  "Condition already exists": "حالة المادة موجودة مسبقاً",
+  "Condition not found": "حالة المادة غير موجودة",
+  "Cannot delete a condition that is used by pricing or stock — deactivate it instead": "لا يمكن حذف حالة مستخدمة في تسعير أو مخزون — يمكنك تعطيلها بدلاً من ذلك",
+  "A material condition is required for this product at your price tier": "يجب تحديد حالة المادة لهذا المنتج حسب فئة حسابك",
+  "Fleet sync queued": "تمت جدولة مزامنة الأسطول",
+  "Driver decision queued": "تمت جدولة تطبيق قرار السائق",
+  "Shift-change decision queued": "تمت جدولة تطبيق قرار تبديل الوردية",
+  "Trucks fetched successfully": "تم جلب الشاحنات بنجاح",
+  "Drivers fetched successfully": "تم جلب السائقين بنجاح",
+  "Truck fetched successfully": "تم جلب الشاحنة بنجاح",
+  "Shifts fetched successfully": "تم جلب الورديات بنجاح",
+  "Driver request approved": "تمت الموافقة على طلب انضمامك كسائق",
+  "Driver request rejected": "تم رفض طلب انضمامك كسائق",
+  "Offer created successfully": "تم إنشاء العرض بنجاح",
+  "Offer updated successfully": "تم تحديث العرض بنجاح",
+  "Offer deleted successfully": "تم حذف العرض بنجاح",
+  "Offer not available for your account type": "هذا العرض غير متاح لنوع حسابك",
+  "Driver accounts are managed in Odoo — use the Odoo admin for this action": "حسابات السائقين تُدار من نظام Odoo — استخدم أدمن Odoo لهذا الإجراء",
+  "Either approved or status is required": "يجب إرسال approved أو status",
+  "My categories fetched successfully": "تم جلب تصنيفاتك بنجاح"
 }

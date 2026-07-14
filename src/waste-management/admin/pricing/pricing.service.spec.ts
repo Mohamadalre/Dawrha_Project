@@ -18,13 +18,14 @@ describe('PricingService', () => {
   let odooSync: any;
   let audit: any;
   let cache: any;
+  let conditions: any;
 
   const dto = {
     individual: 0.3,
     company: 0.27,
-    factory: 0.25,
-    free_facility: 0.26,
-  };
+    factory: [{ condition: 'EXCELLENT', price: 0.25 }],
+    free_facility: [{ condition: 'EXCELLENT', price: 0.26 }],
+  } as any;
 
   beforeEach(() => {
     productRepo = { findOne: jest.fn().mockResolvedValue({ id: 'p1' }) };
@@ -43,8 +44,20 @@ describe('PricingService', () => {
     odooSync = { enqueueUpdatePricing: jest.fn().mockResolvedValue(undefined) };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     cache = { invalidate: jest.fn().mockResolvedValue(undefined) };
+    conditions = {
+      validateActiveCode: jest.fn(async (code: string) => String(code).toUpperCase()),
+    };
 
-    service = new PricingService(productRepo, pricingRepo, historyRepo, cartItemRepo, odooSync, audit, cache);
+    service = new PricingService(
+      productRepo,
+      pricingRepo,
+      historyRepo,
+      cartItemRepo,
+      odooSync,
+      audit,
+      cache,
+      conditions,
+    );
   });
 
   describe('setPricing', () => {
@@ -55,16 +68,16 @@ describe('PricingService', () => {
       );
     });
 
-    it('persists all four tiers and returns them', async () => {
+    it('persists flat + per-condition rows and returns them', async () => {
       const result = await service.setPricing('admin1', 'p1', dto);
 
-      // one insert (save) per tier (4 tiers)
+      // 2 flat rows (individual/company) + 1 factory condition + 1 free-facility condition
       expect(pricingRepo.save).toHaveBeenCalledTimes(4);
       expect(result.pricing).toEqual({
         individual: 0.3,
         company: 0.27,
-        factory: 0.25,
-        free_facility: 0.26,
+        factory: [{ condition: 'EXCELLENT', price: 0.25 }],
+        free_facility: [{ condition: 'EXCELLENT', price: 0.26 }],
       });
     });
 
@@ -83,7 +96,7 @@ describe('PricingService', () => {
       expect(archived.archivedBy).toBe('admin1');
     });
 
-    it('saves a FREE_FACILITY row distinct from FACTORY', async () => {
+    it('saves condition-tagged FACTORY / FREE_FACILITY rows', async () => {
       await service.setPricing('admin1', 'p1', dto);
 
       const savedTiers = pricingRepo.save.mock.calls.map((c: any[]) => c[0]);
@@ -91,7 +104,9 @@ describe('PricingService', () => {
       const factory = savedTiers.find((r: any) => r.tier === PricingTier.FACTORY);
 
       expect(freeFacility.price).toBe('0.26');
+      expect(freeFacility.conditionCode).toBe('EXCELLENT');
       expect(factory.price).toBe('0.25');
+      expect(factory.conditionCode).toBe('EXCELLENT');
     });
 
     it('enqueues an Odoo sync job and writes an audit log', async () => {
@@ -124,25 +139,36 @@ describe('PricingService', () => {
   });
 
   describe('updateTierPrice', () => {
-    it('updates a single tier, archives its previous value and reprices that tier only', async () => {
+    it('updates ONE condition of a condition tier, archives it and reprices matching lines only', async () => {
       pricingRepo.find.mockImplementation((opts: any) =>
         opts?.where?.tier === PricingTier.FACTORY
-          ? Promise.resolve([{ productId: 'p1', tier: PricingTier.FACTORY, price: '0.25', currency: 'JOD', effectiveFrom: new Date() }])
+          ? Promise.resolve([{ productId: 'p1', tier: PricingTier.FACTORY, conditionCode: 'EXCELLENT', price: '0.25', currency: 'JOD', effectiveFrom: new Date() }])
           : Promise.resolve([]),
       );
       cartItemRepo.find.mockResolvedValueOnce([
-        { productId: 'p1', isOffer: false, quantity: '3', cart: { account: { role: Role.FACTORY } } },
+        { productId: 'p1', isOffer: false, quantity: '3', conditionCode: 'EXCELLENT', cart: { account: { role: Role.FACTORY } } },
+        { productId: 'p1', isOffer: false, quantity: '2', conditionCode: 'GOOD', cart: { account: { role: Role.FACTORY } } },
         { productId: 'p1', isOffer: false, quantity: '1', cart: { account: { role: Role.CITIZEN } } },
       ]);
 
-      const result = await service.updateTierPrice('admin1', 'p1', PricingTier.FACTORY, { price: 0.5 });
+      const result = await service.updateTierPrice('admin1', 'p1', PricingTier.FACTORY, {
+        price: 0.5,
+        condition: 'EXCELLENT',
+      } as any);
 
       expect(historyRepo.save).toHaveBeenCalled();
-      expect(pricingRepo.save).toHaveBeenCalledTimes(1); // only one tier inserted
+      expect(pricingRepo.save).toHaveBeenCalledTimes(1); // only one row inserted
       expect(result.tier).toBe('factory');
+      expect(result.condition).toBe('EXCELLENT');
       expect(result.price).toBe(0.5);
-      // only the FACTORY cart line is repriced
+      // only the FACTORY line with the matching condition is repriced
       expect(result.updated_cart_items).toBe(1);
+    });
+
+    it('requires a condition when editing a condition tier', async () => {
+      await expect(
+        service.updateTierPrice('admin1', 'p1', PricingTier.FACTORY, { price: 1 } as any),
+      ).rejects.toMatchObject({ status: 400 });
     });
 
     it('throws NotFound when the product is missing', async () => {
@@ -177,16 +203,16 @@ describe('PricingService', () => {
   describe('getCurrentPricing', () => {
     it('returns the live price per tier (null when unpriced)', async () => {
       pricingRepo.find.mockResolvedValueOnce([
-        { tier: PricingTier.INDIVIDUAL, price: '0.30' },
-        { tier: PricingTier.FACTORY, price: '0.25' },
+        { tier: PricingTier.INDIVIDUAL, price: '0.30', conditionCode: null },
+        { tier: PricingTier.FACTORY, price: '0.25', conditionCode: 'GOOD' },
       ]);
 
       const result: any = await service.getCurrentPricing('p1');
 
       expect(result.pricing.individual).toBe(0.3);
-      expect(result.pricing.factory).toBe(0.25);
+      expect(result.pricing.factory).toEqual([{ condition: 'GOOD', price: 0.25 }]);
       expect(result.pricing.company).toBeNull();
-      expect(result.pricing.free_facility).toBeNull();
+      expect(result.pricing.free_facility).toEqual([]);
     });
   });
 

@@ -15,6 +15,16 @@ import { TruckEntity } from './entities/truck.entity';
 import { TruckAssignmentEntity } from './entities/truck-assignment.entity';
 import { TruckStatus } from './enums/truck-status.enum';
 import { AssignDriverDto } from './dto/assign-driver.dto';
+import {
+  AssignmentShiftNotFoundException,
+  DriverAlreadyAssignedException,
+  DriverNotFoundException,
+  NoAssignmentException,
+  TruckDisabledException,
+  TruckFullyBusyException,
+  TruckNotFoundException,
+  TruckShiftTakenException,
+} from './exceptions/truck.exceptions';
 
 /**
  * Owns the driver↔truck assignment table ("kasr") and keeps each truck's derived
@@ -42,12 +52,12 @@ export class AssignmentService {
     const { truckId, driverId } = dto;
 
     const truck = await this.truckRepo.findOne({ where: { id: truckId } });
-    if (!truck) throw new NotFoundException('Truck not found');
+    if (!truck) throw new TruckNotFoundException();
     if (truck.status === TruckStatus.DISABLED) {
-      throw new BadRequestException('Truck is disabled and cannot take drivers');
+      throw new TruckDisabledException();
     }
     if (truck.status === TruckStatus.FULLY_BUSY) {
-      throw new BadRequestException('Truck is fully busy');
+      throw new TruckFullyBusyException();
     }
 
 
@@ -56,16 +66,16 @@ export class AssignmentService {
       where: { id: driverId },
       relations: ['account', 'assignment'],
     });
-    if (!driver) throw new NotFoundException('Driver not found');
+    if (!driver) throw new DriverNotFoundException();
     if (driver.assignment) {
-      throw new ConflictException('Driver is already assigned to a truck');
+      throw new DriverAlreadyAssignedException();
     }
     const shift = await this.shiftRepo.findOne({ where: { id: driver.shiftId } });
-    if (!shift) throw new BadRequestException('Shift not found');
+    if (!shift) throw new AssignmentShiftNotFoundException();
     const shiftId = shift.id;
     const taken = await this.assignmentRepo.findOne({ where: { truckId, shiftId } });
     if (taken) {
-      throw new ConflictException('This truck already has a driver on the selected shift');
+      throw new TruckShiftTakenException();
     }
 
     const assignment = this.assignmentRepo.create({
@@ -95,9 +105,9 @@ export class AssignmentService {
   // ---------------------------------------------------------------------------
   async unassign(driverId: string) {
     const driver = await this.driverRepo.findOne({ where: { id: driverId } });
-    if (!driver) throw new NotFoundException('Driver not found');
+    if (!driver) throw new DriverNotFoundException();
     const assignment = await this.assignmentRepo.findOne({ where: { driverId } });
-    if (!assignment) throw new NotFoundException('This driver has no truck assignment');
+    if (!assignment) throw new NoAssignmentException();
 
     const { truckId } = assignment;
     await this.assignmentRepo.delete(assignment.id);
@@ -114,7 +124,7 @@ export class AssignmentService {
       where: { account: { id: accountId } },
       relations: ['assignment', 'assignment.truck', 'assignment.shift'],
     });
-    if (!driver) throw new NotFoundException('Driver profile not found');
+    if (!driver) throw new DriverNotFoundException('Driver profile not found');
 
     if (!driver.assignment) {
       return { assigned: false, message: 'You have not been assigned to a truck yet' };

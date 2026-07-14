@@ -88,11 +88,13 @@ export class DatabaseExceptionFilter
         message = 'Unexpected database error';
     }
 
-    // Send standardized error response with all necessary information
+    // Send standardized error response (same unified envelope as AllExceptionsFilter)
     response.status(400).json({
       success: false,
-      statusCode: 400,
       message,
+      errorCode: 'DATABASE_ERROR',
+      data: null,
+      statusCode: 400,
       timestamp: new Date().toISOString(),
       path: request.url,
     });

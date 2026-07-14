@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { AdminCatalogService } from './admin-catalog.service';
-import { UnitType } from '@src/waste-management/enums/unit-type.enum';
+
 
 describe('AdminCatalogService', () => {
   let service: AdminCatalogService;
@@ -10,6 +10,12 @@ describe('AdminCatalogService', () => {
   let odooSync: any;
   let audit: any;
   let cache: any;
+  let unitRepo: any;
+  let units: any;
+  let conditionRepo: any;
+  let pricingRepo: any;
+  let offerRepo: any;
+  let conditionsService: any;
 
   beforeEach(() => {
     categoryRepo = {
@@ -34,8 +40,43 @@ describe('AdminCatalogService', () => {
     };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     cache = { invalidate: jest.fn().mockResolvedValue(undefined) };
+    unitRepo = {
+      findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((x) => x),
+      save: jest.fn((x) => Promise.resolve({ id: 'unit1', ...x })),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    units = {
+      validateActiveCode: jest.fn(async (code: string) => String(code).toUpperCase()),
+      invalidate: jest.fn(),
+    };
 
-    service = new AdminCatalogService(categoryRepo, productRepo, cartItemRepo, odooSync, audit, cache);
+    conditionRepo = {
+      findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((x) => x),
+      save: jest.fn((x) => Promise.resolve({ id: 'cond1', ...x })),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    pricingRepo = { count: jest.fn().mockResolvedValue(0) };
+    offerRepo = { findOne: jest.fn(), create: jest.fn((x) => x), save: jest.fn((x) => Promise.resolve({ id: 'o1', ...x })), delete: jest.fn() };
+    conditionsService = { invalidate: jest.fn() };
+
+    service = new AdminCatalogService(
+      categoryRepo,
+      productRepo,
+      cartItemRepo,
+      unitRepo,
+      conditionRepo,
+      pricingRepo,
+      offerRepo,
+      odooSync,
+      audit,
+      cache,
+      units,
+      conditionsService,
+    );
   });
 
   describe('createCategory', () => {
@@ -75,11 +116,11 @@ describe('AdminCatalogService', () => {
   });
 
   describe('createProduct', () => {
-    it('rejects an unknown category', async () => {
+    it('rejects an unknown category with 404', async () => {
       categoryRepo.findOne.mockResolvedValue(null);
       await expect(
-        service.createProduct('a1', { name: 'X', category_id: 'c1', unit_type: UnitType.KG } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
+        service.createProduct('a1', { name: 'X', category_id: 'c1', unit_type: 'KG' } as any),
+      ).rejects.toMatchObject({ status: 404 });
     });
 
     it('creates a pending product and enqueues sync', async () => {
@@ -87,7 +128,7 @@ describe('AdminCatalogService', () => {
       const res = await service.createProduct('a1', {
         name: 'X',
         category_id: 'c1',
-        unit_type: UnitType.KG,
+        unit_type: 'KG',
       } as any);
       expect(odooSync.enqueueSyncProduct).toHaveBeenCalledWith({ productId: 'p1' });
       expect(cache.invalidate).toHaveBeenCalledWith('products', 'categories');

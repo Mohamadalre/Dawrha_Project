@@ -11,6 +11,7 @@ import { CartItem } from '@src/waste-management/entities/cart-item.entity';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { AuditService } from '@src/waste-management/common/providers/audit.service';
 import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
+import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { TransformInterceptor } from '@src/common/interceptors/transform.interceptor';
@@ -60,6 +61,10 @@ describe('PricingController (integration)', () => {
         { provide: OdooSyncService, useValue: odooSync },
         { provide: AuditService, useValue: audit },
         { provide: CatalogCacheService, useValue: { invalidate: jest.fn() } },
+        {
+          provide: ConditionsService,
+          useValue: { validateActiveCode: jest.fn(async (c: string) => String(c).toUpperCase()) },
+        },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -88,15 +93,15 @@ describe('PricingController (integration)', () => {
   it('POST /admin/waste/products/:id/pricing sets all four tiers (201 + envelope)', async () => {
     const res = await request(app.getHttpServer())
       .post(`/admin/waste/products/${PRODUCT_ID}/pricing`)
-      .send({ individual: 0.3, company: 0.27, factory: 0.25, free_facility: 0.26 })
+      .send({ individual: 0.3, company: 0.27, factory: [{ condition: 'EXCELLENT', price: 0.25 }], free_facility: [{ condition: 'EXCELLENT', price: 0.26 }] })
       .expect(201);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.pricing).toEqual({
       individual: 0.3,
       company: 0.27,
-      factory: 0.25,
-      free_facility: 0.26,
+      factory: [{ condition: 'EXCELLENT', price: 0.25 }],
+      free_facility: [{ condition: 'EXCELLENT', price: 0.26 }],
     });
     expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: PRODUCT_ID });
   });
@@ -104,14 +109,14 @@ describe('PricingController (integration)', () => {
   it('rejects a body missing the free_facility tier (400)', async () => {
     await request(app.getHttpServer())
       .post(`/admin/waste/products/${PRODUCT_ID}/pricing`)
-      .send({ individual: 0.3, company: 0.27, factory: 0.25 })
+      .send({ individual: 0.3, company: 0.27, factory: [{ condition: 'EXCELLENT', price: 0.25 }] })
       .expect(400);
   });
 
   it('rejects an invalid (non-UUID) product id (400)', async () => {
     await request(app.getHttpServer())
       .post('/admin/waste/products/not-a-uuid/pricing')
-      .send({ individual: 0.3, company: 0.27, factory: 0.25, free_facility: 0.26 })
+      .send({ individual: 0.3, company: 0.27, factory: [{ condition: 'EXCELLENT', price: 0.25 }], free_facility: [{ condition: 'EXCELLENT', price: 0.26 }] })
       .expect(400);
   });
 
@@ -159,11 +164,12 @@ describe('PricingController (integration)', () => {
   it('PATCH /admin/waste/products/:id/pricing/:tier edits a single tier', async () => {
     const res = await request(app.getHttpServer())
       .patch(`/admin/waste/products/${PRODUCT_ID}/pricing/FACTORY`)
-      .send({ price: 0.5 })
+      .send({ price: 0.5, condition: 'EXCELLENT' })
       .expect(200);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.tier).toBe('factory');
+    expect(res.body.data.condition).toBe('EXCELLENT');
     expect(res.body.data.price).toBe(0.5);
   });
 

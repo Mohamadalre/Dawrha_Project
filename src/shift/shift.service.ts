@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Shift } from './entities/shift.entity';
-import { UpdateShiftDto } from './dto/update-shift.dto';
+import { ShiftNotFoundException } from './exceptions/shift.exceptions';
 
 @Injectable()
 export class ShiftService {
@@ -20,18 +20,8 @@ export class ShiftService {
   /** Ensures a shift exists (used by other modules before linking to it). */
   async getOrThrow(id: string): Promise<Shift> {
     const shift = await this.shiftRepo.findOne({ where: { id } });
-    if (!shift) throw new NotFoundException('Shift not found');
+    if (!shift) throw new ShiftNotFoundException();
     return shift;
-  }
-
-  /** Admin-only: edit name/times. Shifts cannot be created or deleted. */
-  async updateTimes(id: string, dto: UpdateShiftDto) {
-    const shift = await this.getOrThrow(id);
-    if (dto.name !== undefined) shift.name = dto.name;
-    if (dto.startTime !== undefined) shift.startTime = dto.startTime;
-    if (dto.endTime !== undefined) shift.endTime = dto.endTime;
-    const saved = await this.shiftRepo.save(shift);
-    return { message: 'Shift updated successfully', shift: this.map(saved) };
   }
 
   private map(s: Shift) {

@@ -8,6 +8,7 @@ import { NotificationType } from '@src/notification/enums/notification-type.enum
 import { ProductSuggestion } from '../entities/product-suggestion.entity';
 import { SuggestionStatus } from '../enums/suggestion-status.enum';
 import { AuditService } from '@src/waste-management/common/providers/audit.service';
+import { UnitsService } from '@src/waste-management/common/providers/units.service';
 import { CreateSuggestionDto } from './dto/create-suggestion.dto';
 
 interface Caller {
@@ -26,9 +27,12 @@ export class SuggestionsService {
     private readonly accountRepo: Repository<Account>,
     private readonly notifications: NotificationService,
     private readonly audit: AuditService,
+    private readonly units: UnitsService,
   ) {}
 
   async create(caller: Caller, dto: CreateSuggestionDto) {
+    const unitCode = await this.units.validateActiveCode(dto.unit_type);
+
     const suggestion = await this.suggestionRepo.save(
       this.suggestionRepo.create({
         accountId: caller.id,
@@ -37,7 +41,7 @@ export class SuggestionsService {
           ? `${dto.description ?? ''}\n${dto.additional_info}`.trim()
           : dto.description,
         categoryId: dto.category_id,
-        unitType: dto.unit_type,
+        unitType: unitCode,
         estimatedPrice: dto.estimated_price != null ? String(dto.estimated_price) : undefined,
         imageURL: dto.image,
         status: SuggestionStatus.PENDING_REVIEW,

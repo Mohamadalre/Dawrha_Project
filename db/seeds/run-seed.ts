@@ -4,6 +4,8 @@ import { seedProvince } from './province-seed';
 import { seedPermissions } from './permissions-seed';
 import { seedInstitutionTypes } from './institution-type-seed';
 import { seedShifts } from './shift-seed';
+import { seedUnits } from './unit-seed';
+import { seedConditions } from './condition-seed';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 
 async function run() {
@@ -23,6 +25,8 @@ async function run() {
     await seedProvince(AppDataSource);
     await seedInstitutionTypes(AppDataSource);
     await seedShifts(AppDataSource);
+    await seedUnits(AppDataSource);
+    await seedConditions(AppDataSource);
 
     winstonLogger.info('Seed completed successfully', {
       context: 'SeedRunner',

@@ -37,6 +37,7 @@ import { OdooSyncModule } from './odoo-sync/odoo-sync.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
 import { ReportsModule } from './reports/reports.module';
 import { ShiftModule } from './shift/shift.module';
+import { ContentModule } from './content/content.module';
 
 
 
@@ -90,7 +91,8 @@ import { ShiftModule } from './shift/shift.module';
     OdooSyncModule,
     MaintenanceModule,
     ReportsModule,
-    ShiftModule
+    ShiftModule,
+    ContentModule
   ],
   controllers: [AppController],
   providers: [

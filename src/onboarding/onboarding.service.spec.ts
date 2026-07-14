@@ -11,7 +11,7 @@ describe('OnboardingService.markPendingApproval', () => {
   let statusNotifier: any;
 
   beforeEach(() => {
-    accountRepo = { update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    accountRepo = { update: jest.fn().mockResolvedValue({ affected: 1 }), findOne: jest.fn().mockResolvedValue({ id: 'a1', role: 'citizen' }) };
     statusNotifier = { notifyPendingApproval: jest.fn().mockResolvedValue(undefined) };
 
     const noop: any = {};
@@ -24,6 +24,7 @@ describe('OnboardingService.markPendingApproval', () => {
       noop, // commonService
       noop, // cloudinaryService
       statusNotifier, // statusNotifier
+      { enqueuePushDriverRequest: jest.fn() } as any, // odooSync
     );
   });
 

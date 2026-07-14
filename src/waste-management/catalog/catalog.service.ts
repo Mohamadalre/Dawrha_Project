@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, Repository } from 'typeorm';
 import { Role } from '@src/user/enums/role.enum';
+import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { WasteCategory } from '../entities/waste-category.entity';
 import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
@@ -9,7 +10,15 @@ import { Offer } from '../entities/offer.entity';
 import { PricingTier, tierForRole } from '../enums/pricing-tier.enum';
 import { AssignedCategoryProvider } from '@src/waste-management/common/providers/assigned-category.provider';
 import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
-import { buildPagination, PaginationMeta } from '@src/waste-management/common/dto/pagination.dto';
+import { UnitsService } from '@src/waste-management/common/providers/units.service';
+import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
+import {
+  CategoryNotAccessibleException,
+  CategoryNotFoundException,
+  MaterialsNotApplicableException,
+  ProductNotFoundException,
+} from '../exceptions/waste.exceptions';
+import { buildPagination, PaginationMeta, PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 import {
   ByPriceQueryDto,
   CategoryQueryDto,
@@ -40,6 +49,19 @@ export interface OfferListResult {
   pagination: PaginationMeta;
 }
 
+/** Per-warehouse availability block returned by getProductAvailability. */
+export interface AvailabilityWarehouseEntry {
+  warehouse_id: string;
+  name: string;
+  code: string;
+  address: string | null;
+  quantity: number;
+  reserved_quantity: number;
+  available: number;
+  synced_at: Date | null;
+  conditions: Record<string, unknown>[];
+}
+
 /**
  * Read-side service backing the home screen for every buyer role.
  *
@@ -58,9 +80,46 @@ export class CatalogService {
     private readonly pricingRepo: Repository<ProductPricing>,
     @InjectRepository(Offer)
     private readonly offerRepo: Repository<Offer>,
+    @InjectRepository(WarehouseInventory)
+    private readonly inventoryRepo: Repository<WarehouseInventory>,
     private readonly assignedCategories: AssignedCategoryProvider,
     private readonly cache: CatalogCacheService,
+    private readonly units: UnitsService,
+    private readonly conditionsService: ConditionsService,
   ) {}
+
+  // ---------------------------------------------------------------------------
+  // Material conditions (active only — grade pickers for factory/free-facility)
+  // ---------------------------------------------------------------------------
+  async getConditions() {
+    const conditions = await this.conditionsService.active();
+    return {
+      conditions: conditions.map((c) => ({
+        id: c.id,
+        code: c.code,
+        name_en: c.nameEn,
+        name_ar: c.nameAr,
+        sort_order: c.sortOrder,
+      })),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Measurement units (active only — pickers in the buyer apps)
+  // ---------------------------------------------------------------------------
+  async getUnits() {
+    const units = await this.units.active();
+    return {
+      units: units.map((u) => ({
+        id: u.id,
+        code: u.code,
+        name_en: u.nameEn,
+        name_ar: u.nameAr,
+        is_weight: u.isWeight,
+        allows_tolerance: u.allowsTolerance,
+      })),
+    };
+  }
 
   /**
    * Cache scope: unrestricted roles (CITIZEN/ADMIN) share one cache entry ('all');
@@ -82,32 +141,34 @@ export class CatalogService {
   // ---------------------------------------------------------------------------
   // Categories
   // ---------------------------------------------------------------------------
+  /**
+   * FULL category list — every role (and guests) sees all active categories.
+   * The categories an account picked during onboarding live in the separate
+   * GET /waste/my-categories endpoint.
+   */
   async getCategories(caller: Caller | null, query: CategoryQueryDto) {
-    const cacheParts = `${this.scopeFor(caller)}:${query.page}:${query.limit}:${query.search ?? ''}:${query.sort}:${query.order}`;
+    const cacheParts = `all:${query.page}:${query.limit}:${query.search ?? ''}:${query.sort}:${query.order}`;
     const cached = await this.cache.get<CategoryListResult>('categories', cacheParts);
     if (cached) return cached;
-
-    const allowed = await this.allowedCategoryIds(caller);
 
     const qb = this.categoryRepo
       .createQueryBuilder('c')
       .where('c.isActive = :active', { active: true });
 
-    if (allowed) {
-      if (allowed.length === 0) {
-        return this.emptyList('categories', query.page, query.limit);
-      }
-      qb.andWhere('c.id IN (:...allowed)', { allowed });
-    }
-
     if (query.search) {
-      qb.andWhere('c.name ILIKE :search', { search: `%${query.search}%` });
+      qb.andWhere('c.name ILIKE :search', { search: `%${query.search}%` })
+        .setParameter('prefixSearch', `${query.search}%`);
     }
 
     const sortColumn = query.sort === 'created_at' ? 'c.createdAt' : 'c.name';
-    qb.orderBy(sortColumn, query.order.toUpperCase() as 'ASC' | 'DESC')
-      .skip((query.page - 1) * query.limit)
-      .take(query.limit);
+    if (query.search) {
+      // Autocomplete-friendly: names STARTING with the typed text rank first.
+      qb.orderBy('CASE WHEN c.name ILIKE :prefixSearch THEN 0 ELSE 1 END', 'ASC')
+        .addOrderBy(sortColumn, query.order.toUpperCase() as 'ASC' | 'DESC');
+    } else {
+      qb.orderBy(sortColumn, query.order.toUpperCase() as 'ASC' | 'DESC');
+    }
+    qb.skip((query.page - 1) * query.limit).take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
     const counts = await this.productCounts(rows.map((c) => c.id));
@@ -131,7 +192,7 @@ export class CatalogService {
     if (cached) return cached;
 
     const category = await this.categoryRepo.findOne({ where: { id: categoryId } });
-    if (!category) throw new NotFoundException('Category not found');
+    if (!category) throw new CategoryNotFoundException();
 
     const { items, total } = await this.queryProducts(caller, query, { categoryId });
 
@@ -198,7 +259,7 @@ export class CatalogService {
   // Offers
   // ---------------------------------------------------------------------------
   async getOffers(caller: Caller | null, query: OfferQueryDto) {
-    const cacheParts = `${this.scopeFor(caller)}:${query.page}:${query.limit}:${query.active_only}:${query.sort}`;
+    const cacheParts = `${this.scopeFor(caller)}:${caller?.role ?? 'guest'}:${query.page}:${query.limit}:${query.active_only}:${query.sort}`;
     const cached = await this.cache.get<OfferListResult>('offers', cacheParts);
     if (cached) return cached;
 
@@ -207,7 +268,7 @@ export class CatalogService {
       return this.emptyList('offers', query.page, query.limit);
     }
 
-    const qb = this.baseOfferQuery(allowed, query.active_only);
+    const qb = this.baseOfferQuery(allowed, query.active_only, caller?.role ?? null);
 
     if (query.sort === 'created_at') {
       qb.orderBy('o.createdAt', 'DESC');
@@ -232,15 +293,17 @@ export class CatalogService {
       return this.emptyList('offers', query.page, query.limit);
     }
 
-    const qb = this.baseOfferQuery(allowed, true).andWhere('p.name ILIKE :q', {
-      q: `%${query.query}%`,
-    });
+    const qb = this.baseOfferQuery(allowed, true, caller?.role ?? null)
+      .andWhere('p.name ILIKE :q', { q: `%${query.query}%` })
+      .setParameter('qPrefix', `${query.query}%`);
 
     if (query.category_id) {
       qb.andWhere('p.categoryId = :cid', { cid: query.category_id });
     }
 
-    qb.orderBy('o.discountPercentage', 'DESC')
+    // Autocomplete-friendly: offers on products starting with the text first.
+    qb.orderBy('CASE WHEN p.name ILIKE :qPrefix THEN 0 ELSE 1 END', 'ASC')
+      .addOrderBy('o.discountPercentage', 'DESC')
       .skip((query.page - 1) * query.limit)
       .take(query.limit);
 
@@ -252,6 +315,184 @@ export class CatalogService {
   }
 
   // ---------------------------------------------------------------------------
+  // My categories — the categories picked in the onboarding "material" step
+  // ---------------------------------------------------------------------------
+  /** Onboarding-selected categories of the caller (factory / free facility / institution). */
+  async getMyCategories(caller: Caller) {
+    const selected = await this.assignedCategories.getSelectedCategoryIds(caller.id, caller.role);
+    if (selected === null) throw new MaterialsNotApplicableException();
+    if (selected.length === 0) return { categories: [] };
+
+    const rows = await this.categoryRepo.find({
+      where: { id: In(selected), isActive: true },
+      order: { name: 'ASC' },
+    });
+    const counts = await this.productCounts(rows.map((c) => c.id));
+    return { categories: rows.map((c) => this.mapCategory(c, counts.get(c.id) ?? 0)) };
+  }
+
+  // ---------------------------------------------------------------------------
+  // My materials — products under the onboarding-selected categories
+  // ---------------------------------------------------------------------------
+  /**
+   * Products belonging to the categories the caller picked in the onboarding
+   * "add material information" step (factories, free facilities, institutions).
+   * Reads the raw selections from the role's material join table — independent
+   * of the catalogue *restriction* logic, which only applies to institutions.
+   */
+  async getMyMaterials(caller: Caller, query: PaginationQueryDto) {
+    const selected = await this.assignedCategories.getSelectedCategoryIds(caller.id, caller.role);
+    if (selected === null) {
+      throw new MaterialsNotApplicableException();
+    }
+    if (selected.length === 0) {
+      return {
+        categories: [],
+        products: [],
+        pagination: buildPagination(0, query.page, query.limit),
+      };
+    }
+
+    const [categories, { items, total }] = await Promise.all([
+      this.categoryRepo.find({ where: { id: In(selected), isActive: true } }),
+      this.queryProducts(
+        caller,
+        { page: query.page, limit: query.limit, sort: 'name', order: 'asc' },
+        { categoryIds: selected },
+      ),
+    ]);
+
+    return {
+      categories: categories.map((c) => this.mapCategory(c)),
+      products: items,
+      pagination: buildPagination(total, query.page, query.limit),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Per-warehouse availability (factories & free facilities)
+  // ---------------------------------------------------------------------------
+  /**
+   * How much of a product is available in every active warehouse.
+   * Quantities come from `warehouse_inventory`, which mirrors Odoo's
+   * `recycle.stock` lines (pulled by the SYNC_WAREHOUSE job), so this reads
+   * locally — no Odoo round-trip per request. Not cached: stock freshness wins.
+   */
+  async getProductAvailability(caller: Caller, productId: string) {
+    const product = await this.productRepo.findOne({ where: { id: productId, isActive: true } });
+    if (!product) throw new ProductNotFoundException();
+
+    // Category-restricted roles must not see products outside their assignment.
+    const allowed = await this.allowedCategoryIds(caller);
+    if (allowed && !allowed.includes(product.categoryId)) {
+      throw new ProductNotFoundException();
+    }
+
+    const [conditionLabels, priceByCondition] = await Promise.all([
+      this.conditionsService.labelMap(),
+      this.callerConditionPrices(product.id, caller),
+    ]);
+
+    // Never pushed to Odoo yet → no stock lines can exist for it.
+    if (!product.odooProductId) {
+      return this.mapAvailability(product, [], conditionLabels, priceByCondition);
+    }
+
+    const rows = await this.inventoryRepo
+      .createQueryBuilder('inv')
+      .innerJoinAndSelect('inv.warehouse', 'w')
+      .where('inv.odooProductId = :odooProductId', { odooProductId: product.odooProductId })
+      .andWhere('w.isActive = true')
+      .orderBy('w.name', 'ASC')
+      .getMany();
+
+    return this.mapAvailability(product, rows, conditionLabels, priceByCondition);
+  }
+
+  /** Live per-condition prices of the caller's tier (graded tiers only). */
+  private async callerConditionPrices(
+    productId: string,
+    caller: Caller,
+  ): Promise<Map<string, number>> {
+    const tier = tierForRole(caller.role);
+    if (tier !== PricingTier.FACTORY && tier !== PricingTier.FREE_FACILITY) {
+      return new Map();
+    }
+    const rows = await this.pricingRepo
+      .createQueryBuilder('pp')
+      .where('pp.productId = :productId', { productId })
+      .andWhere('pp.tier = :tier', { tier })
+      .andWhere('pp.conditionCode IS NOT NULL')
+      .andWhere('pp.effectiveFrom <= NOW()')
+      .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())')
+      .getMany();
+    return new Map(rows.map((r) => [r.conditionCode!, Number(r.price)]));
+  }
+
+  /**
+   * Groups the per-condition stock rows by warehouse: each warehouse shows its
+   * grades (condition, quantity, availability and — for graded-tier callers —
+   * the price of that grade).
+   */
+  private mapAvailability(
+    product: Product,
+    rows: WarehouseInventory[],
+    conditionLabels: Map<string, string>,
+    priceByCondition: Map<string, number>,
+  ) {
+    let totalAvailable = 0;
+    const byWarehouse = new Map<string, AvailabilityWarehouseEntry>();
+
+    for (const r of rows) {
+      const quantity = Number(r.quantity);
+      const reserved = Number(r.reservedQuantity);
+      const available = Math.max(quantity - reserved, 0);
+      totalAvailable += available;
+
+      let entry = byWarehouse.get(r.warehouseId);
+      if (!entry) {
+        entry = {
+          warehouse_id: r.warehouseId,
+          name: r.warehouse.name,
+          code: r.warehouse.code,
+          address: r.warehouse.address ?? null,
+          quantity: 0,
+          reserved_quantity: 0,
+          available: 0,
+          synced_at: r.syncedAt ?? null,
+          conditions: [],
+        };
+        byWarehouse.set(r.warehouseId, entry);
+      }
+      entry.quantity += quantity;
+      entry.reserved_quantity += reserved;
+      entry.available += available;
+      if (r.syncedAt && (!entry.synced_at || r.syncedAt > entry.synced_at)) {
+        entry.synced_at = r.syncedAt;
+      }
+      entry.conditions.push({
+        condition: r.conditionCode,
+        condition_label: conditionLabels.get(r.conditionCode) ?? r.conditionCode,
+        quantity,
+        reserved_quantity: reserved,
+        available,
+        price: priceByCondition.get(r.conditionCode) ?? null,
+      });
+    }
+
+    return {
+      product: {
+        id: product.id,
+        name: product.name,
+        unit_type: product.unitType,
+      },
+      total_available: totalAvailable,
+      in_stock: totalAvailable > 0,
+      warehouses: [...byWarehouse.values()],
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Shared internals
   // ---------------------------------------------------------------------------
 
@@ -259,7 +500,7 @@ export class CatalogService {
   private async queryProducts(
     caller: Caller,
     query: ProductQueryDto,
-    filters: { categoryId?: string; search?: string },
+    filters: { categoryId?: string; categoryIds?: string[]; search?: string },
   ) {
     const allowed = await this.assignedCategories.getAssignedCategoryIds(caller.id, caller.role);
     if (allowed && allowed.length === 0) {
@@ -277,8 +518,14 @@ export class CatalogService {
     if (filters.categoryId) {
       qb.andWhere('p.categoryId = :categoryId', { categoryId: filters.categoryId });
     }
+    if (filters.categoryIds?.length) {
+      qb.andWhere('p.categoryId IN (:...filterCategoryIds)', {
+        filterCategoryIds: filters.categoryIds,
+      });
+    }
     if (filters.search) {
-      qb.andWhere('p.name ILIKE :search', { search: `%${filters.search}%` });
+      qb.andWhere('p.name ILIKE :search', { search: `%${filters.search}%` })
+        .setParameter('prefixSearch', `${filters.search}%`);
     }
 
     // Price range filter — correct pagination via EXISTS on current tier price.
@@ -303,7 +550,15 @@ export class CatalogService {
       );
     }
 
-    if (query.sort === 'name') {
+    if (filters.search) {
+      // Autocomplete-friendly: prefix matches first, then the requested order.
+      qb.orderBy('CASE WHEN p.name ILIKE :prefixSearch THEN 0 ELSE 1 END', 'ASC');
+      if (query.sort === 'name') {
+        qb.addOrderBy('p.name', query.order.toUpperCase() as 'ASC' | 'DESC');
+      } else {
+        qb.addOrderBy('p.createdAt', 'DESC');
+      }
+    } else if (query.sort === 'name') {
       qb.orderBy('p.name', query.order.toUpperCase() as 'ASC' | 'DESC');
     } else {
       qb.orderBy('p.createdAt', 'DESC');
@@ -312,11 +567,23 @@ export class CatalogService {
     qb.skip((query.page - 1) * query.limit).take(query.limit);
 
     const [products, total] = await qb.getManyAndCount();
-    const pricingMap = await this.pricingForProducts(products.map((p) => p.id));
-    const offerMap = await this.activeOffersForProducts(products.map((p) => p.id));
+    const [pricingMap, offerMap, unitLabels, conditionLabels] = await Promise.all([
+      this.pricingForProducts(products.map((p) => p.id)),
+      this.activeOffersForProducts(products.map((p) => p.id), caller.role),
+      this.units.labelMap(),
+      this.conditionsService.labelMap(),
+    ]);
 
+    const callerTier = tierForRole(caller.role);
     let items = products.map((p) =>
-      this.mapProduct(p, pricingMap.get(p.id) ?? [], offerMap.get(p.id)),
+      this.mapProduct(
+        p,
+        pricingMap.get(p.id) ?? [],
+        offerMap.get(p.id),
+        unitLabels,
+        callerTier,
+        conditionLabels,
+      ),
     );
 
     // Price sort applied on the materialised page using the caller's own tier.
@@ -339,11 +606,19 @@ export class CatalogService {
     return { items, total };
   }
 
-  private baseOfferQuery(allowed: string[] | null, activeOnly: boolean) {
+  private baseOfferQuery(allowed: string[] | null, activeOnly: boolean, callerRole: Role | null) {
     const qb = this.offerRepo
       .createQueryBuilder('o')
       .innerJoinAndSelect('o.product', 'p')
       .where('p.isActive = :active', { active: true });
+
+    // Role targeting: untargeted offers are public; targeted ones only show to
+    // the listed roles (guests see untargeted only).
+    if (callerRole) {
+      qb.andWhere('(o.targetRoles IS NULL OR :callerRole = ANY(o.targetRoles))', { callerRole });
+    } else {
+      qb.andWhere('o.targetRoles IS NULL');
+    }
 
     if (activeOnly) {
       qb.andWhere('o.isActive = true')
@@ -359,7 +634,7 @@ export class CatalogService {
   private async assertCategoryAllowed(caller: Caller, categoryId: string) {
     const allowed = await this.assignedCategories.getAssignedCategoryIds(caller.id, caller.role);
     if (allowed && !allowed.includes(categoryId)) {
-      throw new NotFoundException('Category not available for this account');
+      throw new CategoryNotAccessibleException();
     }
   }
 
@@ -395,13 +670,22 @@ export class CatalogService {
     return map;
   }
 
-  private async activeOffersForProducts(productIds: string[]): Promise<Map<string, Offer>> {
+  private async activeOffersForProducts(
+    productIds: string[],
+    callerRole: Role | null,
+  ): Promise<Map<string, Offer>> {
     const map = new Map<string, Offer>();
     if (productIds.length === 0) return map;
 
     const rows = await this.offerRepo
       .createQueryBuilder('o')
       .where('o.productId IN (:...ids)', { ids: productIds })
+      .andWhere(
+        callerRole
+          ? '(o.targetRoles IS NULL OR :callerRole = ANY(o.targetRoles))'
+          : 'o.targetRoles IS NULL',
+        { callerRole },
+      )
       .andWhere('o.isActive = true')
       .andWhere('o.validFrom <= NOW()')
       .andWhere('(o.validUntil IS NULL OR o.validUntil > NOW())')
@@ -418,53 +702,87 @@ export class CatalogService {
     return {
       id: c.id,
       name: c.name,
-      description: c.description ?? '',
-      image: c.imageCategoryURL,
+      description: c.description ?? null,
+      image: c.imageCategoryURL || null,
       ...(productCount != null ? { product_count: productCount } : {}),
       created_at: c.createdAt,
       updated_at: c.updatedAt,
     };
   }
 
-  private mapPricing(prices: ProductPricing[]) {
+  /** Rows of a tier that are currently effective. */
+  private liveRows(prices: ProductPricing[], tier: PricingTier): ProductPricing[] {
     const now = Date.now();
-    const pick = (tier: PricingTier): number => {
-      const current = prices
-        .filter(
-          (p) =>
-            p.tier === tier &&
-            new Date(p.effectiveFrom).getTime() <= now &&
-            (!p.effectiveUntil || new Date(p.effectiveUntil).getTime() > now),
-        )
-        .sort(
-          (a, b) => new Date(b.effectiveFrom).getTime() - new Date(a.effectiveFrom).getTime(),
-        )[0];
+    return prices.filter(
+      (p) =>
+        p.tier === tier &&
+        new Date(p.effectiveFrom).getTime() <= now &&
+        (!p.effectiveUntil || new Date(p.effectiveUntil).getTime() > now),
+    );
+  }
+
+  private mapPricing(prices: ProductPricing[]) {
+    const flat = (tier: PricingTier): number => {
+      const current = this.liveRows(prices, tier)
+        .filter((p) => !p.conditionCode)
+        .sort((a, b) => new Date(b.effectiveFrom).getTime() - new Date(a.effectiveFrom).getTime())[0];
       return current ? Number(current.price) : 0;
+    };
+    // Graded tiers are priced per condition — the headline number is the
+    // LOWEST condition price ("starting from"); the full matrix is in
+    // condition_prices on the product payload.
+    const minGraded = (tier: PricingTier): number => {
+      const rows = this.liveRows(prices, tier).filter((p) => p.conditionCode);
+      if (rows.length === 0) return 0;
+      return Math.min(...rows.map((r) => Number(r.price)));
     };
 
     return {
-      individual: pick(PricingTier.INDIVIDUAL),
-      company: pick(PricingTier.COMPANY),
-      factory: pick(PricingTier.FACTORY),
-      free_facility: pick(PricingTier.FREE_FACILITY),
+      individual: flat(PricingTier.INDIVIDUAL),
+      company: flat(PricingTier.COMPANY),
+      factory: minGraded(PricingTier.FACTORY),
+      free_facility: minGraded(PricingTier.FREE_FACILITY),
       currency: 'JOD',
     };
   }
 
-  private mapProduct(p: Product, prices: ProductPricing[], bestOffer?: Offer) {
+  private mapProduct(
+    p: Product,
+    prices: ProductPricing[],
+    bestOffer?: Offer,
+    unitLabels?: Map<string, string>,
+    callerTier?: PricingTier,
+    conditionLabels?: Map<string, string>,
+  ) {
+    // Factories / free facilities buy by grade: expose each condition of the
+    // product with its own price for THEIR tier.
+    const isGradedTier =
+      callerTier === PricingTier.FACTORY || callerTier === PricingTier.FREE_FACILITY;
+    const conditionPrices = isGradedTier
+      ? this.liveRows(prices, callerTier)
+          .filter((r) => r.conditionCode)
+          .map((r) => ({
+            condition: r.conditionCode,
+            condition_label: conditionLabels?.get(r.conditionCode!) ?? r.conditionCode,
+            price: Number(r.price),
+          }))
+          .sort((a, b) => a.price - b.price)
+      : undefined;
+
     return {
       id: p.id,
       name: p.name,
-      description: p.description ?? '',
+      description: p.description ?? null,
       image: p.imageURL ?? null,
       category_id: p.categoryId,
       category_name: p.category?.name ?? null,
       unit_type: p.unitType,
-      unit_label: p.unitType === 'KG' ? 'كغم' : 'قطعة',
+      unit_label: unitLabels?.get(p.unitType) ?? p.unitType,
       pricing: this.mapPricing(prices),
       has_offer: !!bestOffer,
       offer_price: bestOffer ? Number(bestOffer.offerPrice) : null,
       discount_percentage: bestOffer ? Number(bestOffer.discountPercentage) : null,
+      ...(conditionPrices ? { condition_prices: conditionPrices } : {}),
       created_at: p.createdAt,
     };
   }
@@ -477,7 +795,8 @@ export class CatalogService {
       product_image: o.product?.imageURL ?? null,
       offer_price: Number(o.offerPrice),
       discount_percentage: Number(o.discountPercentage),
-      description: o.description ?? '',
+      condition: o.conditionCode ?? null,
+      description: o.description ?? null,
       valid_from: o.validFrom,
       valid_until: o.validUntil ?? null,
     };

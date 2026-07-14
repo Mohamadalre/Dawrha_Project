@@ -9,7 +9,6 @@ import {
 } from 'typeorm';
 import { Account } from '@src/user/entities/account.entity';
 import { WasteCategory } from './waste-category.entity';
-import { UnitType } from '../enums/unit-type.enum';
 import { SuggestionStatus } from '../enums/suggestion-status.enum';
 
 @Entity('product_suggestions')
@@ -38,8 +37,9 @@ export class ProductSuggestion {
   @Column({ name: 'category_id', nullable: true })
   categoryId?: string;
 
-  @Column({ type: 'enum', enum: UnitType })
-  unitType: UnitType;
+  /** Suggested measurement-unit code (see `measurement_units`). */
+  @Column({ length: 20 })
+  unitType: string;
 
   @Column({ type: 'decimal', precision: 12, scale: 3, nullable: true })
   estimatedPrice?: string;

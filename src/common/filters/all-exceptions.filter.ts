@@ -57,11 +57,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal Server Error';
+    let errorCode: string | undefined;
 
     // Handle NestJS HttpException instances
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
       const exceptionResponse = exception.getResponse() as any;
+
+      // AppException subclasses carry a stable machine-readable code.
+      if (typeof exceptionResponse === 'object' && exceptionResponse.errorCode) {
+        errorCode = exceptionResponse.errorCode;
+      }
 
       // Handle class-validator validation errors (typically 400 Bad Request)
       // class-validator returns an array of error messages
@@ -96,7 +102,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     response.status(statusCode).json({
       success: false,
       message: this.translate(message),
-      data: '',
+      ...(errorCode ? { errorCode } : {}),
+      data: null,
       statusCode,
       timestamp: new Date().toISOString(),
     });

@@ -7,6 +7,9 @@ import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
 import { ProductPricingHistory } from '../entities/product-pricing-history.entity';
 import { CartItem } from '../entities/cart-item.entity';
+import { MeasurementUnit } from '../entities/measurement-unit.entity';
+import { MaterialCondition } from '../entities/material-condition.entity';
+import { Offer } from '../entities/offer.entity';
 import { WasteCommonModule } from '../common/waste-common.module';
 import { AdminCatalogController } from './admin-catalog.controller';
 import { AdminCatalogService } from './admin-catalog.service';
@@ -20,7 +23,7 @@ import { PricingService } from './pricing/pricing.service';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([WasteCategory, Product, ProductPricing, ProductPricingHistory, CartItem]),
+    TypeOrmModule.forFeature([WasteCategory, Product, ProductPricing, ProductPricingHistory, CartItem, MeasurementUnit, MaterialCondition, Offer]),
     PermissionsModule,
     OdooSyncModule,
     WasteCommonModule,

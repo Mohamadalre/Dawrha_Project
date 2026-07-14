@@ -26,6 +26,13 @@ export class ProductPricing {
   @Column({ type: 'enum', enum: PricingTier })
   tier: PricingTier;
 
+  /**
+   * Material condition this price applies to (FACTORY / FREE_FACILITY tiers are
+   * priced per condition); null = tier-wide price (INDIVIDUAL / COMPANY).
+   */
+  @Column({ name: 'condition_code', length: 30, nullable: true, type: 'varchar' })
+  conditionCode?: string | null;
+
   @Column({ type: 'decimal', precision: 12, scale: 3 })
   price: string;
 

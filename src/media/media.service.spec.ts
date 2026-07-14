@@ -32,7 +32,7 @@ describe('MediaService', () => {
     profileRepo = { findOne: jest.fn() };
     profileResolver = { getRepo: jest.fn().mockReturnValue(profileRepo) };
 
-    service = new MediaService(mediaRepo, accountRepo, cloudinary, {} as any, {} as any, profileResolver);
+    service = new MediaService(mediaRepo, accountRepo, cloudinary, {} as any, {} as any, profileResolver, { enqueuePushDriverRequest: jest.fn() } as any);
   });
 
   const rejected = {
@@ -45,11 +45,11 @@ describe('MediaService', () => {
   };
 
   describe('reuploadRejectedImage', () => {
-    it('throws when media is missing', async () => {
+    it('throws 404 when media is missing', async () => {
       mediaRepo.findOne.mockResolvedValue(null);
       await expect(
         service.reuploadRejectedImage(file, 'm1', 'u1', Role.FACTORY),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toMatchObject({ status: 404 });
     });
 
     it('rejects non-rejected images', async () => {
@@ -88,11 +88,11 @@ describe('MediaService', () => {
   });
 
   describe('deleteImage', () => {
-    it('throws when media is missing', async () => {
+    it('throws 404 when media is missing', async () => {
       mediaRepo.findOne.mockResolvedValue(null);
-      await expect(service.deleteImage('m1', 'u1', Role.FACTORY)).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
+      await expect(service.deleteImage('m1', 'u1', Role.FACTORY)).rejects.toMatchObject({
+        status: 404,
+      });
     });
 
     it('forbids deleting an image the caller does not own', async () => {

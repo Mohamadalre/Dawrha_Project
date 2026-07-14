@@ -10,6 +10,21 @@ import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { AccountDetailsDto } from './dto/account-details.dto';
 import { BlockedAccountStatusDto, UpdateAccountStatusDto } from './dto/update-account-status.dto';
 import { UpdateMediaStatusDto } from './dto/update-media-status.dto';
+import {
+  AccountAlreadyInStatusException,
+  AccountAlreadyProcessedException,
+  AdminAccountNotFoundException,
+  CannotBlockPendingException,
+  InvalidIdException,
+  InvalidStatusTransitionException,
+  MediaAlreadyReviewedException,
+  MediaReviewIncompleteException,
+  MediaViewNotPendingException,
+  NoMediaForProfileException,
+  ProfileNotFoundException,
+  DriverManagedInOdooException,
+} from './exceptions/account-management.exceptions';
+import { MediaNotFoundException } from '@src/media/exceptions/media.exceptions';
 import { ProfileDataProvider } from './providers/profile-data.provider';
 import { AccountStatusNotifier } from '@src/notification/account-status.notifier';
 
@@ -65,7 +80,7 @@ export class AccountManagementService {
       where: { id: profileId },
       relations: this.profileDataProvider.getRelations(role),
     });
-    if (!profile) throw new NotFoundException('Profile not found');
+    if (!profile) throw new ProfileNotFoundException();
 
     const { account, province, address, coordinates, DesscriptLocation, ...profileFields } = profile;
     const materialKey = this.profileDataProvider.getMaterialKey(role);
@@ -88,28 +103,26 @@ export class AccountManagementService {
 
   /** Full details of a single media/image record. */
   async getMediaDetails(mediaId: string) {
-    if (!isUUID(mediaId)) throw new BadRequestException('Invalid media ID');
+    if (!isUUID(mediaId)) throw new InvalidIdException('Invalid media ID');
     const media = await this.mediaRepo.findOne({ where: { id: mediaId } });
-    if (!media) throw new NotFoundException('Media not found');
+    if (!media) throw new MediaNotFoundException();
     return media;
   }
 
   async updateMediaStatus(mediaId: string, dto: UpdateMediaStatusDto) {
     if (!isUUID(mediaId)) {
-      throw new BadRequestException('Invalid media ID');
+      throw new InvalidIdException('Invalid media ID');
     }
 
     const media = await this.mediaRepo.findOne({ where: { id: mediaId } });
 
     if (!media) {
-      throw new NotFoundException('Media not found');
+      throw new MediaNotFoundException();
     }
 
     // Only pending media can be reviewed.
     if (media.status !== statusMedia.PENDING) {
-      throw new ConflictException(
-        `Media is already ${media.status.toLowerCase()}. Only pending media can be reviewed`,
-      );
+      throw new MediaAlreadyReviewedException(media.status);
     }
 
     const { profile } = await this.resolveProfile(media.ownerId);
@@ -140,9 +153,7 @@ export class AccountManagementService {
     const { profile } = await this.resolveProfile(profileId);
 
     if (profile.account.accountStatus !== AccountStatus.PENDING_APPROVAL) {
-      throw new ConflictException(
-        `Account is ${profile.account.accountStatus.toLowerCase().replace('_', ' ')}. Media can only be viewed for pending approval accounts`,
-      );
+      throw new MediaViewNotPendingException(profile.account.accountStatus);
     }
 
     const media = await this.mediaRepo.find({
@@ -150,7 +161,7 @@ export class AccountManagementService {
     });
 
     if (media.length === 0) {
-      throw new NotFoundException('No media found for this profile');
+      throw new NoMediaForProfileException();
     }
 
     return media;
@@ -158,23 +169,23 @@ export class AccountManagementService {
 
   async updateStatus(accountId: string, dto: UpdateAccountStatusDto) {
     if (!isUUID(accountId)) {
-      throw new BadRequestException('Invalid account ID');
+      throw new InvalidIdException('Invalid account ID');
     }
 
     const account = await this.accountRepo.findOne({ where: { id: accountId } });
+    // Drivers (collectors) are approved / rejected / blocked from ODOO only.
+    if (account?.role === Role.COLLECTOR) throw new DriverManagedInOdooException();
 
     if (!account) {
-      throw new NotFoundException('Account not found');
+      throw new AdminAccountNotFoundException();
     }
 
     if (account.accountStatus !== AccountStatus.PENDING_APPROVAL) {
-      throw new ConflictException(
-        `Account already ${account.accountStatus.toLowerCase().replace('_', ' ')}. Cannot update status again`,
-      );
+      throw new AccountAlreadyProcessedException(account.accountStatus);
     }
 
     if (dto.status === AccountStatus.BLOCKED) {
-      throw new BadRequestException('Cannot block a pending approval account. Use the block-status endpoint');
+      throw new CannotBlockPendingException();
     }
 
     const updateData: Partial<Account> = { accountStatus: dto.status };
@@ -182,14 +193,16 @@ export class AccountManagementService {
       updateData.description = dto.description;
     }
 
-    const profile = await this.profileResolver.getRepo(account.role).findOne({ where: { account: { id: accountId } } });
-    const media = await this.mediaRepo.find({ where: { ownerId: profile.id } });
-    if (media.map(t => t.status).some(s => s === statusMedia.PENDING)) {
-      throw new ConflictException('All media must be pending to approve/reject the account');
+    // All the account's uploaded documents must have been reviewed (none left
+    // PENDING) before it can be approved or rejected. Guard against a missing
+    // profile/role so this never throws a 500 — no profile means no media.
+    const profile = account.role
+      ? await this.profileResolver.getRepo(account.role).findOne({ where: { account: { id: accountId } } })
+      : null;
+    const media = profile ? await this.mediaRepo.find({ where: { ownerId: profile.id } }) : [];
+    if (media.some((m) => m.status === statusMedia.PENDING)) {
+      throw new MediaReviewIncompleteException();
     }
-
- 
-    
 
     await this.accountRepo.update(account.id, updateData);
 
@@ -201,13 +214,15 @@ export class AccountManagementService {
 
   async blockStatus(accountId: string, dto: BlockedAccountStatusDto) {
     if (!isUUID(accountId)) {
-      throw new BadRequestException('Invalid account ID');
+      throw new InvalidIdException('Invalid account ID');
     }
 
     const account = await this.accountRepo.findOne({ where: { id: accountId } });
+    // Drivers (collectors) are blocked / unblocked from ODOO only.
+    if (account?.role === Role.COLLECTOR) throw new DriverManagedInOdooException();
 
     if (!account) {
-      throw new NotFoundException('Account not found');
+      throw new AdminAccountNotFoundException();
     }
 
     const current = account.accountStatus;
@@ -232,17 +247,15 @@ export class AccountManagementService {
     }
 
     if (current === target) {
-      throw new ConflictException(`Account is already ${current.toLowerCase().replace('_', ' ')}`);
+      throw new AccountAlreadyInStatusException(current);
     }
 
-    throw new BadRequestException(
-      `Cannot change status from ${current.toLowerCase().replace('_', ' ')} to ${target.toLowerCase().replace('_', ' ')}. Only ACTIVE↔BLOCKED transitions are allowed`,
-    );
+    throw new InvalidStatusTransitionException(current, target);
   }
 
   private async resolveProfile(profileId: string): Promise<{ role: Role; profile: any }> {
     if (!isUUID(profileId)) {
-      throw new BadRequestException('Invalid profile ID');
+      throw new InvalidIdException('Invalid profile ID');
     }
 
     const roles = [Role.FACTORY, Role.INSTITUTIONS, Role.COLLECTOR, Role.EXTERNAL_PARTNER];
@@ -258,7 +271,7 @@ export class AccountManagementService {
       }
     }
 
-    throw new NotFoundException('Profile not found');
+    throw new ProfileNotFoundException();
   }
 
   private async buildMediaMap(profileIds: string[]): Promise<Map<string, string[]>> {

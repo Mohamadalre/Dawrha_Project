@@ -24,6 +24,10 @@ export class ShiftChangeRequest {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** Odoo id of the mirrored request (the decision is made in Odoo). */
+  @Column({ type: 'int', nullable: true, unique: true })
+  odooRequestId?: number;
+
   @ManyToOne(() => CollectorProfile, { nullable: false, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'driver_id' })
   driver: CollectorProfile;

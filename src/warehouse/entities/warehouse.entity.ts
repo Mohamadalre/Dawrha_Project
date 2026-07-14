@@ -43,6 +43,10 @@ export class Warehouse {
   @Column({ nullable: true })
   address?: string;
 
+  /** Governorate the warehouse is in — captured on creation, pushed to Odoo. */
+  @Column({ length: 100, nullable: true })
+  governorate?: string;
+
   /** Zones the warehouse is split into, pushed to Odoo on creation. */
   @Column({ type: 'jsonb', nullable: true })
   zones?: WarehouseZone[];

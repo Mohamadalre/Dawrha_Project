@@ -1,6 +1,5 @@
 {
   "OPERATION_SUCCESS": "Operation completed successfully",
-
   "notifications": {
     "categorySyncFailed": {
       "title": "Category sync failed",
@@ -25,6 +24,26 @@
     "shiftChangeRejected": {
       "title": "Shift change rejected",
       "body": "Your shift-change request was rejected. Reason: {reason}"
+    },
+    "unitSyncFailed": {
+      "title": "Unit sync failed",
+      "body": "The measurement unit \"{name}\" could not be synced to Odoo and was removed."
+    },
+    "conditionSyncFailed": {
+      "title": "Condition sync failed",
+      "body": "The material condition \"{name}\" could not be synced to Odoo and was removed."
+    }
+  },
+  "content": {
+    "about": {
+      "title": "About Dawrha",
+      "body": "Dawrha is a national recycling platform connecting citizens, institutions, factories and free facilities to a collection-and-sorting ecosystem for recyclable materials. Browse materials, categories and tier-based prices, build a cart and place orders, while the platform manages the truck fleet and warehouses with direct inventory-system integration. Our goal: turning waste into resources for a sustainable circular economy.",
+      "lastUpdated": "2026-07-11"
+    },
+    "terms": {
+      "title": "Terms of Use",
+      "body": "1) By using the app you agree to these terms.\n2) Registration data must be accurate; misleading accounts may be suspended.\n3) Displayed prices depend on your account tier and may change; every previous price is archived.\n4) Cart minimums and daily caps differ per account type.\n5) For no-tolerance units (e.g. PIECE) delivered quantities must match the declared ones exactly.\n6) The platform may review, approve or reject accounts and documents.\n7) Your data is processed per the privacy policy and never shared beyond service operation.\n8) These terms may be updated; material changes are announced in-app.",
+      "lastUpdated": "2026-07-11"
     }
   }
 }

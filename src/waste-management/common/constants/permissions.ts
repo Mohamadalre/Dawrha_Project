@@ -11,6 +11,8 @@ export const WASTE_PERMISSIONS = {
   'waste.categories.view': 'View product categories',
   'waste.products.view': 'View products',
   'waste.products.suggest': 'Suggest new products',
+  'waste.products.availability': 'View per-warehouse product availability',
+  'waste.materials.view': 'View products under the categories selected in onboarding',
   'waste.offers.view': 'View offers',
   'waste.categories.request': 'Request additional assigned categories',
   'cart.view': 'View cart',
@@ -47,6 +49,12 @@ const BUYER_PERMISSIONS: WastePermissionKey[] = [
 /** Extra permission only institutions hold (they alone are category-restricted). */
 const INSTITUTION_EXTRA: WastePermissionKey[] = ['waste.categories.request'];
 
+/** Per-warehouse stock visibility: factories & free facilities only. */
+const AVAILABILITY_EXTRA: WastePermissionKey[] = ['waste.products.availability'];
+
+/** "My materials" (onboarding-selected categories): the three commercial roles. */
+const MATERIALS_EXTRA: WastePermissionKey[] = ['waste.materials.view'];
+
 const ADMIN_PERMISSIONS = Object.keys(WASTE_PERMISSIONS) as WastePermissionKey[];
 
 /**
@@ -57,8 +65,8 @@ const ADMIN_PERMISSIONS = Object.keys(WASTE_PERMISSIONS) as WastePermissionKey[]
  */
 export const ROLE_PERMISSIONS_MAP: Partial<Record<Role, WastePermissionKey[]>> = {
   [Role.CITIZEN]: BUYER_PERMISSIONS,
-  [Role.INSTITUTIONS]: [...BUYER_PERMISSIONS, ...INSTITUTION_EXTRA],
-  [Role.FACTORY]: BUYER_PERMISSIONS,
-  [Role.EXTERNAL_PARTNER]: BUYER_PERMISSIONS,
+  [Role.INSTITUTIONS]: [...BUYER_PERMISSIONS, ...INSTITUTION_EXTRA, ...MATERIALS_EXTRA],
+  [Role.FACTORY]: [...BUYER_PERMISSIONS, ...AVAILABILITY_EXTRA, ...MATERIALS_EXTRA],
+  [Role.EXTERNAL_PARTNER]: [...BUYER_PERMISSIONS, ...AVAILABILITY_EXTRA, ...MATERIALS_EXTRA],
   [Role.ADMIN]: ADMIN_PERMISSIONS,
 };

@@ -12,7 +12,7 @@ import {
 import { Warehouse } from './warehouse.entity';
 
 @Entity('warehouse_inventory')
-@Unique(['warehouseId', 'odooProductId'])
+@Unique(['warehouseId', 'odooProductId', 'conditionCode'])
 export class WarehouseInventory {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -27,6 +27,13 @@ export class WarehouseInventory {
 
   @Column({ type: 'int', nullable: true })
   odooProductId?: number;
+
+  /**
+   * Material condition (grade) assigned by the Odoo sorter for this quantity;
+   * UNGRADED = stock that has not been sorted yet.
+   */
+  @Column({ name: 'condition_code', length: 30, default: 'UNGRADED' })
+  conditionCode: string;
 
   @Column({ nullable: true })
   productName?: string;

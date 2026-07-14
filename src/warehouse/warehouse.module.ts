@@ -18,6 +18,8 @@ from './warehouse-admin.service';
 import { WarehouseAdminController }
 from './warehouse-admin.controller';
 
+import { WasteCommonModule } from '@src/waste-management/common/waste-common.module';
+import { TruckEntity } from '@src/truck/entities/truck.entity';
 import { OdooModule }
 from '../odoo/odoo.module';
 
@@ -41,9 +43,11 @@ from '../permission/permissions.module';
       Warehouse,
       WarehouseManager,
       WarehouseInventory,
+      TruckEntity,
     ]),
 
     OdooModule,
+    WasteCommonModule,
     OdooSyncModule,
     PermissionsModule,
   ],

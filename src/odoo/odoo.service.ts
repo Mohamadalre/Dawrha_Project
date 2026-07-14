@@ -1,23 +1,35 @@
-
 import {
   Injectable,
   InternalServerErrorException,
   Logger,
-  ConflictException
 } from '@nestjs/common';
-
 import { HttpService } from '@nestjs/axios';
-
 import { ConfigService } from '@nestjs/config';
-
 import { firstValueFrom } from 'rxjs';
-import { unlink } from 'fs/promises';
+import { RedisService } from '@src/core/redis/redis.service';
 
+interface OdooSession {
+  uid: number;
+  /** Normalised `Cookie` header value ready to send back on subsequent calls. */
+  sessionId: string;
+}
+
+/**
+ * Thin JSON-RPC client for the custom `recycle_warehouse` Odoo addon. All
+ * catalogue/warehouse calls target its `recycle.*` models. Every write from the
+ * backend is enqueued (see OdooSyncModule) — this service only performs the RPC.
+ *
+ * The authenticated session is cached in Redis and reused across calls to avoid
+ * re-authenticating on every request; it is cleared whenever Odoo returns an
+ * error so the next call transparently re-authenticates (covers session expiry).
+ */
 @Injectable()
 export class OdooService {
-  private readonly logger =
-    new Logger(OdooService.name);
-  
+  private readonly logger = new Logger(OdooService.name);
+
+  private static readonly SESSION_KEY = 'odoo:session';
+  private static readonly SESSION_TTL_SECONDS = 25 * 60; // < Odoo's default session lifetime
+
   private readonly url: string;
   private readonly db: string;
   private readonly username: string;
@@ -27,372 +39,67 @@ export class OdooService {
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
+    private readonly redisService: RedisService,
   ) {
-    this.url =
-      this.configService.get<string>(
-        'ODOO_URL',
-      )!;
-
-    this.db =
-      this.configService.get<string>(
-        'ODOO_DB',
-      )!;
-
-    this.username =
-      this.configService.get<string>(
-        'ODOO_USERNAME',
-      )!;
-
-    this.password =
-      this.configService.get<string>(
-        'ODOO_PASSWORD',
-      )!;
-
-    this.groupId =
-      this.configService.get<number>(
-        'ODOO_GROUP_ID',
-      )!;
+    this.url = this.configService.get<string>('ODOO_URL')!;
+    this.db = this.configService.get<string>('ODOO_DB')!;
+    this.username = this.configService.get<string>('ODOO_USERNAME')!;
+    this.password = this.configService.get<string>('ODOO_PASSWORD')!;
+    this.groupId = this.configService.get<number>('ODOO_GROUP_ID')!;
   }
 
+  // ---------------------------------------------------------------------------
+  // Session handling
+  // ---------------------------------------------------------------------------
+  async authenticate(): Promise<OdooSession> {
+    const cached = await this.redisService.getRedisByKey(OdooService.SESSION_KEY);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as OdooSession;
+      } catch {
+        // Corrupt cache entry — fall through and re-authenticate.
+      }
+    }
 
-  async authenticate() {
     try {
-      const response =
-        await firstValueFrom(
-          this.httpService.post(
-            `${this.url}/web/session/authenticate`,
-            {
-              jsonrpc: '2.0',
+      const response = await firstValueFrom(
+        this.httpService.post(`${this.url}/web/session/authenticate`, {
+          jsonrpc: '2.0',
+          params: { db: this.db, login: this.username, password: this.password },
+        }),
+      );
 
-              params: {
-                db: this.db,
-
-                login: this.username,
-
-                password: this.password,
-              },
-            },
-          ),
-        );
-
-      const uid =
-        response.data.result.uid;
-
-      const sessionId =
-        response.headers['set-cookie'];
-
+      const uid = response.data?.result?.uid;
       if (!uid) {
-        throw new Error(
-          'Authentication failed',
-        );
+        throw new Error('Authentication failed');
       }
 
-      return {
-        uid,
-        sessionId,
-      };
+      const rawCookie = response.headers['set-cookie'];
+      const sessionId = Array.isArray(rawCookie)
+        ? rawCookie.join('; ')
+        : (rawCookie ?? '');
+
+      const session: OdooSession = { uid, sessionId };
+      await this.redisService.setRedisKey({
+        redisKey: OdooService.SESSION_KEY,
+        redisValue: JSON.stringify(session),
+        date: OdooService.SESSION_TTL_SECONDS,
+      });
+      return session;
     } catch (error) {
-      this.logger.error(
-        'Authentication failed',
-        error,
-      );
-
-      throw new InternalServerErrorException(
-        'Failed to connect to Odoo',
-      );
+      this.logger.error('Authentication failed', error as Error);
+      throw new InternalServerErrorException('Failed to connect to Odoo');
     }
   }
 
- 
-
-  async findWarehouseByName(name: string): Promise<number | null> {
-  const auth = await this.authenticate();
-
-  const response = await firstValueFrom(
-    this.httpService.post(
-      `${this.url}/web/dataset/call_kw`,
-      {
-        jsonrpc: '2.0',
-        params: {
-          model: 'stock.warehouse',
-          method: 'search_read',
-          args: [
-            [
-              ['name', '=', name],
-              // إذا عندك شركة واحدة فقط خليها 1:
-              ['company_id', '=', 1],
-            ],
-          ],
-          kwargs: { fields: ['id', 'name'], limit: 1 },
-        },
-      },
-      {
-        headers: { Cookie: auth.sessionId },
-      },
-    ),
-  );
-
-  const rows = response.data?.result ?? [];
-  return rows.length ? rows[0].id : null;
-}
-
-async createWarehouse(
-  name: string,
-  code: string,
-): Promise<number> {
-
-  try {
-    const auth = await this.authenticate();
-
-    const response = await firstValueFrom(
-      this.httpService.post(
-        `${this.url}/web/dataset/call_kw`,
-        {
-          jsonrpc: '2.0',
-
-          params: {
-            model: 'stock.warehouse',
-
-            method: 'create',
-
-            args: [
-              {
-                name,
-                code,
-              },
-            ],
-
-            kwargs: {},
-          },
-        },
-
-        {
-          headers: {
-            Cookie: Array.isArray(auth.sessionId)
-              ? auth.sessionId.join('; ')
-              : auth.sessionId,
-          },
-        },
-      ),
-    );
-
-    if (response.data?.error) {
-
-      const message =
-        response.data.error?.data?.message ||
-        response.data.error?.message ||
-        'Odoo warehouse creation failed';
-
-      if (
-        message.includes('must be unique')
-      ) {
-        throw new ConflictException(
-          'Warehouse already exists in Odoo',
-        );
-      }
-
-      throw new InternalServerErrorException(
-        message,
-      );
-    }
-
-    const id = response.data?.result;
-
-    if (!id) {
-      throw new InternalServerErrorException(
-        'Odoo did not return warehouse id',
-      );
-    }
-
-    return id;
-
-  } catch (error) {
-
-    if (
-      error instanceof ConflictException ||
-      error instanceof InternalServerErrorException
-    ) {
-      throw error;
-    }
-
-    this.logger.error(
-      'Create warehouse failed',
-      error,
-    );
-
-    throw new InternalServerErrorException(
-      'Failed to create warehouse in Odoo',
-    );
+  /** Drops the cached session so the next call re-authenticates. */
+  private async clearSession(): Promise<void> {
+    await this.redisService.clearByKey(OdooService.SESSION_KEY);
   }
-}
-
-
-async createManager(dto: {
-  fullName: string;
-  email: string;
-  password: string;
-  warehouseId: number; // 1. أضفنا هذا الحقل لمعرفة مستودع المدير     // 2. أضفنا هذا الحقل لتمرير ID مجموعة الصلاحيات
-}): Promise<number> {
-  try {
-    const auth = await this.authenticate();
-
-    const response = await firstValueFrom(
-      this.httpService.post(
-        `${this.url}/web/dataset/call_kw`,
-        {
-          jsonrpc: '2.0',
-          params: {
-            model: 'res.users',
-            method: 'create',
-            args: [
-              {
-                name: dto.fullName,
-                login: dto.email,
-                email: dto.email,
-                password: dto.password,
-                
-         
-                property_warehouse_id: dto.warehouseId,
-                
-                groups_id: [[6, 0, [this.groupId]]],
-                // ---------------------------
-              },
-            ],
-            kwargs: {},
-          },
-        },
-        {
-          headers: {
-            Cookie: Array.isArray(auth.sessionId)
-              ? auth.sessionId.join('; ')
-              : auth.sessionId,
-          },
-        },
-      ),
-    );
-
-    // إذا Odoo رجع خطأ
-    if (response.data?.error) {
-      const msg =
-        response.data.error?.data?.message ||
-        response.data.error?.message ||
-        'Odoo error';
-   
-      if (msg.toLowerCase().includes('already exists') || msg.toLowerCase().includes('unique')) {
-        throw new ConflictException(msg);
-      }
-
-      throw new InternalServerErrorException(msg);
-    }
-
-    const id = response.data?.result;
-    if (!id) {
-      throw new InternalServerErrorException('Odoo did not return manager id');
-    }
-
-    return id;
-  } catch (error) {
-    if (error instanceof ConflictException || error instanceof InternalServerErrorException) {
-      throw error;
-    }
-    this.logger.error('Create manager failed', error);
-    throw new InternalServerErrorException('Failed to create manager in Odoo');
-  }
-}
-
-
-
-  async deleteUser(
-    userId: number,
-  ) {
-    try {
-      const auth =
-        await this.authenticate();
-
-      await firstValueFrom(
-        this.httpService.post(
-          `${this.url}/web/dataset/call_kw/res.users/unlink`,
-          {
-            jsonrpc: '2.0',
-
-            params: {
-              model: 'res.users',
-
-              method: 'unlink',
-
-              args: [[userId]],
-
-              kwargs: {},
-            },
-          },
-          {
-            headers: {
-              Cookie:
-                auth.sessionId,
-            },
-          },
-        ),
-      );
-    } catch (error) {
-      this.logger.error(
-        'Delete user failed',
-        error,
-      );
-    }
-  }
-
-
-
-  async deleteWarehouse(
-    warehouseId: number,
-  ) {
-    try {
-      const auth =
-        await this.authenticate();
-
-      await firstValueFrom(
-        this.httpService.post(
-          `${this.url}/web/dataset/call_kw/stock.warehouse/unlink`,
-          {
-            jsonrpc: '2.0',
-
-            params: {
-              model:
-                'stock.warehouse',
-
-              method:
-                'unlink',
-
-              args: [
-                [warehouseId],
-              ],
-
-              kwargs: {},
-            },
-          },
-          {
-            headers: {
-              Cookie:
-                auth.sessionId,
-            },
-          },
-        ),
-      );
-    } catch (error) {
-      this.logger.error(
-        'Delete warehouse failed',
-        error,
-      );
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Generic JSON-RPC helper + catalogue (category / product) operations
-  // ---------------------------------------------------------------------------
 
   /**
-   * Generic Odoo `call_kw` wrapper. Authenticates, performs the call, and
-   * surfaces Odoo-side errors as exceptions so callers (Bull jobs) can retry.
+   * Generic Odoo `call_kw` wrapper. Authenticates (cached), performs the call,
+   * and surfaces Odoo-side errors as exceptions so callers (Bull jobs) can retry.
    */
   private async callKw<T = any>(
     model: string,
@@ -409,17 +116,13 @@ async createManager(dto: {
           jsonrpc: '2.0',
           params: { model, method, args, kwargs },
         },
-        {
-          headers: {
-            Cookie: Array.isArray(auth.sessionId)
-              ? auth.sessionId.join('; ')
-              : auth.sessionId,
-          },
-        },
+        { headers: { Cookie: auth.sessionId } },
       ),
     );
 
     if (response.data?.error) {
+      // Force a fresh session next time (covers an expired/invalid session).
+      await this.clearSession();
       const message =
         response.data.error?.data?.message ||
         response.data.error?.message ||
@@ -430,10 +133,9 @@ async createManager(dto: {
     return response.data?.result as T;
   }
 
-  // NOTE: this backend integrates with the custom `recycle_warehouse` Odoo addon,
-  // so all catalogue/warehouse calls target its `recycle.*` models (not the
-  // standard product.template / stock.warehouse / stock.quant models).
-
+  // ---------------------------------------------------------------------------
+  // Catalogue (category / product)
+  // ---------------------------------------------------------------------------
   async createProductCategory(name: string): Promise<number> {
     const id = await this.callKw<number>('recycle.product.category', 'create', [{ name }]);
     if (!id) throw new InternalServerErrorException('Odoo did not return category id');
@@ -471,6 +173,9 @@ async createManager(dto: {
     await this.callKw('recycle.product', 'unlink', [[odooId]]);
   }
 
+  // ---------------------------------------------------------------------------
+  // Warehouses (recycle.warehouse)
+  // ---------------------------------------------------------------------------
   /**
    * Creates a warehouse in the custom recycle_warehouse addon (recycle.warehouse)
    * together with its zones. Warehouses are authored in the backend and pushed
@@ -540,7 +245,165 @@ async createManager(dto: {
       'recycle.stock',
       'search_read',
       [[['warehouse_id', '=', odooWarehouseId]]],
-      { fields: ['product_id', 'quantity'] },
+      { fields: ['product_id', 'quantity', 'condition_code'] },
     );
+  }
+
+  /**
+   * Reads the master data of one recycle.warehouse so Odoo-side edits (name,
+   * code, ...) are mirrored back during SYNC_WAREHOUSE.
+   */
+  async fetchWarehouseInfo(odooWarehouseId: number): Promise<any | null> {
+    const rows = await this.callKw<any[]>(
+      'recycle.warehouse',
+      'read',
+      [[odooWarehouseId], ['name', 'code']],
+    );
+    return rows?.[0] ?? null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Measurement units (recycle.measurement.unit)
+  // ---------------------------------------------------------------------------
+  // The Odoo warehouse addon consumes `allows_tolerance` during sorting: when
+  // true the sorter's processed quantity may deviate from the shipment's
+  // declared quantity; when false they must match exactly.
+
+  async createMeasurementUnit(values: {
+    name: string;
+    code: string;
+    allowsTolerance: boolean;
+  }): Promise<number> {
+    const id = await this.callKw<number>('recycle.measurement.unit', 'create', [
+      { name: values.name, code: values.code, allows_tolerance: values.allowsTolerance },
+    ]);
+    if (!id) throw new InternalServerErrorException('Odoo did not return unit id');
+    return id;
+  }
+
+  async updateMeasurementUnit(odooId: number, values: Record<string, any>): Promise<void> {
+    await this.callKw('recycle.measurement.unit', 'write', [[odooId], values]);
+  }
+
+  async deleteMeasurementUnit(odooId: number): Promise<void> {
+    await this.callKw('recycle.measurement.unit', 'unlink', [[odooId]]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Material conditions (recycle.material.condition)
+  // ---------------------------------------------------------------------------
+  // Admin-managed grades (EXCELLENT/GOOD/...) pushed to Odoo so the sorting UI
+  // lists them when the sorter grades processed quantities.
+
+  async createMaterialCondition(values: {
+    name: string;
+    code: string;
+    sortOrder: number;
+  }): Promise<number> {
+    const id = await this.callKw<number>('recycle.material.condition', 'create', [
+      { name: values.name, code: values.code, sort_order: values.sortOrder },
+    ]);
+    if (!id) throw new InternalServerErrorException('Odoo did not return condition id');
+    return id;
+  }
+
+  async updateMaterialCondition(odooId: number, values: Record<string, any>): Promise<void> {
+    await this.callKw('recycle.material.condition', 'write', [[odooId], values]);
+  }
+
+  async deleteMaterialCondition(odooId: number): Promise<void> {
+    await this.callKw('recycle.material.condition', 'unlink', [[odooId]]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fleet (Odoo is the MASTER: trucks / shifts / driver assignments live there;
+  // the backend keeps a read mirror so the driver app endpoints keep working)
+  // ---------------------------------------------------------------------------
+  async fetchShifts(): Promise<any[]> {
+    return this.callKw<any[]>('recycle.shift', 'search_read', [[]], {
+      fields: ['name', 'start_time', 'end_time'],
+    });
+  }
+
+  async fetchTrucks(): Promise<any[]> {
+    return this.callKw<any[]>('recycle.truck', 'search_read', [[]], {
+      fields: ['model', 'year', 'plate_number', 'max_payload_kg', 'warehouse_id', 'is_active'],
+    });
+  }
+
+  async fetchDriverAssignments(): Promise<any[]> {
+    return this.callKw<any[]>('recycle.driver.assignment', 'search_read', [[]], {
+      fields: ['backend_driver_id', 'truck_id', 'shift_id'],
+    });
+  }
+
+  /** Pushes a collector's onboarding request so the Odoo admin reviews it there. */
+  async createDriverRequest(values: {
+    backendDriverId: string;
+    name: string;
+    email: string;
+    phone?: string | null;
+  }): Promise<number> {
+    const id = await this.callKw<number>('recycle.driver.request', 'create', [
+      {
+        backend_driver_id: values.backendDriverId,
+        name: values.name,
+        email: values.email,
+        phone: values.phone ?? false,
+      },
+    ]);
+    if (!id) throw new InternalServerErrorException('Odoo did not return driver request id');
+    return id;
+  }
+
+  /** Pushes a driver's shift-change request so the Odoo admin decides there. */
+  async createShiftChangeRequest(values: {
+    backendRequestId: string;
+    backendDriverId: string;
+    driverName: string;
+    truckOdooId?: number | null;
+    shiftOdooId?: number | null;
+  }): Promise<number> {
+    const id = await this.callKw<number>('recycle.shift.change.request', 'create', [
+      {
+        backend_request_id: values.backendRequestId,
+        backend_driver_id: values.backendDriverId,
+        driver_name: values.driverName,
+        truck_id: values.truckOdooId ?? false,
+        shift_id: values.shiftOdooId ?? false,
+      },
+    ]);
+    if (!id) throw new InternalServerErrorException('Odoo did not return shift-change id');
+    return id;
+  }
+
+  /**
+   * Replaces the per-condition price lines of one product+tier in Odoo
+   * (model recycle.product.condition.price). Odoo invoices factories and free
+   * facilities with these — each condition of a product has its own price.
+   */
+  async replaceConditionPrices(
+    odooProductId: number,
+    tier: 'factory' | 'free_facility',
+    lines: { conditionCode: string; price: number }[],
+  ): Promise<void> {
+    const existing = await this.callKw<number[]>(
+      'recycle.product.condition.price',
+      'search',
+      [[['product_id', '=', odooProductId], ['tier', '=', tier]]],
+    );
+    if (existing?.length) {
+      await this.callKw('recycle.product.condition.price', 'unlink', [existing]);
+    }
+    if (lines.length) {
+      await this.callKw('recycle.product.condition.price', 'create', [
+        lines.map((l) => ({
+          product_id: odooProductId,
+          tier,
+          condition_code: l.conditionCode,
+          price: l.price,
+        })),
+      ]);
+    }
   }
 }

@@ -16,6 +16,10 @@ export class Shift {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** Odoo id of the shift (shifts are authored in Odoo and mirrored here). */
+  @Column({ type: 'int', nullable: true, unique: true })
+  odooShiftId?: number;
+
   @Column({ unique: true })
   name: string;
 

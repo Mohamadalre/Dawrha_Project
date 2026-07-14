@@ -3,16 +3,31 @@ import {
   PrimaryGeneratedColumn,
   Column,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { TruckAssignmentEntity } from './truck-assignment.entity';
 import { TruckStatus } from '../enums/truck-status.enum';
+import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 
 @Entity({ name: 'trucks' })
 export class TruckEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  /** Odoo id of the truck (fleet is authored in Odoo and mirrored here). */
+  @Column({ type: 'int', nullable: true, unique: true })
+  odooTruckId?: number;
+
+  /** Warehouse the truck belongs to (assigned in Odoo). */
+  @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
+  warehouseId?: string | null;
+
+  @ManyToOne(() => Warehouse, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'warehouse_id' })
+  warehouse?: Warehouse | null;
 
   @Column()
   model: string;

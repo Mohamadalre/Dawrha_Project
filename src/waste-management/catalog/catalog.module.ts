@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PermissionsModule } from '@src/permission/permissions.module';
+import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
+import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { WasteCategory } from '../entities/waste-category.entity';
 import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
@@ -18,7 +20,7 @@ import { CatalogService } from './catalog.service';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([WasteCategory, Product, ProductPricing, Offer]),
+    TypeOrmModule.forFeature([WasteCategory, Product, ProductPricing, Offer, Warehouse, WarehouseInventory]),
     PermissionsModule,
     WasteCommonModule,
   ],

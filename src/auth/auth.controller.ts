@@ -255,6 +255,20 @@ export class AuthController {
   }
 
 
+  /**
+   * Resend the password-reset OTP for the given email (cooldown + daily cap).
+   * @param forgotPasswordDto body payload containing email
+   * @returns cooldownSeconds until the next resend is allowed
+   */
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('password/forgot/resend')
+  @HttpCode(200)
+  async resendForgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    const result = await this.authService.resendForgotPasswordOtp(forgotPasswordDto);
+    return { message: 'The OTP code has been sent successfully', result };
+  }
+
+
   @Post('password/verify')
   @HttpCode(200)
   async verifyReset(@Body() verifyResetOtpDto: VerifyResetOtpDto) {
@@ -318,10 +332,9 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Put('FCMToken')
   @HttpCode(200)
-  async addFCMToken(@CurrentUser() user: any,@Body() dto:DeviceDto){
-  
-    const result = await this.authService.addFCMToken(dto,user.id)
-    return result.message;
+  async addFCMToken(@CurrentUser() user: any, @Body() dto: DeviceDto) {
+    const result = await this.authService.addFCMToken(dto, user.id);
+    return { message: result.message };
   }
 
 

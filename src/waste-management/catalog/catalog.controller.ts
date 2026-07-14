@@ -10,6 +10,7 @@ import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
+import { PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 import { CatalogService } from './catalog.service';
 import {
   ByPriceQueryDto,
@@ -39,6 +40,41 @@ export class CatalogController {
     return { message: 'Categories fetched successfully', result };
   }
 
+  /** Categories the caller picked in the onboarding "material" step. */
+  @Get('my-categories')
+  @Permissions('waste.materials.view')
+  async getMyCategories(@CurrentUser() user) {
+    const result = await this.catalog.getMyCategories(user);
+    return { message: 'My categories fetched successfully', result };
+  }
+
+  /**
+   * Products under the categories the caller selected in the onboarding
+   * "add material information" step — factories, free facilities, institutions.
+   */
+  @Get('my-materials')
+  @Permissions('waste.materials.view')
+  async getMyMaterials(@CurrentUser() user, @Query() query: PaginationQueryDto) {
+    const result = await this.catalog.getMyMaterials(user, query);
+    return { message: 'My materials fetched successfully', result };
+  }
+
+  /** Active material conditions (grades) — pickers for factory / free-facility orders. */
+  @Get('conditions')
+  @Permissions('waste.products.view')
+  async getConditions() {
+    const result = await this.catalog.getConditions();
+    return { message: 'Conditions fetched successfully', result };
+  }
+
+  /** Active measurement units — for unit pickers (suggestions, admin panels). */
+  @Get('units')
+  @Permissions('waste.products.view')
+  async getUnits() {
+    const result = await this.catalog.getUnits();
+    return { message: 'Units fetched successfully', result };
+  }
+
   @Get('categories/:categoryId/products')
   @Permissions('waste.products.view')
   async getProductsByCategory(
@@ -62,6 +98,17 @@ export class CatalogController {
   async byPrice(@CurrentUser() user, @Query() query: ByPriceQueryDto) {
     const result = await this.catalog.getProductsByPrice(user, query);
     return { message: 'Products fetched successfully', result };
+  }
+
+  /** Per-warehouse stock of a product — factories & free facilities only. */
+  @Get('products/:productId/availability')
+  @Permissions('waste.products.availability')
+  async getProductAvailability(
+    @CurrentUser() user,
+    @Param('productId', ParseUUIDPipe) productId: string,
+  ) {
+    const result = await this.catalog.getProductAvailability(user, productId);
+    return { message: 'Product availability fetched successfully', result };
   }
 
   @Get('offers')

@@ -29,6 +29,7 @@ import { ExternalPartnerMaterial } from '@src/user/entities/material/external-pa
 import { ExternalPartnerProfile } from '@src/user/entities/profile/external-partner-profile.entity';
 import { InstitutionMaterial } from '@src/user/entities/material/institution-material.entity';
 import { CoreModule } from '@src/core/core.module';
+import { OdooSyncModule } from '@src/odoo-sync/odoo-sync.module';
 import { NotificationModule } from '@src/notification/notification.module';
 import { ShiftModule } from '@src/shift/shift.module';
 
@@ -37,6 +38,7 @@ import { ShiftModule } from '@src/shift/shift.module';
 @Module({
   imports: [
     NotificationModule,
+    OdooSyncModule,
     TypeOrmModule.forFeature([AccountProgress, Account,
        Province, InstitutionProfile,CollectorProfile,
        WasteCategory,InstitutionType,FactoryProfile,

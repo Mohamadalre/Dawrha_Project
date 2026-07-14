@@ -10,7 +10,6 @@ import {
 import { Cart } from './cart.entity';
 import { Product } from './product.entity';
 import { Offer } from './offer.entity';
-import { UnitType } from '../enums/unit-type.enum';
 
 @Entity('cart_items')
 export class CartItem {
@@ -41,8 +40,16 @@ export class CartItem {
   @Column({ type: 'decimal', precision: 12, scale: 3 })
   quantity: string;
 
-  @Column({ type: 'enum', enum: UnitType })
-  unitType: UnitType;
+  /** Snapshot of the product's unit code at add-time (see `measurement_units`). */
+  @Column({ length: 20 })
+  unitType: string;
+
+  /**
+   * Material condition ordered (FACTORY / FREE_FACILITY buyers pick a grade —
+   * their prices are per condition); null for tiers priced product-wide.
+   */
+  @Column({ name: 'condition_code', length: 30, nullable: true, type: 'varchar' })
+  conditionCode?: string | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 3 })
   unitPrice: string;

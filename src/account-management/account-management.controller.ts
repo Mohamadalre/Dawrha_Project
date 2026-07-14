@@ -75,7 +75,7 @@ export class AccountManagementController {
     @Query('status') status?: AccountStatus,
   ) {
     const data = await this.accountManagementService.getProfiles(Role.FACTORY, page, limit, status);
-    return {message:'Factory fetch sueessfully'}
+    return { message: 'Factories fetched successfully', result: data };
   }
 
   @Get('institution')
@@ -89,16 +89,8 @@ export class AccountManagementController {
     return { message: 'Institutions fetched successfully', result: data };
   }
 
-  @Get('collector')
-  @Permissions('admin.accounts.view')
-  async getCollectors(
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
-    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
-    @Query('status') status?: AccountStatus,
-  ) {
-    const data = await this.accountManagementService.getProfiles(Role.COLLECTOR, page, limit, status);
-    return { message: 'Collectors fetched successfully', result: data };
-  }
+  // NOTE: the collector (driver) requests listing was removed — driver requests
+  // are pushed to ODOO (PUSH_DRIVER_REQUEST) and reviewed by the Odoo admin.
 
   @Get('external-partner')
   @Permissions('admin.accounts.view')

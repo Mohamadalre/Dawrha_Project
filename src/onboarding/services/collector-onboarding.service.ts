@@ -2,8 +2,6 @@ import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/com
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { OnboardingService } from '../onboarding.service';
-
-import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { InformationCollectorDto } from '../dto/collector-onboarding.dto';
 import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
 import { AccountProgress } from '../entities/account-progress.entity';
@@ -14,6 +12,7 @@ import { WasteCategory } from '@src/waste-management/entities/waste-category.ent
 import { CommonService } from '@src/common/common.service';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { AccountStatusNotifier } from '@src/notification/account-status.notifier';
+import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { ShiftService } from '@src/shift/shift.service';
 
 @Injectable()
@@ -31,11 +30,12 @@ export class CollectorOnboardingService extends OnboardingService {
     commonService: CommonService,
     cloudinaryService: CloudinaryService,
     statusNotifier: AccountStatusNotifier,
+    odooSync: OdooSyncService,
     @InjectRepository(CollectorProfile)
     private readonly collectorRepo: Repository<CollectorProfile>,
     private readonly shiftService: ShiftService,
   ) {
-    super(progressRepo, resolver, provinceRepo, acccountRepo, wasteCategoryRepo, commonService, cloudinaryService, statusNotifier);
+    super(progressRepo, resolver, provinceRepo, acccountRepo, wasteCategoryRepo, commonService, cloudinaryService, statusNotifier, odooSync);
   }
 
   /**

@@ -11,6 +11,21 @@ import { Account } from './entities/account.entity';
 import { Role } from './enums/role.enum';
 import { ProfileResolver } from './providers/profile-resolver.privder';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { AccountStatus } from './enums/account-status.enum';
+import {
+  AccountNotActiveException,
+  AccountNotFoundException,
+  CitizenOnlyLocationsException,
+  IncorrectPasswordException,
+  InvalidProvinceException,
+  LocationNotFoundException,
+  NoPasswordSetException,
+  NotYourLocationException,
+  PasswordConfirmationMismatchException,
+  PhoneAlreadyExistsException,
+  SamePasswordException,
+} from './exceptions/user.exceptions';
 import { CitizenProfile } from './entities/profile/citizen-profile.entity';
 import { Location } from './entities/location/location.entity';
 import { Province } from './entities/location/province.entity';
@@ -58,7 +73,7 @@ export class UserService {
     });
 
     if (!account) {
-      throw new NotFoundException(`Account with email ${email} not found`);
+      throw new AccountNotFoundException(`Account with email ${email} not found`);
     }
     return account;
   }
@@ -68,7 +83,7 @@ export class UserService {
       where: { id },
     });
     if (!account) {
-      throw new NotFoundException(`Account not found`);
+      throw new AccountNotFoundException();
     }
     return account;
   }
@@ -77,9 +92,42 @@ export class UserService {
   async update(id: string, data: object): Promise<Boolean> {
     const account = await this.accountRepository.update(id,data);
     if (!account) {
-      throw new NotFoundException(`Account not found`);
+      throw new AccountNotFoundException();
     }
     return true;
+  }
+
+  /**
+   * Self-service edit of the basic account fields (name / phone / description)
+   * for every role — allowed ONLY while the account is ACTIVE. Blocked/pending
+   * accounts must go through the admin/onboarding flows instead.
+   */
+  async updateProfile(accountId: string, dto: UpdateProfileDto) {
+    const account = await this.findById(accountId);
+
+    if (account.accountStatus !== AccountStatus.ACTIVE) {
+      throw new AccountNotActiveException();
+    }
+
+    if (dto.phone !== undefined && dto.phone !== account.phone) {
+      const phoneTaken = await this.accountRepository.findOne({ where: { phone: dto.phone } });
+      if (phoneTaken) throw new PhoneAlreadyExistsException();
+      account.phone = dto.phone;
+    }
+    if (dto.name !== undefined) account.name = dto.name;
+    if (dto.description !== undefined) account.description = dto.description;
+
+    const saved = await this.accountRepository.save(account);
+
+    return {
+      message: 'Profile updated successfully',
+      result: {
+        id: saved.id,
+        name: saved.name,
+        phone: saved.phone ?? null,
+        description: saved.description || null,
+      },
+    };
   }
 
   /**
@@ -109,22 +157,22 @@ export class UserService {
    */
   async changePassword(accountId: string, dto: ChangePasswordDto) {
     if (dto.newPassword !== dto.confirmPassword) {
-      throw new BadRequestException('Password confirmation does not match');
+      throw new PasswordConfirmationMismatchException();
     }
 
     const account = await this.findById(accountId);
     if (!account.passwordHash) {
-      throw new BadRequestException('This account has no password set (e.g. social login)');
+      throw new NoPasswordSetException();
     }
 
     const currentMatches = await argon2.verify(account.passwordHash, dto.currentPassword);
     if (!currentMatches) {
-      throw new BadRequestException('Current password is incorrect');
+      throw new IncorrectPasswordException();
     }
 
     const sameAsOld = await argon2.verify(account.passwordHash, dto.newPassword);
     if (sameAsOld) {
-      throw new BadRequestException('The new password must be different from the current one');
+      throw new SamePasswordException();
     }
 
     const newHash = await argon2.hash(dto.newPassword);
@@ -140,7 +188,7 @@ export class UserService {
 
   private assertCitizen(role: Role) {
     if (role !== Role.CITIZEN) {
-      throw new ForbiddenException('Only individual users can manage multiple locations');
+      throw new CitizenOnlyLocationsException();
     }
   }
 
@@ -171,7 +219,7 @@ export class UserService {
     this.assertCitizen(role);
 
     const province = await this.provinceRepo.findOne({ where: { id: dto.provinceId } });
-    if (!province) throw new BadRequestException('Invalid province');
+    if (!province) throw new InvalidProvinceException();
 
     const profile = await this.getOrCreateCitizenProfile(accountId);
     const [lng, lat] = dto.coordinates;
@@ -206,9 +254,9 @@ export class UserService {
       where: { id: locationId },
       relations: ['cititzenProfile', 'cititzenProfile.account'],
     });
-    if (!location) throw new NotFoundException('Location not found');
+    if (!location) throw new LocationNotFoundException();
     if (location.cititzenProfile?.account?.id !== accountId) {
-      throw new ForbiddenException('This location does not belong to your account');
+      throw new NotYourLocationException();
     }
     await this.locationRepo.delete(locationId);
     return { message: 'Location removed successfully' };

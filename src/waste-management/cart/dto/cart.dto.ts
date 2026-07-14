@@ -1,14 +1,17 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
-  IsEnum,
-  IsNotEmpty,
   IsNumber,
   IsOptional,
+  IsString,
   IsUUID,
+  MaxLength,
   Min,
 } from 'class-validator';
-import { UnitType } from '../../enums/unit-type.enum';
+
+/** Uppercases unit codes so 'kg' and 'KG' hit the same measurement_units row. */
+const normalizeUnitCode = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim().toUpperCase() : value;
 
 export class AddToCartDto {
   @IsUUID()
@@ -19,8 +22,17 @@ export class AddToCartDto {
   @Min(0.001)
   quantity: number;
 
-  @IsEnum(UnitType)
-  unit_type: UnitType;
+  @Transform(normalizeUnitCode)
+  @IsString()
+  @MaxLength(20)
+  unit_type: string;
+
+  /** Material grade being ordered — REQUIRED for factory / free-facility buyers. */
+  @IsOptional()
+  @Transform(normalizeUnitCode)
+  @IsString()
+  @MaxLength(30)
+  condition?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -34,8 +46,10 @@ export class UpdateCartItemDto {
   quantity: number;
 
   @IsOptional()
-  @IsEnum(UnitType)
-  unit_type?: UnitType;
+  @Transform(normalizeUnitCode)
+  @IsString()
+  @MaxLength(20)
+  unit_type?: string;
 }
 
 export class AddOfferToCartDto {
@@ -47,6 +61,8 @@ export class AddOfferToCartDto {
   @Min(0.001)
   quantity: number;
 
-  @IsEnum(UnitType)
-  unit_type: UnitType;
+  @Transform(normalizeUnitCode)
+  @IsString()
+  @MaxLength(20)
+  unit_type: string;
 }

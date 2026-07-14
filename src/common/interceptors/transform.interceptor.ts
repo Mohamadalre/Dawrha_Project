@@ -30,24 +30,30 @@ export class TransformInterceptor<T>
 
     return next.handle().pipe(
       map((data) => {
-        let finalData = data;
+        let finalData: any = data;
         let message = 'OPERATION_SUCCESS';
 
-        if (data && typeof data === 'object') {
+        // Response convention (single source of truth):
+        //   { message, result }  → message extracted, data = result
+        //   { message }          → message extracted, data = null
+        //   { message, ...rest } → message extracted, data = rest (never leaked)
+        //   anything else        → data = value as-is
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
           if ('message' in data) {
-            message = data.message;
+            message = (data as any).message;
           }
           if ('result' in data) {
-            finalData = data.result;
-          } else if (Object.keys(data).length === 1 && 'message' in data) {
-            finalData = null;
+            finalData = (data as any).result;
+          } else if ('message' in data) {
+            const { message: _extracted, ...rest } = data as Record<string, unknown>;
+            finalData = Object.keys(rest).length ? rest : null;
           }
         }
 
         return {
           success: true,
           message: translateMessage(message, context),
-          data: finalData ?? '',
+          data: finalData ?? null,
           statusCode,
           timestamp: new Date().toISOString(),
         };

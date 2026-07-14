@@ -1,7 +1,7 @@
 import { SuggestionsService } from './suggestions.service';
 import { Role } from '@src/user/enums/role.enum';
 import { SuggestionStatus } from '../enums/suggestion-status.enum';
-import { UnitType } from '../enums/unit-type.enum';
+
 
 describe('SuggestionsService', () => {
   let service: SuggestionsService;
@@ -9,6 +9,7 @@ describe('SuggestionsService', () => {
   let accountRepo: any;
   let notifications: any;
   let audit: any;
+  let units: any;
 
   beforeEach(() => {
     suggestionRepo = {
@@ -23,13 +24,16 @@ describe('SuggestionsService', () => {
       enqueueNotification: jest.fn().mockResolvedValue(undefined),
     };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
-    service = new SuggestionsService(suggestionRepo, accountRepo, notifications, audit);
+    units = {
+      validateActiveCode: jest.fn(async (code: string) => String(code).toUpperCase()),
+    };
+    service = new SuggestionsService(suggestionRepo, accountRepo, notifications, audit, units);
   });
 
   it('creates a PENDING suggestion, writes an audit log and notifies admins', async () => {
     const res = await service.create(
       { id: 'u1', role: Role.CITIZEN },
-      { product_name: 'Cardboard', category_id: 'c1', unit_type: UnitType.KG } as any,
+      { product_name: 'Cardboard', category_id: 'c1', unit_type: 'KG' } as any,
     );
 
     expect(res.suggestion_id).toBe('s1');
