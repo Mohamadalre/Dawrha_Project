@@ -1,6 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Job } from 'bullmq';
 import { OdooService } from '@src/odoo/odoo.service';
 import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
@@ -21,8 +21,9 @@ import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.enti
 import { ShiftChangeRequest } from '@src/truck/entities/shift-change-request.entity';
 import { ShiftChangeRequestStatus } from '@src/truck/enums/shift-change-request-status.enum';
 import { TruckStatus } from '@src/truck/enums/truck-status.enum';
-import { Shift } from '@src/shift/entities/shift.entity';
+import { Shift, ShiftType } from '@src/shift/entities/shift.entity';
 import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
+import { Media, OwnerType, statusMedia } from '@src/media/entities/media.entity';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { NotificationService } from '@src/notification/notification.service';
@@ -82,6 +83,8 @@ export class OdooSyncProcessor extends WorkerHost {
     private readonly collectorRepo: Repository<CollectorProfile>,
     @InjectRepository(ShiftChangeRequest)
     private readonly shiftChangeRepo: Repository<ShiftChangeRequest>,
+    @InjectRepository(Media)
+    private readonly mediaRepo: Repository<Media>,
   ) {
     super();
   }
@@ -391,7 +394,9 @@ export class OdooSyncProcessor extends WorkerHost {
   private async syncFleet() {
     // 1) Shifts (match by odoo id, fall back to name for the seeded ones).
     const odooShifts = await this.odoo.fetchShifts();
+    const seenShiftOdooIds = new Set<number>();
     for (const os of odooShifts) {
+      seenShiftOdooIds.add(os.id);
       let shift =
         (await this.shiftRepo.findOne({ where: { odooShiftId: os.id } })) ??
         (await this.shiftRepo.findOne({ where: { name: os.name } }));
@@ -400,10 +405,15 @@ export class OdooSyncProcessor extends WorkerHost {
       shift.name = os.name ?? shift.name;
       if (os.start_time) shift.startTime = os.start_time;
       if (os.end_time) shift.endTime = os.end_time;
+      // Audience mirrors Odoo: only DRIVER shifts reach the driver app.
+      shift.shiftType = os.shift_type === 'warehouse' ? ShiftType.WAREHOUSE : ShiftType.DRIVER;
+      shift.isActive = true;
       await this.shiftRepo.save(shift);
     }
 
     // 2) Trucks (linked to their warehouse via odooWarehouseId).
+    // The backend admin is told about fleet authoring done in Odoo: a new
+    // truck, or an existing truck (re/un)assigned to a warehouse.
     const odooTrucks = await this.odoo.fetchTrucks();
     for (const ot of odooTrucks) {
       const warehouseOdooId = Array.isArray(ot.warehouse_id) ? ot.warehouse_id[0] : ot.warehouse_id;
@@ -412,6 +422,8 @@ export class OdooSyncProcessor extends WorkerHost {
         : null;
 
       let truck = await this.truckRepo.findOne({ where: { odooTruckId: ot.id } });
+      const isNew = !truck;
+      const prevWarehouseId = truck?.warehouseId ?? null;
       if (!truck) truck = this.truckRepo.create({ odooTruckId: ot.id, status: TruckStatus.ACTIVE });
       truck.model = ot.model ?? truck.model ?? '';
       truck.year = ot.year ?? truck.year ?? 0;
@@ -421,6 +433,45 @@ export class OdooSyncProcessor extends WorkerHost {
       if (ot.is_active === false) truck.status = TruckStatus.DISABLED;
       else if (truck.status === TruckStatus.DISABLED) truck.status = TruckStatus.ACTIVE;
       await this.truckRepo.save(truck);
+
+      const plate = truck.plateNumber ?? '';
+      if (isNew) {
+        if (warehouse) {
+          await this.notifyAdmins({
+            title: 'New truck added',
+            body: `Truck "${plate}" was added in Odoo and assigned to warehouse "${warehouse.name}".`,
+            titleKey: 'notifications.truckAdded.title',
+            bodyKey: 'notifications.truckAdded.body',
+            args: { plate, warehouse: warehouse.name },
+          });
+        } else {
+          await this.notifyAdmins({
+            title: 'New truck added',
+            body: `Truck "${plate}" was added in Odoo (not assigned to a warehouse yet).`,
+            titleKey: 'notifications.truckAddedUnassigned.title',
+            bodyKey: 'notifications.truckAddedUnassigned.body',
+            args: { plate },
+          });
+        }
+      } else if (prevWarehouseId !== truck.warehouseId) {
+        if (warehouse) {
+          await this.notifyAdmins({
+            title: 'Truck assignment changed',
+            body: `Truck "${plate}" is now assigned to warehouse "${warehouse.name}".`,
+            titleKey: 'notifications.truckAssignmentChanged.title',
+            bodyKey: 'notifications.truckAssignmentChanged.body',
+            args: { plate, warehouse: warehouse.name },
+          });
+        } else {
+          await this.notifyAdmins({
+            title: 'Truck assignment changed',
+            body: `Truck "${plate}" is no longer assigned to any warehouse.`,
+            titleKey: 'notifications.truckUnassigned.title',
+            bodyKey: 'notifications.truckUnassigned.body',
+            args: { plate },
+          });
+        }
+      }
     }
 
     // 3) Driver assignments (decided by the Odoo admin; mirrored 1:1).
@@ -462,6 +513,31 @@ export class OdooSyncProcessor extends WorkerHost {
       if (!seen.has(row.id)) await this.assignmentRepo.delete(row.id);
     }
 
+    // Shifts deleted in Odoo: drop the mirror row. When historical rows
+    // (driver profiles, old requests) still reference it, the FK blocks the
+    // delete — deactivate instead so it disappears from driver-facing lists.
+    // Runs AFTER the assignment cleanup so freshly-removed assignments no
+    // longer hold a reference.
+    const mirroredShifts = await this.shiftRepo
+      .createQueryBuilder('s')
+      .where('s.odooShiftId IS NOT NULL')
+      .getMany();
+    for (const s of mirroredShifts) {
+      if (seenShiftOdooIds.has(s.odooShiftId!)) continue;
+      try {
+        await this.shiftRepo.delete(s.id);
+      } catch {
+        if (s.isActive) {
+          s.isActive = false;
+          await this.shiftRepo.save(s);
+          winstonLogger.warn(
+            `Shift "${s.name}" was deleted in Odoo but is still referenced — deactivated instead`,
+            LOG_META,
+          );
+        }
+      }
+    }
+
     // 4) Derived truck statuses (capacity = number of shifts).
     const capacity = await this.shiftRepo.count();
     const trucks = await this.truckRepo.find();
@@ -484,11 +560,18 @@ export class OdooSyncProcessor extends WorkerHost {
     const profile = await this.collectorRepo.findOne({ where: { account: { id: account.id } } });
     if (!profile) return;
 
+    // The Odoo admin reviews the uploaded documents inline, so ship them
+    // along (media id lets Odoo reject one specific image later).
+    const media = await this.mediaRepo.find({
+      where: { ownerId: profile.id, ownerType: OwnerType.COLLECTOR },
+    });
+
     await this.odoo.createDriverRequest({
       backendDriverId: profile.id,
       name: account.name,
       email: account.email,
       phone: account.phone ?? null,
+      images: media.map((m) => ({ mediaId: m.id, fileType: m.fileType, url: m.url })),
     });
   }
 
@@ -506,6 +589,16 @@ export class OdooSyncProcessor extends WorkerHost {
       (payload.status as AccountStatus | undefined) ??
       (payload.approved ? AccountStatus.ACTIVE : AccountStatus.REJECTED);
     await this.accountRepo.update(profile.account.id, { accountStatus: newStatus });
+
+    // Documents the Odoo admin flagged: mark them REJECTED so the driver's
+    // re-upload endpoint (PATCH /media/:id/reupload) accepts exactly those.
+    // Ownership is enforced — only this driver's media can be touched.
+    if (payload.rejectedMediaIds?.length) {
+      await this.mediaRepo.update(
+        { id: In(payload.rejectedMediaIds), ownerId: profile.id },
+        { status: statusMedia.REJECTED },
+      );
+    }
 
     if (newStatus === AccountStatus.ACTIVE && payload.truckOdooId && payload.shiftOdooId) {
       const truck = await this.truckRepo.findOne({ where: { odooTruckId: payload.truckOdooId } });

@@ -99,6 +99,7 @@ export class OdooWebhookController {
       rejectionReason: dto.rejection_reason,
       truckOdooId: dto.truck_odoo_id,
       shiftOdooId: dto.shift_odoo_id,
+      rejectedMediaIds: dto.rejected_media_ids,
     });
     return { message: 'Driver decision queued', result: { queued: 1 } };
   }

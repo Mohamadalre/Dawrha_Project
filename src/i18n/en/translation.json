@@ -17,6 +17,22 @@
       "title": "Truck assigned",
       "body": "You have been assigned to truck \"{plate}\"."
     },
+    "truckAdded": {
+      "title": "New truck added",
+      "body": "Truck \"{plate}\" was added in Odoo and assigned to warehouse \"{warehouse}\"."
+    },
+    "truckAddedUnassigned": {
+      "title": "New truck added",
+      "body": "Truck \"{plate}\" was added in Odoo (not assigned to a warehouse yet)."
+    },
+    "truckAssignmentChanged": {
+      "title": "Truck assignment changed",
+      "body": "Truck \"{plate}\" is now assigned to warehouse \"{warehouse}\"."
+    },
+    "truckUnassigned": {
+      "title": "Truck assignment changed",
+      "body": "Truck \"{plate}\" is no longer assigned to any warehouse."
+    },
     "shiftChangeAccepted": {
       "title": "Shift change accepted",
       "body": "Your shift-change request was accepted; you are now on truck \"{plate}\"."

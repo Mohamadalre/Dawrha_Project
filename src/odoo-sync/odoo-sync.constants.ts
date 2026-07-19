@@ -92,6 +92,8 @@ export interface DriverDecisionPayload {
   /** Optional immediate assignment decided by the Odoo admin. */
   truckOdooId?: number;
   shiftOdooId?: number;
+  /** Media rows the Odoo admin flagged as unacceptable (driver re-uploads). */
+  rejectedMediaIds?: string[];
 }
 export interface ShiftChangeDecisionPayload {
   /** Backend request id echoed back by Odoo. */

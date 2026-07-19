@@ -59,8 +59,9 @@ export class CollectorOnboardingService extends OnboardingService {
     if (exist) {
       throw new ForbiddenException('You cannot add the information again,please move to the next stage')
     }
-    // Validate the chosen shift exists (throws NotFound otherwise).
-    await this.shiftService.getOrThrow(dto.shiftId);
+    // Validate the chosen shift exists AND is a driver shift (warehouse
+    // staff shifts can never be picked by a collector).
+    await this.shiftService.getDriverShiftOrThrow(dto.shiftId);
     const information = this.collectorRepo.create({
       shiftId: dto.shiftId,
       NationalID: dto.NationalID,

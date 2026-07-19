@@ -16,6 +16,7 @@ import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.enti
 import { ShiftChangeRequest } from '@src/truck/entities/shift-change-request.entity';
 import { Shift } from '@src/shift/entities/shift.entity';
 import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
+import { Media } from '@src/media/entities/media.entity';
 import { ODOO_SYNC_QUEUE } from './odoo-sync.constants';
 import { OdooSyncService } from './odoo-sync.service';
 import { OdooSyncProcessor } from './odoo-sync.processor';
@@ -40,6 +41,7 @@ import { OdooWebhookController } from './odoo-webhook.controller';
       ShiftChangeRequest,
       Shift,
       CollectorProfile,
+      Media,
     ]),
   ],
   controllers: [OdooWebhookController],

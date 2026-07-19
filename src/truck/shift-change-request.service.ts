@@ -11,7 +11,7 @@ import { NotificationService } from '@src/notification/notification.service';
 import { NotificationType } from '@src/notification/enums/notification-type.enum';
 import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
-import { Shift } from '@src/shift/entities/shift.entity';
+import { Shift, ShiftType } from '@src/shift/entities/shift.entity';
 import { buildPagination, PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
@@ -78,8 +78,11 @@ export class ShiftChangeRequestService {
 
     const truck = await this.truckRepo.findOne({ where: { id: dto.truckId } });
     if (!truck) throw new TruckNotFoundException();
+    // Drivers may only request DRIVER shifts that still exist in Odoo.
     const shift = await this.shiftRepo.findOne({ where: { id: dto.shiftId } });
-    if (!shift) throw new AssignmentShiftNotFoundException();
+    if (!shift || shift.shiftType !== ShiftType.DRIVER || !shift.isActive) {
+      throw new AssignmentShiftNotFoundException();
+    }
 
     const request = await this.requestRepo.save(
       this.requestRepo.create({

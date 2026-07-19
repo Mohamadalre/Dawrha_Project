@@ -321,7 +321,7 @@ export class OdooService {
   // ---------------------------------------------------------------------------
   async fetchShifts(): Promise<any[]> {
     return this.callKw<any[]>('recycle.shift', 'search_read', [[]], {
-      fields: ['name', 'start_time', 'end_time'],
+      fields: ['name', 'start_time', 'end_time', 'shift_type'],
     });
   }
 
@@ -337,12 +337,18 @@ export class OdooService {
     });
   }
 
-  /** Pushes a collector's onboarding request so the Odoo admin reviews it there. */
+  /**
+   * Pushes a collector's onboarding request so the Odoo admin reviews it
+   * there. Called again after every document re-upload — the Odoo model
+   * upserts by backend_driver_id (and replaces the images) instead of
+   * duplicating.
+   */
   async createDriverRequest(values: {
     backendDriverId: string;
     name: string;
     email: string;
     phone?: string | null;
+    images?: { mediaId: string; fileType: string; url: string }[];
   }): Promise<number> {
     const id = await this.callKw<number>('recycle.driver.request', 'create', [
       {
@@ -350,6 +356,11 @@ export class OdooService {
         name: values.name,
         email: values.email,
         phone: values.phone ?? false,
+        image_ids: (values.images ?? []).map((img) => [
+          0,
+          0,
+          { backend_media_id: img.mediaId, file_type: img.fileType, url: img.url },
+        ]),
       },
     ]);
     if (!id) throw new InternalServerErrorException('Odoo did not return driver request id');

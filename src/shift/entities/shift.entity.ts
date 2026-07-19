@@ -6,10 +6,16 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+/** Who a shift is meant for — mirrors recycle.shift.shift_type in Odoo. */
+export enum ShiftType {
+  DRIVER = 'DRIVER',
+  WAREHOUSE = 'WAREHOUSE',
+}
+
 /**
- * A work shift drivers operate in. There are exactly two seeded shifts
- * (Morning / Evening); admins may only edit their name/times, not create new
- * ones. A truck has one driver per shift → at most two drivers.
+ * A work shift drivers operate in. Shifts are authored in Odoo and mirrored
+ * here; only DRIVER-type shifts are offered to collectors (onboarding /
+ * shift-change). The two seeded shifts (Morning / Evening) are a bootstrap.
  */
 @Entity('shifts')
 export class Shift {
@@ -22,6 +28,16 @@ export class Shift {
 
   @Column({ unique: true })
   name: string;
+
+  @Column({ type: 'enum', enum: ShiftType, default: ShiftType.DRIVER })
+  shiftType: ShiftType;
+
+  /**
+   * False when the shift was deleted in Odoo but old rows (driver profiles,
+   * past requests) still reference it — hidden from every driver-facing list.
+   */
+  @Column({ default: true })
+  isActive: boolean;
 
   @Column({ type: 'time' })
   startTime: string;

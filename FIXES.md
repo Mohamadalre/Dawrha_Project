@@ -225,3 +225,31 @@
 - **جولة 2026-07-08:** `tsc --noEmit` نظيف · كل الاختبارات (159/159) ناجحة · JSON الترجمة صالح. أُصلح اختبار `account-management` كان فاشلاً مسبقاً.
 - **جولة 2026-07-10:** `tsc --noEmit` نظيف · كل الاختبارات (163/163) ناجحة · JSON الترجمة صالح.
 - **جولة 2026-07-10 (ب):** `tsc --noEmit` نظيف · كل الاختبارات ناجحة · **مطلوب بعد السحب:** `npm run migration:run` ثم `npm run seed` (لجدول الوحدات وصفوف KG/PIECE)، وإضافة `ODOO_WEBHOOK_SECRET` للـ `.env` + Automated Action في Odoo لتفعيل المزامنة الفورية.
+
+---
+
+## جولة 2026-07-14 — إدارة الشاحنات (Fleet) تُؤلَّف في Odoo + إشعار أدمن الباك إند
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 68 | **إشعار الأدمن عند تغيّرات الأسطول القادمة من Odoo** | `odoo-sync.processor.ts` (`syncFleet`) + `i18n/{ar,en}/translation.json` | ✅ | `SYNC_FLEET` صار يوازن الحالة السابقة/الجديدة لكل شاحنة: **شاحنة جديدة** (مسندة/غير مسندة لمستودع) أو **تغيّر إسناد المستودع** → إشعار لكل حساب `role=ADMIN` عبر `notifyAdmins(...)` (in-app + FCM + طابور). 4 مفاتيح i18n جديدة: `truckAdded / truckAddedUnassigned / truckAssignmentChanged / truckUnassigned`. الشاحنات تُؤلَّف حصراً في Odoo (سيّد الأسطول)؛ الباك إند مرآة — أُضيف حقل `notes` وبقية الحقول موجودة أصلاً في `recycle.truck` بالأودو. |
+| — | **سر الـ webhook** | `.env` | ✅ | أُضيف `ODOO_WEBHOOK_SECRET` (يطابق `recycle.backend_webhook_secret` في Odoo) — بدونه نقطة `POST /api/v1/odoo/webhooks/fleet` تُرجع 503. النقطة كانت موجودة أصلاً (`OdooWebhookController.fleetChanged`)؛ الجديد أن Odoo صار **يستدعيها فعلياً** عند كل تغيير أسطول. |
+
+**ملاحظة معمارية**: `notifyAdmins()` القائمة (كانت لإشعارات فشل المزامنة فقط) أُعيد استخدامها؛ تجنّبت إضافة دالة مكررة (كسر `tsc` بـ Duplicate function ثم أُزيل). عقد الأودو للأسطول موثّق في `D:/ite-odoo/odoo19-docker/BACKEND_INTEGRATION.md §3.4` و`PROJECT_LOG.md` (جلسة 2026-07-14 — الشاحنات).
+
+## ملاحظات تحقّق
+- **جولة 2026-07-14:** `tsc --noEmit` نظيف · **154/154 اختبار ناجح** · JSON الترجمة (ar/en) صالح ومتماثل المفاتيح. الجانب الأودو: ترقية 0 أخطاء + 12/12 اختبار + تحقق حي بالشل والمتصفح (إنشاء/تعديل شاحنة، إطلاق نداء الأسطول للمسار الصحيح بالهيدر الصحيح). **مطلوب بعد السحب**: ضبط `ODOO_WEBHOOK_SECRET` في `.env`.
+
+---
+
+## جولة 2026-07-16 — نوع الوردية + حذف الورديات من أودو + دورة طلبات السائقين الكاملة
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 69 | **الوردية صار لها جمهور**: `shift_type` (DRIVER/WAREHOUSE) + `is_active` | `shift.entity.ts`، هجرة `1783700000000`، `shift.service.ts`، `odoo.service.ts` (fetchShifts += shift_type)، `odoo-sync.processor.ts` | ✅ | `GET /shifts` (منتقي السائق في onboarding) يعيد **ورديات DRIVER الفعالة فقط**؛ ورديات موظفي المستودع (تُدار في أودو) لا تصل للسائق أبداً. `getDriverShiftOrThrow` يحرس onboarding + طلب تغيير الوردية. **مطلوب بعد السحب: `npm run migration:run`**. |
+| 70 | **حذف وردية في أودو ينعكس هنا** | `odoo-sync.processor.ts` (`syncFleet`) | ✅ | المرايا الغائبة عن أودو تُحذف؛ إن منعها FK تاريخي (بروفايل سائق قديم) تُعطَّل `is_active=false` فتختفي من القوائم — بعد تنظيف الإسنادات بنفس دورة المزامنة. |
+| 71 | **دفع طلب السائق يشمل صور مستنداته** | `odoo.service.ts` (`createDriverRequest`)، `odoo-sync.processor.ts` (+`mediaRepo`)، `odoo-sync.module.ts` | ✅ | كل صور media بمالكها profile.id (COLLECTOR) تُرسل كـ `image_ids` لنموذج `recycle.driver.request` في أودو — أدمن أودو يراها ويقرر عليها. إعادة الرفع تعيد الدفع (upsert في أودو — لا تكرار). |
+| 72 | **رفض صورة واحدة من أودو**: webhook `driver-decision` + `rejected_media_ids[]` | `odoo-webhook.dto.ts`، `odoo-webhook.controller.ts`، `odoo-sync.constants.ts`، `odoo-sync.processor.ts` | ✅ | مع NEED_CHANGES: الصور المحددة تُعلَّم REJECTED (بفحص ملكية `ownerId=profile.id`، حد 20، UUID لكل عنصر) → يقبلها `PATCH /media/:id/reupload` → الحساب يعود PENDING_APPROVAL ويُعاد الدفع لأودو تلقائياً — **دورة مغلقة**. قرارات أودو **صارمة**: أودو لا يحفظ القرار إن لم يصل الـ webhook (لا انحراف حالات أبداً). |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-16:** `tsc --noEmit` نظيف · **154/154 اختبار** (حُدّث fixture واحد في `shift-change-request.service.spec` ليعكس عقد DRIVER الجديد) · الجانب الأودو: ترقية 0 أخطاء + 12/12 + تحقق شل وبصري كامل (انظر `PROJECT_LOG.md` جلسة 2026-07-16). **مطلوب بعد السحب: `npm run migration:run`**.

@@ -1,5 +1,16 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 /**
  * Payload sent by the Odoo automated action when recycle.stock changes.
@@ -46,6 +57,17 @@ export class OdooDriverDecisionDto {
   @IsInt()
   @Min(1)
   shift_odoo_id?: number;
+
+  /**
+   * Media ids the Odoo admin flagged as unacceptable (sent with
+   * status NEED_CHANGES): the backend marks them REJECTED so the driver's
+   * re-upload endpoint accepts exactly those images again.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsUUID('all', { each: true })
+  rejected_media_ids?: string[];
 }
 
 export class OdooShiftChangeDecisionDto {

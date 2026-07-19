@@ -26,7 +26,7 @@ describe('ShiftChangeRequestService', () => {
     };
     driverRepo = { findOne: jest.fn() };
     truckRepo = { findOne: jest.fn().mockResolvedValue({ id: 't1', status: TruckStatus.ACTIVE, plateNumber: 'ABC-1' }) };
-    shiftRepo = { findOne: jest.fn().mockResolvedValue({ id: 's1' }) };
+    shiftRepo = { findOne: jest.fn().mockResolvedValue({ id: 's1', shiftType: 'DRIVER', isActive: true }) };
     assignmentRepo = {
       findOne: jest.fn(),
       create: jest.fn((x) => x),
