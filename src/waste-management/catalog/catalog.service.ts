@@ -12,6 +12,8 @@ import { AssignedCategoryProvider } from '@src/waste-management/common/providers
 import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
 import { UnitsService } from '@src/waste-management/common/providers/units.service';
 import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
+import { BuyerProfileService } from '@src/waste-management/common/providers/buyer-profile.service';
+import { WarehouseState } from '@src/warehouse/enums/warehouse-state.enum';
 import {
   CategoryNotAccessibleException,
   CategoryNotFoundException,
@@ -47,6 +49,21 @@ export interface ProductListResult {
 export interface OfferListResult {
   offers: Record<string, unknown>[];
   pagination: PaginationMeta;
+}
+
+/**
+ * What a guest may filter materials by.
+ *
+ * Its own type rather than the buyer's ProductQueryDto: that one carries
+ * price_min / price_max, and a price filter is a way of reading prices back out
+ * one range at a time. Sharing the type would put the leak one inherited field
+ * away.
+ */
+export interface GuestProductQuery {
+  page: number;
+  limit: number;
+  category_id?: string;
+  search?: string;
 }
 
 /** Per-warehouse availability block returned by getProductAvailability. */
@@ -86,13 +103,16 @@ export class CatalogService {
     private readonly cache: CatalogCacheService,
     private readonly units: UnitsService,
     private readonly conditionsService: ConditionsService,
+    private readonly buyerProfiles: BuyerProfileService,
   ) {}
 
   // ---------------------------------------------------------------------------
-  // Material conditions (active only — grade pickers for factory/free-facility)
+  // Material grades — always scoped to ONE material.
+  // A global picker would offer a buyer grades the material in front of them
+  // does not have, and an ungraded material would appear to have some.
   // ---------------------------------------------------------------------------
-  async getConditions() {
-    const conditions = await this.conditionsService.active();
+  async getConditions(productId: string) {
+    const conditions = await this.conditionsService.activeForProduct(productId);
     return {
       conditions: conditions.map((c) => ({
         id: c.id,
@@ -127,9 +147,54 @@ export class CatalogService {
    * Derived from role alone so a cache HIT needs no DB lookup.
    */
   private scopeFor(caller: Caller | null): string {
-    // Only INSTITUTIONS are scoped to their assigned categories; everyone else
-    // (guest / citizen / factory / free-facility / admin) shares the full cache.
-    return caller?.role === Role.INSTITUTIONS ? `acc:${caller.id}` : 'all';
+    // The TIER is part of the scope, and must be: the product list now hides
+    // materials with no live price for the caller's tier, so a factory and a
+    // citizen no longer see the same catalogue. Sharing one cache entry between
+    // them would serve one role the other's list — including materials they
+    // cannot be charged for.
+    if (!caller) return 'guest';
+    const tier = tierForRole(caller.role);
+    // INSTITUTIONS are additionally scoped to their assigned categories, which
+    // differ per account.
+    return caller.role === Role.INSTITUTIONS
+      ? `acc:${caller.id}`
+      : `tier:${tier}`;
+  }
+
+  /**
+   * SQL for "this category holds at least one material this caller can buy".
+   *
+   * A correlated EXISTS rather than a filter applied after fetching: the page
+   * slice and the total have to be computed over the SAME set, or the pagination
+   * reports a count the caller can never page to.
+   *
+   * An ADMIN (and any caller with no buying tier) is judged on active materials
+   * alone — they are not buying, so "priced for my tier" is not a question they
+   * have, and applying it would hide categories they are meant to administer.
+   */
+  private buyableProductExistsSql(caller: Caller | null): string {
+    const priced = `AND EXISTS (
+             SELECT 1 FROM product_pricing pp
+              WHERE pp.product_id = pr.id
+                AND pp.tier = :callerTier
+                AND pp.effective_from <= NOW()
+                AND (pp.effective_until IS NULL OR pp.effective_until > NOW())
+           )`;
+    return `SELECT 1 FROM products pr
+              WHERE pr.category_id = c.id
+                AND pr.is_active = true
+                ${this.buyingTier(caller) ? priced : ''}`;
+  }
+
+  /** The tier a caller buys at, or null when they do not buy at all. */
+  private buyingTier(caller: Caller | null): PricingTier | null {
+    if (!caller || caller.role === Role.ADMIN) return null;
+    return tierForRole(caller.role);
+  }
+
+  private applyTierParam(qb: { setParameter: (k: string, v: unknown) => unknown }, caller: Caller | null) {
+    const tier = this.buyingTier(caller);
+    if (tier) qb.setParameter('callerTier', tier);
   }
 
   /** Assigned-category restriction for the caller, or null for guests/unrestricted. */
@@ -147,13 +212,25 @@ export class CatalogService {
    * GET /waste/my-categories endpoint.
    */
   async getCategories(caller: Caller | null, query: CategoryQueryDto) {
-    const cacheParts = `all:${query.page}:${query.limit}:${query.search ?? ''}:${query.sort}:${query.order}`;
+    // The SCOPE is part of the cache key, and must be: the list below hides
+    // categories holding nothing this caller can buy, so a factory and a citizen
+    // no longer see the same categories. A shared 'all' entry would serve one
+    // role the other's list — the exact bug already fixed on the product list.
+    const cacheParts = `${this.scopeFor(caller)}:${query.page}:${query.limit}:${query.search ?? ''}:${query.sort}:${query.order}`;
     const cached = await this.cache.get<CategoryListResult>('categories', cacheParts);
     if (cached) return cached;
 
     const qb = this.categoryRepo
       .createQueryBuilder('c')
-      .where('c.isActive = :active', { active: true });
+      .where('c.isActive = :active', { active: true })
+      // An empty category is a dead end: the buyer taps it, gets nothing, and
+      // learns only that the catalogue is unfinished. "Empty" means empty FOR
+      // THEM — a category whose materials are all priced for another tier has
+      // nothing in it they could buy, and the emptiness test is the same one the
+      // material list applies, so tapping a category always lands on the
+      // materials that were counted for it.
+      .andWhere(`EXISTS (${this.buyableProductExistsSql(caller)})`);
+    this.applyTierParam(qb, caller);
 
     if (query.search) {
       qb.andWhere('c.name ILIKE :search', { search: `%${query.search}%` })
@@ -179,6 +256,152 @@ export class CatalogService {
     };
     await this.cache.set('categories', cacheParts, result);
     return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Guest catalogue — what a visitor with no account may see
+  // ---------------------------------------------------------------------------
+  /**
+   * Materials, to a visitor: what we deal in, never what it is worth.
+   *
+   * No price is shown, and no guest-specific price is invented either. Price is
+   * a function of the buyer's TIER — a factory and a citizen are quoted
+   * different numbers for the same crate — so a number attached to
+   * nobody-in-particular is a number nobody will actually be paid. Showing 10
+   * to a visitor who then registers and sees 7 does not read as a tier system;
+   * it reads as a bait.
+   *
+   * What IS shown is the material itself, so a visitor can see the business is
+   * real and find their material before deciding to register.
+   *
+   * Only materials with a LIVE price for SOME tier appear. A material priced
+   * for nobody is suspended: it cannot be bought by any account that registers,
+   * so advertising it to a visitor promises something the system will not
+   * deliver.
+   */
+  async guestProducts(query: GuestProductQuery) {
+    const cacheParts = `guest-products:${query.page}:${query.limit}:${query.category_id ?? ''}:${query.search ?? ''}`;
+    const cached = await this.cache.get<ProductListResult>('products', cacheParts);
+    if (cached) return cached;
+
+    const qb = this.productRepo
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.category', 'c')
+      .where('p.isActive = :active', { active: true })
+      // A material inside a switched-off category is switched off too — the
+      // visitor listing has to agree with the signed-in one, or a material
+      // disappears the moment somebody logs in.
+      .andWhere('c.isActive = :active', { active: true })
+      .andWhere(
+        `EXISTS (
+           SELECT 1 FROM product_pricing pp
+            WHERE pp.product_id = p.id
+              AND pp.effective_from <= NOW()
+              AND (pp.effective_until IS NULL OR pp.effective_until > NOW())
+         )`,
+      );
+
+    if (query.category_id) {
+      qb.andWhere('p.categoryId = :categoryId', { categoryId: query.category_id });
+    }
+    if (query.search) {
+      qb.andWhere('p.name ILIKE :search', { search: `%${query.search}%` });
+    }
+
+    qb.orderBy('p.name', 'ASC')
+      .skip((query.page - 1) * query.limit)
+      .take(query.limit);
+
+    const [rows, total] = await qb.getManyAndCount();
+    const unitLabels = await this.units.labelMap();
+    const offerFlags = await this.productsWithLiveOffer(rows.map((p) => p.id));
+
+    const result = {
+      products: rows.map((p) => this.mapProductForGuest(p, unitLabels, offerFlags)),
+      pagination: buildPagination(total, query.page, query.limit),
+    };
+    await this.cache.set('products', cacheParts, result);
+    return result;
+  }
+
+  /** One material, to a visitor: its grades by name, still without prices. */
+  async guestProductDetail(productId: string) {
+    const product = await this.productRepo.findOne({
+      // The category has to be live too: a material reachable by direct link
+      // while its category is switched off is a material an admin believes
+      // they withdrew.
+      where: { id: productId, isActive: true, category: { isActive: true } },
+      relations: ['category'],
+    });
+    if (!product) throw new ProductNotFoundException();
+
+    const live = await this.pricingRepo
+      .createQueryBuilder('pp')
+      .where('pp.productId = :productId', { productId })
+      .andWhere('pp.effectiveFrom <= NOW()')
+      .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())')
+      .getCount();
+    // Consistent with the listing: a material nobody can buy is not shown to a
+    // visitor either, rather than shown and then unbuyable after they register.
+    if (!live) throw new ProductNotFoundException();
+
+    const [unitLabels, offerFlags, conditions] = await Promise.all([
+      this.units.labelMap(),
+      this.productsWithLiveOffer([productId]),
+      this.conditionsService.activeForProduct(productId),
+    ]);
+
+    return {
+      product: {
+        ...this.mapProductForGuest(product, unitLabels, offerFlags),
+        // Names only. The grades tell a visitor the material is bought at
+        // different qualities; the prices behind them are the buyer's business.
+        conditions: conditions.map((c) => ({
+          code: c.code,
+          name_en: c.nameEn,
+          name_ar: c.nameAr,
+        })),
+      },
+    };
+  }
+
+  /** Which of these materials currently carry an untargeted (public) offer. */
+  private async productsWithLiveOffer(productIds: string[]): Promise<Set<string>> {
+    if (!productIds.length) return new Set();
+    const rows = await this.offerRepo
+      .createQueryBuilder('o')
+      .select('DISTINCT o.productId', 'productId')
+      .where('o.productId IN (:...ids)', { ids: productIds })
+      .andWhere('o.isActive = true')
+      .andWhere('o.validFrom <= NOW()')
+      .andWhere('(o.validUntil IS NULL OR o.validUntil > NOW())')
+      // Untargeted only, matching what a guest is allowed to see in the offers
+      // list — flagging an offer they could never be shown would be a lie.
+      .andWhere('o.targetRoles IS NULL')
+      .getRawMany<{ productId: string }>();
+    return new Set(rows.map((r) => r.productId));
+  }
+
+  private mapProductForGuest(
+    p: Product,
+    unitLabels: Map<string, string>,
+    offerFlags: Set<string>,
+  ) {
+    return {
+      id: p.id,
+      name: p.name,
+      description: p.description ?? null,
+      image: p.imageURL ?? null,
+      category_id: p.categoryId,
+      category_name: p.category?.name ?? null,
+      unit_type: p.unitType,
+      unit_label: unitLabels.get(p.unitType) ?? p.unitType,
+      // The pull, without the number: enough to make registering worth it,
+      // not enough to remove the reason to.
+      has_offer: offerFlags.has(p.id),
+      requires_login: true,
+      price_hint: 'Sign in to see prices for your account type',
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -280,7 +503,7 @@ export class CatalogService {
 
     const [rows, total] = await qb.getManyAndCount();
     const result = {
-      offers: rows.map((o) => this.mapOffer(o)),
+      offers: rows.map((o) => this.mapOffer(o, !caller)),
       pagination: buildPagination(total, query.page, query.limit),
     };
     await this.cache.set('offers', cacheParts, result);
@@ -309,7 +532,7 @@ export class CatalogService {
 
     const [rows, total] = await qb.getManyAndCount();
     return {
-      offers: rows.map((o) => this.mapOffer(o)),
+      offers: rows.map((o) => this.mapOffer(o, !caller)),
       pagination: buildPagination(total, query.page, query.limit),
     };
   }
@@ -379,7 +602,12 @@ export class CatalogService {
    * locally — no Odoo round-trip per request. Not cached: stock freshness wins.
    */
   async getProductAvailability(caller: Caller, productId: string) {
-    const product = await this.productRepo.findOne({ where: { id: productId, isActive: true } });
+    const product = await this.productRepo.findOne({
+      // Category too — otherwise stock is quotable for a material the catalogue
+      // no longer lists, and the order it leads to has nowhere to come from.
+      where: { id: productId, isActive: true, category: { isActive: true } },
+      relations: ['category'],
+    });
     if (!product) throw new ProductNotFoundException();
 
     // Category-restricted roles must not see products outside their assignment.
@@ -389,24 +617,45 @@ export class CatalogService {
     }
 
     const [conditionLabels, priceByCondition] = await Promise.all([
-      this.conditionsService.labelMap(),
+      this.conditionsService.labelMapFor([product.id]),
       this.callerConditionPrices(product.id, caller),
     ]);
 
     // Never pushed to Odoo yet → no stock lines can exist for it.
     if (!product.odooProductId) {
-      return this.mapAvailability(product, [], conditionLabels, priceByCondition);
+      return this.mapAvailability(product, [], conditionLabels, priceByCondition, null);
     }
 
-    const rows = await this.inventoryRepo
+    // Scoped to the buyer's OWN governorate.
+    //
+    // Allocation only ever matches a buyer to warehouses in their governorate,
+    // so a nationwide availability figure answered a question nobody asked and
+    // misled on the one they did: a factory saw 8,000 kg, ordered 5,000, and
+    // the allocator found 900 within reach. The number shown before committing
+    // has to be the number the order can actually be filled from.
+    const provinceId = await this.buyerProfiles.provinceForBuyer(
+      caller.id,
+      caller.role,
+    );
+
+    const qb = this.inventoryRepo
       .createQueryBuilder('inv')
       .innerJoinAndSelect('inv.warehouse', 'w')
       .where('inv.odooProductId = :odooProductId', { odooProductId: product.odooProductId })
-      .andWhere('w.isActive = true')
-      .orderBy('w.name', 'ASC')
-      .getMany();
+      .andWhere('w.isActive = true');
 
-    return this.mapAvailability(product, rows, conditionLabels, priceByCondition);
+    if (provinceId) {
+      qb.andWhere('w.provinceId = :provinceId', { provinceId })
+        // A warehouse Odoo has put into closing or inactive will not be
+        // allocated to either, so counting its stock here would promise from a
+        // shelf the order can never reach.
+        .andWhere('w.state = :active', { active: WarehouseState.ACTIVE });
+    }
+
+    const rows = await qb.orderBy('w.name', 'ASC').getMany();
+
+    return this.mapAvailability(
+      product, rows, conditionLabels, priceByCondition, provinceId);
   }
 
   /** Live per-condition prices of the caller's tier (graded tiers only). */
@@ -439,6 +688,7 @@ export class CatalogService {
     rows: WarehouseInventory[],
     conditionLabels: Map<string, string>,
     priceByCondition: Map<string, number>,
+    provinceId: string | null,
   ) {
     let totalAvailable = 0;
     const byWarehouse = new Map<string, AvailabilityWarehouseEntry>();
@@ -472,7 +722,12 @@ export class CatalogService {
       }
       entry.conditions.push({
         condition: r.conditionCode,
-        condition_label: conditionLabels.get(r.conditionCode) ?? r.conditionCode,
+        // Keyed by (material, code): the same code means different things for
+        // different materials, so the bare code is only the last-resort label.
+        condition_label:
+          conditionLabels.get(`${product.id}:${r.conditionCode}`)
+          ?? conditionLabels.get(r.conditionCode)
+          ?? r.conditionCode,
         quantity,
         reserved_quantity: reserved,
         available,
@@ -488,6 +743,12 @@ export class CatalogService {
       },
       total_available: totalAvailable,
       in_stock: totalAvailable > 0,
+      // Stated, not implied. A caller reading `total_available` needs to know
+      // whether it counts the whole country or one governorate — the two are
+      // different promises, and a client cannot tell them apart from the number
+      // alone.
+      scope: provinceId ? 'PROVINCE' : 'ALL',
+      province_id: provinceId,
       warehouses: [...byWarehouse.values()],
     };
   }
@@ -510,7 +771,34 @@ export class CatalogService {
     const qb = this.productRepo
       .createQueryBuilder('p')
       .leftJoinAndSelect('p.category', 'c')
-      .where('p.isActive = :active', { active: true });
+      .where('p.isActive = :active', { active: true })
+      // A material inside a switched-off CATEGORY is switched off too.
+      //
+      // This was missing, and it made deactivating a category do almost
+      // nothing: `GET /categories` hid it, and every material in it went on
+      // being listed, searched and bought. An admin who takes a whole category
+      // out of circulation — a material line discontinued, a supply problem —
+      // means its materials, not just the heading above them, and having to
+      // deactivate each one by hand is a rule that will be half-applied the
+      // first time someone is in a hurry.
+      .andWhere('c.isActive = :active', { active: true });
+
+    // A material with no LIVE price for this buyer's tier does not exist as far
+    // as they are concerned. Applied in SQL rather than filtered afterwards so
+    // the page size and the total both stay truthful — and, more importantly,
+    // so a material they could never be charged for never reaches their basket
+    // in the first place. Without this the failure surfaces at checkout, on a
+    // line that had no price to begin with.
+    qb.andWhere(
+      `EXISTS (
+         SELECT 1 FROM product_pricing pp
+          WHERE pp.product_id = p.id
+            AND pp.tier = :callerTier
+            AND pp.effective_from <= NOW()
+            AND (pp.effective_until IS NULL OR pp.effective_until > NOW())
+       )`,
+      { callerTier: tierForRole(caller.role) },
+    );
 
     if (allowed) {
       qb.andWhere('p.categoryId IN (:...allowed)', { allowed });
@@ -571,7 +859,7 @@ export class CatalogService {
       this.pricingForProducts(products.map((p) => p.id)),
       this.activeOffersForProducts(products.map((p) => p.id), caller.role),
       this.units.labelMap(),
-      this.conditionsService.labelMap(),
+      this.conditionsService.labelMapFor(products.map((p) => p.id)),
     ]);
 
     const callerTier = tierForRole(caller.role);
@@ -787,14 +1075,33 @@ export class CatalogService {
     };
   }
 
-  private mapOffer(o: Offer) {
+  /**
+   * A guest is told an offer EXISTS; they are not told what it is worth.
+   *
+   * The figure is withheld for two reasons. It is commercially sensitive — the
+   * discount off a factory price is the factory price minus one subtraction,
+   * and any visitor could read a competitor's whole sheet in one call. And it
+   * would be a number the visitor never actually gets: price is a function of
+   * the buyer's tier, so the amount shown to nobody-in-particular is the amount
+   * shown to nobody. "There is an offer here" is what makes them register;
+   * "20% off 7" is what makes them stop needing to.
+   *
+   * The flag lives INSIDE the mapper on purpose. A separate guest mapper is one
+   * more thing a future call site can forget to use; a rule at the single point
+   * where offers become JSON cannot be bypassed by forgetting.
+   */
+  private mapOffer(o: Offer, isGuest = false) {
     return {
       offer_id: o.id,
       product_id: o.productId,
       product_name: o.product?.name ?? null,
       product_image: o.product?.imageURL ?? null,
-      offer_price: Number(o.offerPrice),
-      discount_percentage: Number(o.discountPercentage),
+      ...(isGuest
+        ? { requires_login: true }
+        : {
+            offer_price: Number(o.offerPrice),
+            discount_percentage: Number(o.discountPercentage),
+          }),
       condition: o.conditionCode ?? null,
       description: o.description ?? null,
       valid_from: o.validFrom,

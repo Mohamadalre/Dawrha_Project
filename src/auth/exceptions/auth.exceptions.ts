@@ -39,6 +39,42 @@ export class PhoneAlreadyExistsException extends BadRequestException {
   }
 }
 
+/**
+ * The account exists but was created through Google and has no password.
+ *
+ * Answering such an attempt with the generic "invalid credentials" would send
+ * the user round in circles retyping a password that never existed — and
+ * letting it reach the hash comparison crashed the request with a 500 from
+ * argon2 ("pchstr must be a non-empty string") instead of any answer at all.
+ * The message names the way in, because that is the only thing the user can act
+ * on.
+ *
+ * Note this confirms the address is registered. That is already true of this
+ * flow (a wrong role answers APP_NOT_AUTHORIZED, a missing account answers
+ * INVALID_CREDENTIALS), so it reveals nothing new — and the alternative is a
+ * dead end for a legitimate user.
+ */
+export class SocialLoginRequiredException extends BadRequestException {
+  constructor() {
+    super({
+      message:
+        'This email is registered with Google. Please sign in with Google instead.',
+      errorCode: 'SOCIAL_LOGIN_REQUIRED',
+    });
+  }
+}
+
+/** Registering an address that already belongs to a Google account. */
+export class EmailRegisteredWithGoogleException extends BadRequestException {
+  constructor() {
+    super({
+      message:
+        'This email is already registered with Google. Please sign in with Google instead.',
+      errorCode: 'EMAIL_REGISTERED_WITH_GOOGLE',
+    });
+  }
+}
+
 export class InvalidOtpException extends BadRequestException {
   constructor() {
     super({

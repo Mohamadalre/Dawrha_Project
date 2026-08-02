@@ -24,6 +24,7 @@ import { MediaModule } from './media/media.module';
 import { WasteManagementModule } from './waste-management/waste-management.module';
 import { CatalogModule } from './waste-management/catalog/catalog.module';
 import { CartModule } from './waste-management/cart/cart.module';
+import { FavouritesModule } from './waste-management/favourites/favourites.module';
 import { SuggestionsModule } from './waste-management/suggestions/suggestions.module';
 import { WasteAdminModule } from './waste-management/admin/waste-admin.module';
 import { CategoryRequestModule } from './waste-management/category-requests/category-request.module';
@@ -33,6 +34,7 @@ import { AccountManagementModule } from './account-management/account-management
 import { TruckModule } from './truck/truck.module';
 import { OdooModule } from './odoo/odoo.module';
 import { WarehouseModule } from './warehouse/warehouse.module';
+import { OrderModule } from './order/order.module';
 import { OdooSyncModule } from './odoo-sync/odoo-sync.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
 import { ReportsModule } from './reports/reports.module';
@@ -79,6 +81,7 @@ import { ContentModule } from './content/content.module';
     WasteManagementModule,
     CatalogModule,
     CartModule,
+    FavouritesModule,
     SuggestionsModule,
     WasteAdminModule,
     CategoryRequestModule,
@@ -88,6 +91,7 @@ import { ContentModule } from './content/content.module';
     TruckModule,
     OdooModule,
     WarehouseModule,
+    OrderModule,
     OdooSyncModule,
     MaintenanceModule,
     ReportsModule,

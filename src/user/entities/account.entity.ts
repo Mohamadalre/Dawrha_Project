@@ -39,8 +39,26 @@ export class Account {
   @Column({ nullable: true })
   profileImage?: string;
 
+  /** The account holder's OWN words. They write it, they read it. */
   @Column({ default: '' })
   description: string;
+
+  /**
+   * The reviewer's note: why an application was rejected, why an account was
+   * blocked.
+   *
+   * A separate column because it was sharing `description` with the line
+   * above — the field the account holder edits in `PATCH /user/profile` and
+   * reads back in `GET /user/profile`. Blocking someone for suspected fraud
+   * therefore printed the reason on their own profile screen and let them
+   * overwrite it. An internal note that the subject can read is not an
+   * internal note, and one they can rewrite is not a record.
+   *
+   * Never returned by any route the account holder can call.
+   */
+  @Column({ type: 'text', nullable: true })
+  @Exclude()
+  adminNote?: string | null;
 
   @Column({
     type: 'enum',

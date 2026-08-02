@@ -47,8 +47,16 @@ describe('CartService', () => {
       validateActiveCode: jest.fn(async (code: string) => String(code).toUpperCase()),
       weightCodes: jest.fn(async () => new Set(['KG'])),
     };
+    // Grades are resolved against the MATERIAL now, so the cart asks the
+    // service what this product allows rather than validating a bare code.
     conditionsService = {
-      validateActiveCode: jest.fn(async (code: string) => String(code).toUpperCase()),
+      validateActiveCode: jest.fn(async (_p: string, code: string) =>
+        String(code).toUpperCase(),
+      ),
+      resolveOrderedCondition: jest.fn(async (_p: string, code?: string | null) =>
+        code ? String(code).toUpperCase() : null,
+      ),
+      hasConditions: jest.fn(async () => false),
     };
 
     service = new CartService(cartRepo, itemRepo, productRepo, pricingRepo, offerRepo, units, conditionsService);

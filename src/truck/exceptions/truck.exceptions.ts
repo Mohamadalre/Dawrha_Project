@@ -127,3 +127,94 @@ export class ShiftChangeStateException extends BadRequestException {
     super({ message, errorCode: 'SHIFT_CHANGE_INVALID_STATE' });
   }
 }
+
+// --- Truck handover (pickup / dropoff) ------------------------------------------
+export class PickupBeforeShiftException extends BadRequestException {
+  constructor() {
+    super({
+      message: 'You cannot pick up the truck before your shift starts',
+      errorCode: 'PICKUP_BEFORE_SHIFT',
+    });
+  }
+}
+
+export class PickupAfterShiftException extends BadRequestException {
+  constructor() {
+    super({
+      message: 'Your shift has ended — you can no longer pick up the truck',
+      errorCode: 'PICKUP_AFTER_SHIFT',
+    });
+  }
+}
+
+export class DropoffBeforeShiftEndException extends BadRequestException {
+  constructor() {
+    super({
+      message: 'You can only hand the truck back after your shift ends (unless it is out of service)',
+      errorCode: 'DROPOFF_BEFORE_SHIFT_END',
+    });
+  }
+}
+
+export class TruckAlreadyHeldException extends ConflictException {
+  constructor() {
+    super({
+      message: 'You are already holding a truck — hand it back first',
+      errorCode: 'TRUCK_ALREADY_HELD',
+    });
+  }
+}
+
+export class TruckHeldByOtherException extends ConflictException {
+  constructor() {
+    super({
+      message: 'The previous driver has not handed this truck back yet',
+      errorCode: 'TRUCK_HELD_BY_OTHER',
+    });
+  }
+}
+
+export class NoOpenHandoverException extends NotFoundException {
+  constructor() {
+    super({
+      message: 'You are not currently holding a truck',
+      errorCode: 'NO_OPEN_HANDOVER',
+    });
+  }
+}
+
+export class DropoffReasonRequiredException extends BadRequestException {
+  constructor() {
+    super({
+      message: 'Please record a note about the truck before handing it back',
+      errorCode: 'DROPOFF_REASON_REQUIRED',
+    });
+  }
+}
+
+export class SameShiftRequestException extends BadRequestException {
+  constructor() {
+    super({
+      message: 'You are already on this shift — pick a different one',
+      errorCode: 'SAME_SHIFT_REQUEST',
+    });
+  }
+}
+
+export class ShiftNotInYourWarehouseException extends BadRequestException {
+  constructor() {
+    super({
+      message: 'You can only request shifts of your own warehouse',
+      errorCode: 'SHIFT_NOT_IN_YOUR_WAREHOUSE',
+    });
+  }
+}
+
+export class DriverHasNoTruckException extends BadRequestException {
+  constructor() {
+    super({
+      message: 'You must be assigned to a truck before requesting a shift change',
+      errorCode: 'DRIVER_HAS_NO_TRUCK',
+    });
+  }
+}

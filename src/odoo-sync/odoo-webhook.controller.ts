@@ -21,8 +21,11 @@ import { OdooSyncService } from './odoo-sync.service';
 import {
   OdooDriverDecisionDto,
   OdooInventoryWebhookDto,
+  OdooOrderEventDto,
   OdooShiftChangeDecisionDto,
 } from './dto/odoo-webhook.dto';
+import { SuggestionsService } from '@src/waste-management/suggestions/suggestions.service';
+import { OdooSuggestionDto } from '@src/waste-management/suggestions/dto/odoo-suggestion.dto';
 
 /**
  * Inbound push channel from Odoo (server-to-server, no JWT).
@@ -43,6 +46,7 @@ export class OdooWebhookController {
     private readonly odooSync: OdooSyncService,
     @InjectRepository(Warehouse)
     private readonly warehouseRepo: Repository<Warehouse>,
+    private readonly suggestions: SuggestionsService,
   ) {}
 
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
@@ -80,6 +84,58 @@ export class OdooWebhookController {
     return { message: 'Fleet sync queued', result: { queued: 1 } };
   }
 
+  /**
+   * A warehouse acted on one part of a buyer's order.
+   *
+   * This route was the missing half of the ordering flow: Odoo has always
+   * posted here after completing an order, and nothing was listening — so every
+   * order a warehouse finished vanished, and the buyer was never told.
+   *
+   * Orders created inside Odoo carry no `part_id` and are accepted-and-ignored:
+   * they belong to no buyer order here, and rejecting them would fill Odoo's
+   * logs with failures for a perfectly legitimate internal workflow.
+   */
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Post('orders')
+  @HttpCode(202)
+  async orderEvent(
+    @Headers('x-odoo-webhook-secret') secret: string | undefined,
+    @Body() dto: OdooOrderEventDto,
+  ) {
+    this.assertAuthorized(secret);
+    if (!dto.part_id) {
+      return { message: 'Ignored — not part of a buyer order', result: { queued: 0 } };
+    }
+    await this.odooSync.enqueueOrderEvent({
+      partId: dto.part_id,
+      odooOrderId: dto.odoo_id,
+      event: dto.event,
+      invoiceNumber: dto.invoice_number,
+      outputZone: dto.output_zone,
+      handoverType: dto.handover_type,
+      rejectReason: dto.approval_reject_reason,
+    });
+    return { message: 'Order event queued', result: { queued: 1 } };
+  }
+
+  /**
+   * The Odoo administrator changed delivery pricing → re-mirror it.
+   *
+   * Payload-less on purpose (same shape as the fleet ping): the job re-reads the
+   * whole tariff table from Odoo, so a duplicated or replayed ping is harmless
+   * and no diff can be applied half-way.
+   */
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Post('delivery-tariffs')
+  @HttpCode(202)
+  async deliveryTariffsChanged(
+    @Headers('x-odoo-webhook-secret') secret: string | undefined,
+  ) {
+    this.assertAuthorized(secret);
+    await this.odooSync.enqueueSyncDeliveryTariffs();
+    return { message: 'Delivery tariff sync queued', result: { queued: 1 } };
+  }
+
   /** Odoo admin decided on a driver (collector) request. */
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Post('driver-decision')
@@ -99,12 +155,17 @@ export class OdooWebhookController {
       rejectionReason: dto.rejection_reason,
       truckOdooId: dto.truck_odoo_id,
       shiftOdooId: dto.shift_odoo_id,
+      warehouseOdooId: dto.warehouse_odoo_id,
+      warehouseChangeOnly: dto.warehouse_change_only,
       rejectedMediaIds: dto.rejected_media_ids,
+      documentsOnly: dto.documents_only,
+      requestReupload: dto.request_reupload,
+      cancelReupload: dto.cancel_reupload,
     });
     return { message: 'Driver decision queued', result: { queued: 1 } };
   }
 
-  /** Odoo admin decided on a driver's shift-change request. */
+  /** The warehouse manager moved a driver's shift-change request in Odoo. */
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Post('shift-change-decision')
   @HttpCode(202)
@@ -115,10 +176,30 @@ export class OdooWebhookController {
     this.assertAuthorized(secret);
     await this.odooSync.enqueueShiftChangeDecision({
       requestId: dto.backend_request_id,
-      approved: dto.approved,
+      status: dto.status,
+      truckOdooId: dto.truck_odoo_id,
       rejectionReason: dto.rejection_reason,
     });
     return { message: 'Shift-change decision queued', result: { queued: 1 } };
+  }
+
+  /**
+   * The Odoo administrator proposes a new material.
+   *
+   * Written straight through rather than queued: the payload is the whole fact,
+   * it is idempotent on the Odoo record id, and Odoo needs the backend id back
+   * to show the proposal's state on its own form. A queue would hand back a
+   * job id and leave that form with nothing to display.
+   */
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('product-suggestion')
+  @HttpCode(200)
+  async productSuggestion(
+    @Headers('x-odoo-webhook-secret') secret: string | undefined,
+    @Body() dto: OdooSuggestionDto,
+  ) {
+    this.assertAuthorized(secret);
+    return this.suggestions.ingestFromOdoo(dto);
   }
 
   private async queueSync(secret: string | undefined, dto: OdooInventoryWebhookDto) {

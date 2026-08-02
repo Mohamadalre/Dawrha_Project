@@ -1,4 +1,4 @@
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import {
   OnWorkerEvent,
   Processor,
@@ -11,6 +11,7 @@ import { winstonLogger } from '@src/core/logger-config/winston.config';
 import { Language } from '@src/common/enums/language.enum';
 import {
   NOTIFICATION_QUEUE_NAME,
+  PERMANENT_FAILURE_NO_DEVICE,
 } from '../queues/notification.queue';
 import {
   NotificationJobPayload,
@@ -50,9 +51,14 @@ export class NotificationProcessor extends WorkerHost {
     if (!devices.length) {
       await this.notificationService.markAsFailed(
         notification.id,
-        'No device tokens registered',
+        PERMANENT_FAILURE_NO_DEVICE,
       );
-      throw new Error('No FCM tokens registered for user');
+      // PERMANENT failure: a user with no registered device will not suddenly
+      // have one on attempt 2 or 3. A plain Error made BullMQ retry three
+      // times per notification — which, combined with the 5-minute retry cron,
+      // produced an endless storm that hammered Redis. UnrecoverableError
+      // fails the job at once, with no retry.
+      throw new UnrecoverableError(PERMANENT_FAILURE_NO_DEVICE);
     }
 
     // Group device tokens by language so each group gets one localized push.
@@ -126,16 +132,32 @@ export class NotificationProcessor extends WorkerHost {
 
   @OnWorkerEvent('failed')
   onFailed(job: Job, error: Error) {
-    winstonLogger.error(
-      `Notification job failed ${job.id} (${job.name}): ${error.message}`,
-      { channel: 'jobs' }
-    );
+    // A permanent failure is expected bookkeeping, not an incident: there is
+    // simply nobody to push to. Log it at info so real errors stay visible.
+    const isPermanent = error instanceof UnrecoverableError;
+    const line = `Notification job ${job.id} (${job.name}): ${error.message}`;
+    if (isPermanent) {
+      winstonLogger.info(`${line} — permanent, not retried`, { channel: 'jobs' });
+      return;
+    }
 
-    const nextAttempt = job.attemptsMade + 1;
-    winstonLogger.warn(
-      `Notification job ${job.id} failed and will retry. Attempt ${nextAttempt} / ${job.opts.attempts}`,
-      { channel: 'jobs' }
-    );
+    winstonLogger.error(`Notification job failed ${line}`, { channel: 'jobs' });
+
+    // Only announce a retry when one will ACTUALLY happen. The old code always
+    // printed "will retry", even for jobs BullMQ had already given up on —
+    // which made the log look like an endless loop that wasn't there.
+    const attempts = job.opts.attempts ?? 1;
+    if (job.attemptsMade < attempts) {
+      winstonLogger.warn(
+        `Notification job ${job.id} will retry. Attempt ${job.attemptsMade + 1} / ${attempts}`,
+        { channel: 'jobs' },
+      );
+    } else {
+      winstonLogger.warn(
+        `Notification job ${job.id} exhausted all ${attempts} attempts`,
+        { channel: 'jobs' },
+      );
+    }
   }
 }
 

@@ -60,9 +60,12 @@ export class CartService {
     let offer: Offer | null = null;
     let isOffer = false;
 
-    let conditionCode = dto.condition
-      ? await this.conditionsService.validateActiveCode(dto.condition)
-      : null;
+    // Resolved against THIS material: a bare code means nothing, and an
+    // ungraded material must refuse one rather than silently drop it.
+    let conditionCode = await this.conditionsService.resolveOrderedCondition(
+      product.id,
+      dto.condition,
+    );
 
     if (dto.add_offer) {
       offer = await this.currentOfferForProduct(product.id, caller.role);
@@ -239,13 +242,29 @@ export class CartService {
     return item;
   }
 
+  /**
+   * The price this buyer pays for this material, or a refusal.
+   *
+   * Whether a grade is involved is decided by the MATERIAL, not by the tier:
+   * an ungraded material carries ONE price for every tier, factories included,
+   * so demanding a grade there would look for a row that cannot exist and the
+   * material would appear unbuyable to a factory while a citizen could buy it.
+   *
+   * A missing price is refused outright rather than defaulted. A material with
+   * no price for this tier is one this buyer was never meant to see — the
+   * catalogue already hides it — and the only way to reach here is a basket
+   * left open while an admin withdrew the price list.
+   */
   private async tierPrice(
     productId: string,
     role: Role,
     conditionCode: string | null = null,
   ): Promise<number> {
     const tier = tierForRole(role);
-    const isConditionTier = tier === PricingTier.FACTORY || tier === PricingTier.FREE_FACILITY;
+    const graded = await this.conditionsService.hasConditions(productId);
+    const perCondition =
+      graded &&
+      (tier === PricingTier.FACTORY || tier === PricingTier.FREE_FACILITY);
 
     const qb = this.pricingRepo
       .createQueryBuilder('pp')
@@ -254,9 +273,7 @@ export class CartService {
       .andWhere('pp.effectiveFrom <= NOW()')
       .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())');
 
-    if (isConditionTier) {
-      // FACTORY / FREE_FACILITY prices are per material condition — the buyer
-      // must say which grade they are ordering.
+    if (perCondition) {
       if (!conditionCode) throw new ConditionRequiredException();
       qb.andWhere('pp.conditionCode = :conditionCode', { conditionCode });
     } else {
@@ -265,11 +282,12 @@ export class CartService {
 
     const price = await qb.orderBy('pp.effectiveFrom', 'DESC').getOne();
     if (!price) {
-      throw new BadRequestException('Product is not priced for your account type');
+      throw new BadRequestException(
+        'This material is not available for purchase at the moment',
+      );
     }
     return Number(price.price);
   }
-
   private async currentOfferForProduct(productId: string, callerRole: Role): Promise<Offer | null> {
     return this.offerRepo
       .createQueryBuilder('o')

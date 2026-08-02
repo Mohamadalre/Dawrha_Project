@@ -37,8 +37,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (account.accountStatus == AccountStatus.INACTIVE || !account.isEmailVerified) {
       throw new UnauthorizedException('Account is disabled or not found');
     }
+    // Checked on EVERY request, which is what makes a block take effect at
+    // once: the access token already in the app's memory is still
+    // cryptographically valid, and this is the only thing standing between it
+    // and the API until it expires.
     if (account.accountStatus == AccountStatus.BLOCKED) {
-      throw new UnauthorizedException('Account is blocked ');
+      throw new UnauthorizedException(
+        'Your account has been blocked. Please contact technical support.',
+      );
     }
 
 

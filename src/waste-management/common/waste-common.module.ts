@@ -14,6 +14,11 @@ import { PermissionSeederService } from './providers/permission-seeder.service';
 import { CatalogCacheService } from './providers/catalog-cache.service';
 import { UnitsService } from './providers/units.service';
 import { ConditionsService } from './providers/conditions.service';
+import { SellabilityService } from './providers/sellability.service';
+import { BuyerProfileService } from './providers/buyer-profile.service';
+import { FactoryProfile } from '@src/user/entities/profile/factory-profile.entity';
+import { ExternalPartnerProfile } from '@src/user/entities/profile/external-partner-profile.entity';
+import { ProductPricing } from '../entities/product-pricing.entity';
 
 /**
  * Domain kernel for the waste-management marketplace. Holds the cross-cutting
@@ -27,14 +32,38 @@ import { ConditionsService } from './providers/conditions.service';
       AuditLog,
       MeasurementUnit,
       MaterialCondition,
+      ProductPricing,
       InstitutionWasteCategory,
       FactoryWasteCategory,
       ExternalPartnerWasteCategory,
       Permission,
       RolePermission,
+      // Buyer profiles: the governorate on them is what BOTH order allocation
+      // and catalogue availability scope themselves to. One lookup, shared, so
+      // the stock a buyer is shown and the stock they can actually be sent can
+      // never be computed from two different answers.
+      FactoryProfile,
+      ExternalPartnerProfile,
     ]),
   ],
-  providers: [AuditService, AssignedCategoryProvider, PermissionSeederService, CatalogCacheService, UnitsService, ConditionsService],
-  exports: [AuditService, AssignedCategoryProvider, CatalogCacheService, UnitsService, ConditionsService],
+  providers: [
+    AuditService,
+    AssignedCategoryProvider,
+    PermissionSeederService,
+    CatalogCacheService,
+    UnitsService,
+    ConditionsService,
+    SellabilityService,
+    BuyerProfileService,
+  ],
+  exports: [
+    AuditService,
+    AssignedCategoryProvider,
+    CatalogCacheService,
+    UnitsService,
+    ConditionsService,
+    SellabilityService,
+    BuyerProfileService,
+  ],
 })
 export class WasteCommonModule {}

@@ -32,8 +32,7 @@ export class CategoryRequestController {
   @Post()
   @Permissions('waste.categories.request')
   async create(@CurrentUser() user, @Body() dto: CreateCategoryRequestDto) {
-    const result = await this.service.create(user, dto);
-    return { message: result.message, result };
+    return this.service.create(user, dto);
   }
 }
 

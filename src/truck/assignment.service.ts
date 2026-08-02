@@ -122,16 +122,22 @@ export class AssignmentService {
   async getMyAssignment(accountId: string) {
     const driver = await this.driverRepo.findOne({
       where: { account: { id: accountId } },
-      relations: ['assignment', 'assignment.truck', 'assignment.shift'],
+      relations: [
+        'assignment',
+        'assignment.truck',
+        'assignment.truck.warehouse',
+        'assignment.shift',
+      ],
     });
     if (!driver) throw new DriverNotFoundException('Driver profile not found');
 
     if (!driver.assignment) {
-      return { assigned: false, message: 'You have not been assigned to a truck yet' };
+      return { assigned: false, message: 'You will be assigned to a truck soon' };
     }
 
     const t = driver.assignment.truck;
     const s = driver.assignment.shift;
+    const w = t.warehouse ?? null;
     return {
       assigned: true,
       message: 'Assignment fetched successfully',
@@ -142,6 +148,11 @@ export class AssignmentService {
         year: t.year,
         max_payload_kg: t.maxPayloadKg != null ? Number(t.maxPayloadKg) : null,
       },
+      // The warehouse the TRUCK serves (assigned in Odoo) — id + name so the
+      // app can show where the driver reports to.
+      warehouse: w
+        ? { warehouse_id: w.id, odoo_warehouse_id: w.odooWarehouseId ?? null, name: w.name }
+        : null,
       shift: { shift_id: s.id, name: s.name, start_time: s.startTime, end_time: s.endTime },
       assigned_at: driver.assignment.assignedAt,
     };

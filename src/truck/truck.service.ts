@@ -104,7 +104,21 @@ export class TruckService {
   // ---------------------------------------------------------------------------
   // Drivers grouped by whether they are linked to a truck
   // ---------------------------------------------------------------------------
-  async getDrivers(assigned?: boolean, shiftId?: string) {
+  /**
+   * Drivers, a page at a time.
+   *
+   * It used to return every driver in the system with four joins on each. That
+   * is fine with a dozen drivers and a slow, growing failure with a thousand:
+   * nothing breaks, the admin screen just gets heavier every month until it
+   * times out — the kind of fault that is discovered as "the app is slow"
+   * rather than as an error anyone can point at.
+   */
+  async getDrivers(
+    assigned?: boolean,
+    shiftId?: string,
+    page = 1,
+    limit = 10,
+  ) {
     const qb = this.driverRepo
       .createQueryBuilder('d')
       .leftJoinAndSelect('d.account', 'account')
@@ -117,9 +131,11 @@ export class TruckService {
     if (assigned === false) qb.andWhere('assignment.id IS NULL');
     if (shiftId) qb.andWhere('assignment.shift_id = :shiftId', { shiftId });
 
-    const drivers = await qb.getMany();
+    qb.skip((page - 1) * limit).take(limit);
+    const [drivers, total] = await qb.getManyAndCount();
 
-    return drivers.map((d) => ({
+    return {
+      drivers: drivers.map((d) => ({
       driver_id: d.id,
       name: d.account?.name ?? null,
       phone: d.account?.phone ?? null,
@@ -131,6 +147,8 @@ export class TruckService {
       shift: d.assignment?.shift
         ? { shift_id: d.assignment.shift.id, name: d.assignment.shift.name }
         : null,
-    }));
+      })),
+      pagination: buildPagination(total, page, limit),
+    };
   }
 }

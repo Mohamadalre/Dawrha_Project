@@ -1,29 +1,17 @@
-import { IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
-import { ShiftChangeRequestStatus } from '../enums/shift-change-request-status.enum';
+import { IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
-/** Driver: request to be (re)assigned to a truck on a shift. */
+/**
+ * A driver's shift-change request: ONLY the shift he wants to move into plus
+ * a mandatory reason. No truck is picked here — the warehouse manager
+ * reserves one (of the requested shift) when he approves in Odoo.
+ */
 export class CreateShiftChangeRequestDto {
-  @IsUUID()
-  truckId: string;
-
+  /** Backend id of the DRIVER shift (of the driver's own warehouse). */
   @IsUUID()
   shiftId: string;
-}
 
-/** Admin: move a request to PROCESSING, or REJECT it (reason required). */
-export class UpdateRequestStatusDto {
-  @IsIn([ShiftChangeRequestStatus.PROCESSING, ShiftChangeRequestStatus.REJECTED])
-  status: ShiftChangeRequestStatus;
-
-  @IsOptional()
   @IsString()
   @MinLength(3)
   @MaxLength(500)
-  rejectionReason?: string;
-}
-
-/** Admin: process a driver's (PROCESSING) request — performs the assignment swap. */
-export class ProcessRequestDto {
-  @IsUUID()
-  driverId: string;
+  reason: string;
 }

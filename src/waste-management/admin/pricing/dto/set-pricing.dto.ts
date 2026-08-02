@@ -15,12 +15,22 @@ import {
 const normalizeConditionCode = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim().toUpperCase() : value;
 
-/** One price line of a condition-priced tier (FACTORY / FREE_FACILITY). */
+/**
+ * One price line of a condition-priced tier (FACTORY / FREE_FACILITY).
+ *
+ * `condition` is OPTIONAL because not every material is graded: a material with
+ * no conditions is priced once for the tier and that single line carries no
+ * condition code. Odoo shows such a line as the material's plain price. When a
+ * tier does send condition codes, the whole list must be condition-coded — the
+ * service rejects a mix, since a plain price plus a graded price for the same
+ * tier has no defined meaning.
+ */
 export class ConditionPriceDto {
+  @IsOptional()
   @Transform(normalizeConditionCode)
   @IsString()
   @MaxLength(30)
-  condition: string;
+  condition?: string;
 
   @Type(() => Number)
   @IsNumber()
@@ -46,6 +56,11 @@ export class SetPricingDto {
   @Min(0)
   company: number;
 
+  /**
+   * Graded material: one entry per condition.
+   * Ungraded material: exactly ONE entry with no condition — the service
+   * enforces which, because only the material knows.
+   */
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

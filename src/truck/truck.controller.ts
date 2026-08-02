@@ -11,6 +11,7 @@ import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { TruckService } from './truck.service';
 import { ListTrucksQueryDto } from './dto/list-trucks.query.dto';
+import { PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 
 /**
  * READ-ONLY fleet views. Trucks are created/edited in ODOO (linked to their
@@ -30,12 +31,21 @@ export class TruckController {
     return { message: 'Trucks fetched successfully', result };
   }
 
-  /** List drivers grouped by whether they are linked to a truck. */
+  /** Drivers, a page at a time, filterable by whether they have a truck. */
   @Get('drivers')
   @Permissions('admin.trucks.view')
-  async drivers(@Query('assigned') assigned?: string, @Query('shiftId') shiftId?: string) {
+  async drivers(
+    @Query() page: PaginationQueryDto,
+    @Query('assigned') assigned?: string,
+    @Query('shiftId') shiftId?: string,
+  ) {
     const flag = assigned === 'true' ? true : assigned === 'false' ? false : undefined;
-    const result = await this.truckService.getDrivers(flag, shiftId);
+    const result = await this.truckService.getDrivers(
+      flag,
+      shiftId,
+      page.page,
+      page.limit,
+    );
     return { message: 'Drivers fetched successfully', result };
   }
 

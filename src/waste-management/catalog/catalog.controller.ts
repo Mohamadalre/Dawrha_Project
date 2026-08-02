@@ -1,7 +1,9 @@
 import {
   Controller,
+  DefaultValuePipe,
   Get,
   Param,
+  ParseIntPipe,
   Query,
   UseGuards,
   ParseUUIDPipe,
@@ -12,6 +14,7 @@ import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 import { CatalogService } from './catalog.service';
+import { PopularityService } from './popularity.service';
 import {
   ByPriceQueryDto,
   CategoryQueryDto,
@@ -31,7 +34,10 @@ import {
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller({ path: 'waste', version: '1' })
 export class CatalogController {
-  constructor(private readonly catalog: CatalogService) {}
+  constructor(
+    private readonly catalog: CatalogService,
+    private readonly popularity: PopularityService,
+  ) {}
 
   @Get('categories')
   @Permissions('waste.categories.view')
@@ -59,11 +65,18 @@ export class CatalogController {
     return { message: 'My materials fetched successfully', result };
   }
 
-  /** Active material conditions (grades) — pickers for factory / free-facility orders. */
-  @Get('conditions')
+  /**
+   * The grades of ONE material — the picker a factory or free facility uses
+   * when ordering it.
+   *
+   * Scoped to the material because grades belong to it: a global list would
+   * offer grades this material does not have, and would make an ungraded
+   * material look as if it had some.
+   */
+  @Get('products/:productId/conditions')
   @Permissions('waste.products.view')
-  async getConditions() {
-    const result = await this.catalog.getConditions();
+  async getConditions(@Param('productId', ParseUUIDPipe) productId: string) {
+    const result = await this.catalog.getConditions(productId);
     return { message: 'Conditions fetched successfully', result };
   }
 
@@ -109,6 +122,33 @@ export class CatalogController {
   ) {
     const result = await this.catalog.getProductAvailability(user, productId);
     return { message: 'Product availability fetched successfully', result };
+  }
+
+  /**
+   * The materials people actually order, most first.
+   *
+   * Available to EVERY buyer role. Ranked by how many orders a material appears
+   * in rather than by summed quantity: quantity lives in each material's own
+   * unit, so adding 5,000 kg to 300 units and sorting the result compares two
+   * different physical dimensions and lets whichever unit produces bigger
+   * numbers top the list forever. The quantity is still returned per material,
+   * in its own unit, where it means something.
+   *
+   * Defined BEFORE `products/:productId/...`-style routes would matter and after
+   * the static ones; `most-ordered` is a literal segment so it cannot be
+   * swallowed by a parameterised path above it.
+   */
+  @Get('most-ordered')
+  @Permissions('waste.products.popular')
+  async mostOrdered(
+    @CurrentUser() user,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+  ) {
+    const result = await this.popularity.mostOrdered(
+      user.role,
+      Math.min(Math.max(limit, 1), 50),
+    );
+    return { message: 'Most ordered materials fetched successfully', result };
   }
 
   @Get('offers')

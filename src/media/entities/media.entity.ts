@@ -73,6 +73,30 @@ export class Media {
     @Column({ type: 'enum', enum: statusMedia, default: statusMedia.PENDING })
     status: statusMedia;
 
+    /**
+     * Set when the reviewer has ASKED for this document again.
+     *
+     * Rejecting a document and asking for a replacement are two different acts,
+     * and collapsing them was wrong in both directions: a reviewer working
+     * through a batch could not mark one bad without immediately pushing the
+     * whole account into "needs changes" and pinging the applicant, and an
+     * applicant could be sent back to fix a document nobody had told them
+     * about.
+     *
+     * So rejection is now silent, and this column records the separate,
+     * deliberate request. It is also what decides when the applicant is DONE:
+     * the account returns to review once no requested document is still
+     * outstanding. Keying that off "nothing is rejected" instead would strand
+     * an applicant in NEED_CHANGES over a document they were never asked for
+     * and cannot see.
+     */
+    @Column({ type: 'timestamptz', nullable: true })
+    reuploadRequestedAt?: Date | null;
+
+    /** What the applicant was told to fix. Sent to them with the request. */
+    @Column({ type: 'text', nullable: true })
+    reuploadReason?: string | null;
+
     @CreateDateColumn()
     createdAt: Date;
 

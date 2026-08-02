@@ -1,4 +1,8 @@
-import { Controller, UseGuards, Post, Body, Req, UseInterceptors, BadRequestException, UploadedFile, ForbiddenException } from '@nestjs/common';
+import { Controller, UseGuards, Post, Get, Patch, Param, ParseUUIDPipe, Body, Req, UseInterceptors, BadRequestException, UploadedFile, ForbiddenException } from '@nestjs/common';
+import { UpdateLocationDto } from '../dto/update-location.dto';
+ import { UpdateMaterialsInstitutionDto } from '../dto/update-materials.dto';
+import { UpdateInformationInstitutionDto } from '../dto/update-information.dto';
+import { OnboardingSubmissionService } from '../services/onboarding-submission.service';
 import { RolesGuard } from '@src/auth/guards/roles.guard';
 import { Roles } from '@src/auth/decorators/roles.decorator';
 import { Role } from '@src/user/enums/role.enum';
@@ -33,9 +37,78 @@ export class InstitutionOnboardingController {
     private readonly institutionOnboardingService: InstitutionOnboardingService,
     private readonly commonService: CommonService,
     private readonly mediaService: MediaService,
+    private readonly submissionService: OnboardingSubmissionService,
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
   ) {}
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Submitted application: review + corrections.
+  // The class-level @AccountsStatus(PENDING_PROFILE) is overridden per
+  // handler below — these endpoints only make sense AFTER submission.
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** The application as submitted, in step order (info → location → docs → materials). */
+  @Get('submission')
+  @Roles(Role.INSTITUTIONS)
+  @AccountsStatus(
+    AccountStatus.PENDING_APPROVAL,
+    AccountStatus.REJECTED,
+    AccountStatus.NEED_CHANGES,
+  )
+  async getSubmissionInstitution(@Req() req) {
+    const result = await this.submissionService.getSubmission(req.user.id, Role.INSTITUTIONS);
+    return { message: 'Application fetched successfully', result };
+  }
+
+  /** Correct the submitted information while the application is pending approval. */
+  @Patch('information')
+  @Roles(Role.INSTITUTIONS)
+  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  async updateInformationInstitution(
+    @Body() dto: UpdateInformationInstitutionDto,
+    @Req() req,
+  ) {
+    const result = await this.submissionService.updateInformation(
+      req.user.id, Role.INSTITUTIONS, dto);
+    return { message: 'Information updated successfully', result };
+  }
+
+
+  /** Correct the submitted materials while the application is pending approval. */
+  @Patch('materials')
+  @Roles(Role.INSTITUTIONS)
+  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  async updateMaterialsInstitution(@Body() dto: UpdateMaterialsInstitutionDto, @Req() req) {
+    const result = await this.submissionService.updateMaterials(
+      req.user.id, Role.INSTITUTIONS, dto);
+    return { message: 'Materials updated successfully', result };
+  }
+  /** Correct the registered location while the application is pending approval. */
+  @Patch('location')
+  @Roles(Role.INSTITUTIONS)
+  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  async updateLocationInstitution(@Body() dto: UpdateLocationDto, @Req() req) {
+    const result = await this.submissionService.updateLocation(
+      req.user.id, Role.INSTITUTIONS, dto);
+    return { message: 'Location updated successfully', result };
+  }
+
+  /** Replace a still-pending document while the application is pending approval. */
+  @Patch('documents/:mediaId')
+  @Roles(Role.INSTITUTIONS)
+  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
+  async replaceDocumentInstitution(
+    @Param('mediaId', ParseUUIDPipe) mediaId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req,
+  ) {
+    if (!file) throw new BadRequestException('file is required');
+    const result = await this.submissionService.replaceDocument(
+      req.user.id, Role.INSTITUTIONS, mediaId, file);
+    return { message: 'Document replaced successfully', result };
+  }
 
   /**
    * Adds institution information during onboarding

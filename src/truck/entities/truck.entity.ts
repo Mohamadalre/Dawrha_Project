@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { TruckAssignmentEntity } from './truck-assignment.entity';
 import { TruckStatus } from '../enums/truck-status.enum';
+import { TruckType } from '../enums/truck-type.enum';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 
 @Entity({ name: 'trucks' })
@@ -28,6 +29,16 @@ export class TruckEntity {
   @ManyToOne(() => Warehouse, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'warehouse_id' })
   warehouse?: Warehouse | null;
+
+  /**
+   * Collection or delivery — authored in Odoo, mirrored here.
+   *
+   * Only COLLECTION trucks are ever assigned to a collector, so this is what
+   * lets a fleet screen explain why a delivery truck has no driver instead of
+   * showing it as an unassigned anomaly.
+   */
+  @Column({ type: 'enum', enum: TruckType, default: TruckType.COLLECTION })
+  truckType: TruckType;
 
   @Column()
   model: string;

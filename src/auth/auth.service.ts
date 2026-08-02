@@ -31,6 +31,8 @@ import {
   AppNotAuthorizedException,
   DeviceNotFoundException,
   EmailAlreadyExistsException,
+  EmailRegisteredWithGoogleException,
+  SocialLoginRequiredException,
   InvalidCredentialsException,
   InvalidOtpException,
   InvalidResetTicketException,
@@ -94,9 +96,30 @@ export class AuthService {
 
 
 
+  /**
+   * True when the account can only be entered through Google.
+   *
+   * The discriminator is the ABSENCE OF A PASSWORD, not the provider flag: an
+   * account that registered locally and later signed in with Google has its
+   * provider rewritten to GOOGLE (see `loginWithGoogle`) while keeping a
+   * perfectly usable password. Judging by the flag alone would lock those users
+   * out of the password form they have always used.
+   */
+  private isGoogleOnly(account: Pick<Account, 'passwordHash' | 'googleId' | 'provider'>): boolean {
+    if (account.passwordHash) return false;
+    return !!account.googleId || account.provider === AuthProvider.GOOGLE;
+  }
+
   async register({ fullName, email, phoneNumber, password }: RegisterDto, role: Role) {
 
     const existAccount = await this.accountRepository.findOne({ where: { email: email } });
+    // Checked BEFORE the unverified-account branch: a Google account is verified
+    // by definition, but ordering the guard first means no future change to that
+    // branch can quietly start mailing an OTP to an account that has no password
+    // to confirm.
+    if (existAccount && this.isGoogleOnly(existAccount)) {
+      throw new EmailRegisteredWithGoogleException();
+    }
     if (existAccount && !existAccount.isEmailVerified) {
       await this.mailService.generateAndSendOtp(existAccount.email);
       const token = await this.generateTemporaryTokens(existAccount.id, existAccount.role, existAccount.accountStatus);
@@ -140,6 +163,18 @@ export class AuthService {
     if (!allowed || !allowed.includes(account.role)) {
       throw new AppNotAuthorizedException();
     }
+    // A Google account has no stored hash. Reaching argon2.verify with it threw
+    // "pchstr must be a non-empty string" and surfaced as a 500 — an internal
+    // error for what is an ordinary, foreseeable user mistake.
+    if (!account.passwordHash) {
+      if (this.isGoogleOnly(account)) {
+        throw new SocialLoginRequiredException();
+      }
+      // No password and no social identity: nothing to verify against, and
+      // saying so would describe an account state the user cannot act on.
+      throw new InvalidCredentialsException();
+    }
+
     const isPasswordValid = await argon2.verify(account.passwordHash, password);
     if (!isPasswordValid) {
       throw new InvalidCredentialsException();
@@ -240,7 +275,16 @@ export class AuthService {
     await this.redis.set(cdKey, 'locked', 'EX', OTP_COOLDOWN_SECONDS);
 
     const account = await this.accountRepository.findOne({ where: { email } });
-    if (account) {
+    if (account && this.isGoogleOnly(account)) {
+      // Nothing to reset — the account has no password. The RESPONSE stays
+      // identical so the anti-enumeration guarantee above is not undone by this
+      // branch; only the pointless email is skipped.
+      winstonLogger.warn(`Forgot-password requested for a Google-only account: ${email}`, {
+        context: 'ForgotPassword',
+        channel: 'app',
+        metadata: { task: 'auth' },
+      });
+    } else if (account) {
       await this.mailService.generateAndSendOtpForgot(account.email);
     } else {
       winstonLogger.warn(`Forgot-password requested for non-existent email: ${email}`, {
@@ -289,7 +333,9 @@ export class AuthService {
     await this.redis.set(cooldownKey, 'locked', 'EX', OTP_COOLDOWN_SECONDS);
 
     const account = await this.accountRepository.findOne({ where: { email } });
-    if (account) {
+    // Same rule as forgotPassword: a Google-only account has no password to
+    // reset, so no code is sent — and the response is unchanged either way.
+    if (account && !this.isGoogleOnly(account)) {
       await this.mailService.generateAndSendOtpForgot(account.email);
     }
 
@@ -323,6 +369,12 @@ export class AuthService {
       // Should not normally happen if email was valid during step 1/2,
       // but guard anyway.
       throw new InvalidResetTicketException();
+    }
+    // Unreachable today (no code is ever sent to a Google-only account), and
+    // kept as the statement of the invariant: a password is never silently
+    // attached to an account whose owner only ever proved a Google identity.
+    if (this.isGoogleOnly(account)) {
+      throw new SocialLoginRequiredException();
     }
 
     const hashedPassword = await argon2.hash(newPassword);
@@ -539,6 +591,31 @@ export class AuthService {
     if (!account.googleId) {
       account.googleId = googleId;
       account.provider = AuthProvider.GOOGLE;
+      await this.accountRepository.save(account);
+    }
+
+    // GOOGLE HAS PROVEN THE MAILBOX, which is the entire job the OTP does.
+    //
+    // `verifyGoogleToken` refuses a token whose `email_verified` claim is
+    // false, so reaching here means Google itself vouches that this person
+    // controls this address — the same fact an emailed code establishes, from a
+    // stronger source.
+    //
+    // The flag alone would not be enough. An account that registered with a
+    // password and never entered the code sits at INACTIVE, and the INACTIVE
+    // handler answers every sign-in with `NoActive_ACCOUNT` — so verifying the
+    // email and leaving the status would produce an account that is verified,
+    // permanently refused, and no longer has a pending code to rescue it. The
+    // status is settled by exactly the rule `verifyOtpCode` uses, because this
+    // IS that step, arrived at by another door.
+    if (!account.isEmailVerified) {
+      account.isEmailVerified = true;
+      if (account.accountStatus === AccountStatus.INACTIVE) {
+        account.accountStatus =
+          account.role === Role.CITIZEN || account.role === Role.ADMIN
+            ? AccountStatus.ACTIVE
+            : AccountStatus.PENDING_PROFILE;
+      }
       await this.accountRepository.save(account);
     }
 

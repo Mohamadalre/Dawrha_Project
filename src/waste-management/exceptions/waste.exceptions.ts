@@ -117,6 +117,53 @@ export class InvalidUnitCodeException extends BadRequestException {
   }
 }
 
+/**
+ * A material still held in a warehouse cannot be deleted.
+ *
+ * Deleting it would leave real, physical stock described by a catalogue entry
+ * that no longer exists: the warehouse can see the material, the system cannot
+ * name it, and no order can ever be raised to clear it. Reaching zero means
+ * selling or writing it off — both decisions, not side effects of a delete.
+ */
+export class ProductHasStockException extends BadRequestException {
+  constructor(name: string, remaining: number) {
+    super({
+      message:
+        `"${name}" still has ${remaining} in warehouse stock and cannot be ` +
+        'deleted. Sell or write off the remaining quantity first.',
+      errorCode: 'PRODUCT_HAS_STOCK',
+    });
+  }
+}
+
+/** A material must be measured in something before it can be priced or sorted. */
+export class UnitRequiredException extends BadRequestException {
+  constructor() {
+    super({
+      message: 'A measurement unit is required. Send unit_id.',
+      errorCode: 'UNIT_REQUIRED',
+    });
+  }
+}
+
+/**
+ * `unit_id` and `unit_type` were both sent and name different units.
+ *
+ * Refused rather than resolved by precedence: either could have been what the
+ * caller meant, and quietly picking one is how a material ends up measured in
+ * kilograms and priced per piece.
+ */
+export class UnitMismatchException extends BadRequestException {
+  constructor(fromId: string, fromCode: string) {
+    super({
+      message:
+        `unit_id refers to "${fromId}" but unit_type says "${fromCode}". ` +
+        'Send one, or send both agreeing.',
+      errorCode: 'UNIT_MISMATCH',
+    });
+  }
+}
+
 // --- Material conditions ---------------------------------------------------------
 export class ConditionNotFoundException extends NotFoundException {
   constructor() {

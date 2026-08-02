@@ -1,7 +1,7 @@
 // src/media/media.service.ts
 import { ForbiddenException, Injectable, InternalServerErrorException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, IsNull, Not } from 'typeorm';
 import { Media, MediaType, OwnerType, statusMedia } from './entities/media.entity';
 import {
   DuplicateImageTypeException,
@@ -17,6 +17,7 @@ import { UploadImageDto } from './dto/upload-image.dto';
 import { ProfileResolver } from '@src/user/providers/profile-resolver.privder';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { Role } from '@src/user/enums/role.enum';
+import { ApplicationsCacheService } from '@src/account-management/providers/applications-cache.service';
 
 
 /**
@@ -48,6 +49,10 @@ export class MediaService {
     private readonly dataSource: DataSource,
     private readonly profileResolver: ProfileResolver,
     private readonly odooSync: OdooSyncService,
+    // The applicant answering a request moves their account back into the
+    // review queue, so the reviewer's cached listings have to be dropped —
+    // otherwise the queue keeps showing an application that is no longer stuck.
+    private readonly applicationsCache: ApplicationsCacheService,
   ) { }
 
   /**
@@ -85,16 +90,46 @@ export class MediaService {
       media.fileType,
     );
 
+    // The replacement takes the rejected one's place: same row, same file type,
+    // so it appears exactly where the old one did on the review screen — and
+    // the request it answers is closed.
     await this.mediaRepository.update(mediaId, {
       url: uploadResult.imageUrl,
       publicId: uploadResult.publicId,
       status: statusMedia.PENDING,
+      reuploadRequestedAt: null,
+      reuploadReason: null,
     });
 
-    // The account goes back to pending review.
-    await this.accountRepository.update(userId, {
-      accountStatus: AccountStatus.PENDING_APPROVAL,
+    // Back to review ONLY once nothing is still ASKED FOR.
+    //
+    // The test used to be "nothing is left rejected", and that is a different
+    // question with a worse answer. A reviewer can now reject a document
+    // without asking for it — rejection is silent, requesting it is the
+    // deliberate act — so an account can legitimately carry a rejected document
+    // the applicant has never been told about and cannot see. Keying the
+    // release off rejections would leave that applicant permanently in
+    // NEED_CHANGES, having replaced everything they were actually asked for,
+    // with nothing on their screen left to fix.
+    //
+    // Several documents requested at once still behave correctly: replacing the
+    // first leaves the others outstanding, so the flag stays until the last one
+    // is answered.
+    const stillRequested = await this.mediaRepository.count({
+      where: {
+        ownerId: media.ownerId,
+        ownerType: media.ownerType,
+        reuploadRequestedAt: Not(IsNull()),
+      },
     });
+    if (stillRequested === 0) {
+      await this.accountRepository.update(userId, {
+        accountStatus: AccountStatus.PENDING_APPROVAL,
+      });
+      // The account moved back into the review queue — every cached listing
+      // page for its role is now stale.
+      await this.applicationsCache.invalidate(role);
+    }
 
     // Drivers are reviewed in ODOO: re-push the request so the updated
     // documents show up there again for the Odoo admin to re-review.

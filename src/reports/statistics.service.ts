@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Account } from '@src/user/entities/account.entity';
 import { Role } from '@src/user/enums/role.enum';
+import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { TruckEntity } from '@src/truck/entities/truck.entity';
 import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
@@ -39,13 +40,21 @@ export class StatisticsService {
 
   /** Single payload combining every section — for the admin dashboard. */
   async getOverview() {
-    const [accounts, trucks, warehouses, catalog] = await Promise.all([
+    const [accounts, trucks, drivers, warehouses, catalog] = await Promise.all([
       this.getAccountStats(),
       this.getTruckStats(),
+      this.getDriverStats(),
       this.getWarehouseStats(),
       this.getCatalogStats(),
     ]);
-    return { accounts, trucks, warehouses, catalog, generated_at: new Date().toISOString() };
+    return {
+      accounts,
+      trucks,
+      drivers,
+      warehouses,
+      catalog,
+      generated_at: new Date().toISOString(),
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -112,6 +121,27 @@ export class StatisticsService {
       assigned_to_drivers: assigned,
       unassigned: total - assigned,
       by_status: byStatus,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drivers (collectors)
+  // ---------------------------------------------------------------------------
+  async getDriverStats() {
+    const total = await this.accountRepo.count({ where: { role: Role.COLLECTOR } });
+    const active = await this.accountRepo.count({
+      where: { role: Role.COLLECTOR, accountStatus: AccountStatus.ACTIVE },
+    });
+
+    // Assignments are 1:1 per driver (unique driver_id), so a plain count is
+    // the number of drivers currently holding a truck.
+    const assigned = await this.assignmentRepo.count();
+
+    return {
+      total,
+      active,
+      assigned_to_truck: assigned,
+      without_truck: Math.max(total - assigned, 0),
     };
   }
 

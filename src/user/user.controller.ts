@@ -53,8 +53,7 @@ export class UserController {
 
   @Post('locations')
   async addLocation(@CurrentUser() user, @Body() dto: LocationDto) {
-    const result = await this.userService.addLocation(user.id, user.role, dto);
-    return { message: result.message, result };
+    return this.userService.addLocation(user.id, user.role, dto);
   }
 
   @Delete('locations/:locationId')

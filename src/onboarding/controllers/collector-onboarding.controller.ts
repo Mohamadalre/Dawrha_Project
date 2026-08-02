@@ -1,4 +1,7 @@
-import { Controller, UseGuards, Post, Body, Req, UseInterceptors, BadRequestException, UploadedFile, ForbiddenException } from '@nestjs/common';
+import { Controller, UseGuards, Post, Get, Patch, Param, ParseUUIDPipe, Body, Req, UseInterceptors, BadRequestException, UploadedFile, ForbiddenException } from '@nestjs/common';
+import { UpdateLocationDto } from '../dto/update-location.dto';
+import { UpdateInformationCollectorDto } from '../dto/update-information.dto';
+import { OnboardingSubmissionService } from '../services/onboarding-submission.service';
 import { RolesGuard } from '@src/auth/guards/roles.guard';
 import { Roles } from '@src/auth/decorators/roles.decorator';
 import { Role } from '@src/user/enums/role.enum';
@@ -33,9 +36,70 @@ export class CollectorOnboardingController {
     private readonly collectoronboardingService: CollectorOnboardingService ,
     private readonly commonService: CommonService,
     private readonly mediaService: MediaService,
+    private readonly submissionService: OnboardingSubmissionService,
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
   ) {}
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Submitted application: review + corrections (class-level
+  // @AccountsStatus(PENDING_PROFILE) is overridden per handler).
+  // A driver's application is decided in ODOO, so every correction here is
+  // re-pushed there immediately by the service.
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** The application as submitted, in step order (info → location → documents). */
+  @Get('submission')
+  @Roles(Role.COLLECTOR)
+  @AccountsStatus(
+    AccountStatus.PENDING_APPROVAL,
+    AccountStatus.REJECTED,
+    AccountStatus.NEED_CHANGES,
+  )
+  async getSubmissionCollector(@Req() req) {
+    const result = await this.submissionService.getSubmission(req.user.id, Role.COLLECTOR);
+    return { message: 'Application fetched successfully', result };
+  }
+
+  /** Correct the submitted information while the application is pending approval. */
+  @Patch('information')
+  @Roles(Role.COLLECTOR)
+  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  async updateInformationCollector(@Body() dto: UpdateInformationCollectorDto, @Req() req) {
+    const result = await this.submissionService.updateInformation(
+      req.user.id, Role.COLLECTOR, dto);
+    return { message: 'Information updated successfully', result };
+  }
+
+  /**
+   * Correct the registered location while the application is pending approval.
+   * NOTE: a driver may change the written address only — sending `coordinates`
+   * is rejected (his GPS point is captured by the app and drives dispatch).
+   */
+  @Patch('location')
+  @Roles(Role.COLLECTOR)
+  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  async updateLocationCollector(@Body() dto: UpdateLocationDto, @Req() req) {
+    const result = await this.submissionService.updateLocation(
+      req.user.id, Role.COLLECTOR, dto);
+    return { message: 'Location updated successfully', result };
+  }
+
+  /** Replace a still-pending document while the application is pending approval. */
+  @Patch('documents/:mediaId')
+  @Roles(Role.COLLECTOR)
+  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
+  async replaceDocumentCollector(
+    @Param('mediaId', ParseUUIDPipe) mediaId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req,
+  ) {
+    if (!file) throw new BadRequestException('file is required');
+    const result = await this.submissionService.replaceDocument(
+      req.user.id, Role.COLLECTOR, mediaId, file);
+    return { message: 'Document replaced successfully', result };
+  }
 
   /**
    * Adds collector information during onboarding

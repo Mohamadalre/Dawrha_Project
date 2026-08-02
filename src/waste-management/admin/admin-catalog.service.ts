@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { WasteCategory } from '../entities/waste-category.entity';
 import { Product } from '../entities/product.entity';
 import { CartItem } from '../entities/cart-item.entity';
+import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { MeasurementUnit } from '../entities/measurement-unit.entity';
 import { MaterialCondition } from '../entities/material-condition.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
@@ -20,6 +21,7 @@ import {
   CategoryNotFoundException,
   OfferNotFoundException,
   ProductInCartsException,
+  ProductHasStockException,
   ProductNotFoundException,
   ConditionAlreadyExistsException,
   ConditionInUseException,
@@ -28,6 +30,8 @@ import {
   UnitInUseException,
   UnitNotFoundException,
   UnitUsedByActiveProductsException,
+  UnitRequiredException,
+  UnitMismatchException,
 } from '../exceptions/waste.exceptions';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import {
@@ -56,6 +60,8 @@ export class AdminCatalogService {
     private readonly categoryRepo: Repository<WasteCategory>,
     @InjectRepository(Product)
     private readonly productRepo: Repository<Product>,
+    @InjectRepository(WarehouseInventory)
+    private readonly inventoryRepo: Repository<WarehouseInventory>,
     @InjectRepository(CartItem)
     private readonly cartItemRepo: Repository<CartItem>,
     @InjectRepository(MeasurementUnit)
@@ -177,7 +183,10 @@ export class AdminCatalogService {
 
   // --- Products -------------------------------------------------------------
   async listProducts(query: AdminListQueryDto) {
-    const qb = this.productRepo.createQueryBuilder('p').leftJoinAndSelect('p.category', 'c');
+    const qb = this.productRepo
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.category', 'c')
+      .leftJoinAndSelect('p.unit', 'u');
     this.applyStatus(qb, 'p', query.status);
     if (query.category_id) qb.andWhere('p.categoryId = :cid', { cid: query.category_id });
     if (query.search) qb.andWhere('p.name ILIKE :s', { s: `%${query.search}%` });
@@ -193,11 +202,33 @@ export class AdminCatalogService {
     };
   }
 
+  /**
+   * The unit a material is to be measured in, named by ID.
+   *
+   * By id and nothing else. The code was accepted for a while and is not any
+   * more: a code is a label that can be renamed and re-used, so two callers
+   * sending "KG" could mean two different rows — and a material's unit decides
+   * how every quantity of it is read, priced and sorted. An id names one row
+   * for good, which is the same reason the category is given by id.
+   *
+   * `unitType` is still WRITTEN from the resolved row, because Odoo, the cart
+   * and the suggestion flow all read a code; it is a denormalised label now,
+   * never an input.
+   */
+  private async resolveUnit(
+    unitId: string | undefined,
+    required: boolean,
+  ): Promise<MeasurementUnit> {
+    if (unitId) return this.units.resolveActiveById(unitId);
+    if (required) throw new UnitRequiredException();
+    return null as unknown as MeasurementUnit;
+  }
+
   async createProduct(adminId: string, dto: CreateProductDto) {
     const category = await this.categoryRepo.findOne({ where: { id: dto.category_id } });
     if (!category) throw new CategoryNotFoundException();
 
-    const unitCode = await this.units.validateActiveCode(dto.unit_type);
+    const unit = await this.resolveUnit(dto.unit_id, true);
 
     const product = await this.productRepo.save(
       this.productRepo.create({
@@ -205,7 +236,12 @@ export class AdminCatalogService {
         description: dto.description,
         categoryId: dto.category_id,
         imageURL: dto.image,
-        unitType: unitCode,
+        // Both written together, always. `unitId` is the link; `unitType` is
+        // the denormalised code Odoo and the cart read, and letting the two
+        // drift apart would mean the material is measured in one unit and
+        // priced in another.
+        unitId: unit.id,
+        unitType: unit.code,
         isActive: dto.is_active ?? true,
         odooSyncStatus: OdooSyncStatus.PENDING,
       }),
@@ -233,8 +269,10 @@ export class AdminCatalogService {
     if (dto.description !== undefined) product.description = dto.description;
     if (dto.category_id !== undefined) product.categoryId = dto.category_id;
     if (dto.image !== undefined) product.imageURL = dto.image;
-    if (dto.unit_type !== undefined) {
-      product.unitType = await this.units.validateActiveCode(dto.unit_type);
+    if (dto.unit_id !== undefined) {
+      const unit = await this.resolveUnit(dto.unit_id, true);
+      product.unitId = unit.id;
+      product.unitType = unit.code;
     }
     if (dto.is_active !== undefined) product.isActive = dto.is_active;
     product.odooSyncStatus = OdooSyncStatus.PENDING;
@@ -261,6 +299,29 @@ export class AdminCatalogService {
     const inCart = await this.cartItemRepo.count({ where: { productId: id } });
     if (inCart > 0) {
       throw new ProductInCartsException();
+    }
+
+    // A material still sitting on a warehouse floor cannot be deleted.
+    //
+    // The rows here mirror Odoo, which is the only writer of quantities — so
+    // deleting the material would leave real, physical stock described by a
+    // catalogue entry that no longer exists: the warehouse can see it, the
+    // system cannot name it, and no order can ever be raised to clear it. The
+    // material has to reach zero first, which means selling or writing it off
+    // — both of which are decisions, not side effects of a delete.
+    if (product.odooProductId) {
+      const held = await this.inventoryRepo
+        .createQueryBuilder('i')
+        .select('COALESCE(SUM(i.quantity), 0)', 'total')
+        .where('i.odooProductId = :odooProductId', {
+          odooProductId: product.odooProductId,
+        })
+        .getRawOne<{ total: string }>();
+
+      const remaining = Number(held?.total ?? 0);
+      if (remaining > 0) {
+        throw new ProductHasStockException(product.name, remaining);
+      }
     }
 
     if (product.odooProductId) {
@@ -431,7 +492,7 @@ export class AdminCatalogService {
     if (!product) throw new ProductNotFoundException();
 
     const conditionCode = dto.condition
-      ? await this.conditionsService.validateActiveCode(dto.condition)
+      ? await this.conditionsService.validateActiveCode(dto.product_id, dto.condition)
       : null;
 
     const offer = await this.offerRepo.save(
@@ -467,7 +528,7 @@ export class AdminCatalogService {
     if (dto.discount_percentage !== undefined) offer.discountPercentage = String(dto.discount_percentage);
     if (dto.condition !== undefined) {
       offer.conditionCode = dto.condition
-        ? await this.conditionsService.validateActiveCode(dto.condition)
+        ? await this.conditionsService.validateActiveCode(offer.productId, dto.condition)
         : null;
     }
     if (dto.target_roles !== undefined) {
@@ -525,117 +586,11 @@ export class AdminCatalogService {
   }
 
   // --- Material conditions ------------------------------------------------------
-  // Admin-managed grades used by the Odoo sorter and by FACTORY/FREE_FACILITY
-  // pricing. Every mutation is mirrored to Odoo (SYNC_CONDITION job).
-  async listConditions() {
-    const conditions = await this.conditionRepo.find({
-      order: { sortOrder: 'ASC', code: 'ASC' },
-    });
-    return { conditions: conditions.map((c) => this.mapCondition(c)) };
-  }
+  // Moved out: grades belong to a MATERIAL, not to a global list, so they are
+  // managed by ProductConditionsService under the product they describe.
+  // A flat collection here is what made them global and forced every material
+  // to borrow another's vocabulary.
 
-  async createCondition(adminId: string, dto: CreateConditionDto) {
-    const exists = await this.conditionRepo.findOne({ where: { code: dto.code } });
-    if (exists) throw new ConditionAlreadyExistsException();
-
-    const condition = await this.conditionRepo.save(
-      this.conditionRepo.create({
-        code: dto.code,
-        nameEn: dto.name_en,
-        nameAr: dto.name_ar,
-        sortOrder: dto.sort_order ?? 0,
-        odooSyncStatus: OdooSyncStatus.PENDING,
-      }),
-    );
-
-    await this.odooSync.enqueueSyncCondition({ conditionId: condition.id });
-    this.conditionsService.invalidate();
-    await this.audit.record({
-      userId: adminId,
-      action: 'CREATE_CONDITION',
-      entityType: 'material_condition',
-      entityId: condition.id,
-      newValues: { code: condition.code },
-    });
-
-    return { condition: this.mapCondition(condition), message: 'Condition created successfully' };
-  }
-
-  async updateCondition(adminId: string, id: string, dto: UpdateConditionDto) {
-    const condition = await this.conditionRepo.findOne({ where: { id } });
-    if (!condition) throw new ConditionNotFoundException();
-
-    // Deactivating a grade that still has live prices would strand those rows.
-    if (dto.is_active === false && condition.isActive) {
-      const pricedWith = await this.pricingRepo.count({ where: { conditionCode: condition.code } });
-      if (pricedWith > 0) throw new ConditionInUseException();
-    }
-
-    const before = {
-      nameEn: condition.nameEn,
-      nameAr: condition.nameAr,
-      sortOrder: condition.sortOrder,
-      isActive: condition.isActive,
-    };
-    if (dto.name_en !== undefined) condition.nameEn = dto.name_en;
-    if (dto.name_ar !== undefined) condition.nameAr = dto.name_ar;
-    if (dto.sort_order !== undefined) condition.sortOrder = dto.sort_order;
-    if (dto.is_active !== undefined) condition.isActive = dto.is_active;
-    condition.odooSyncStatus = OdooSyncStatus.PENDING;
-    const saved = await this.conditionRepo.save(condition);
-
-    await this.odooSync.enqueueSyncCondition({ conditionId: saved.id });
-    this.conditionsService.invalidate();
-    await this.cache.invalidate('products');
-    await this.audit.record({
-      userId: adminId,
-      action: 'UPDATE_CONDITION',
-      entityType: 'material_condition',
-      entityId: id,
-      oldValues: before,
-      newValues: { ...dto },
-    });
-
-    return { condition: this.mapCondition(saved), message: 'Condition updated successfully' };
-  }
-
-  async deleteCondition(adminId: string, id: string) {
-    const condition = await this.conditionRepo.findOne({ where: { id } });
-    if (!condition) throw new ConditionNotFoundException();
-
-    const inUse = await this.pricingRepo.count({ where: { conditionCode: condition.code } });
-    if (inUse > 0) throw new ConditionInUseException();
-
-    if (condition.odooConditionId) {
-      await this.odooSync.enqueueDeleteCondition({ odooConditionId: condition.odooConditionId });
-    }
-    await this.conditionRepo.delete(id);
-    this.conditionsService.invalidate();
-    await this.audit.record({
-      userId: adminId,
-      action: 'DELETE_CONDITION',
-      entityType: 'material_condition',
-      entityId: id,
-      oldValues: { code: condition.code },
-    });
-
-    return { message: 'Condition deleted successfully' };
-  }
-
-  private mapCondition(c: MaterialCondition) {
-    return {
-      id: c.id,
-      code: c.code,
-      name_en: c.nameEn,
-      name_ar: c.nameAr,
-      sort_order: c.sortOrder,
-      is_active: c.isActive,
-      odoo_sync_status: c.odooSyncStatus,
-      created_at: c.createdAt,
-    };
-  }
-
-  /** Unified snake_case shape for the admin category list (no raw entities). */
   private mapAdminCategory(c: WasteCategory) {
     return {
       id: c.id,
@@ -650,7 +605,6 @@ export class AdminCatalogService {
     };
   }
 
-  /** Unified snake_case shape for the admin product list (no raw entities). */
   private mapAdminProduct(p: Product) {
     return {
       id: p.id,
@@ -658,6 +612,19 @@ export class AdminCatalogService {
       description: p.description ?? null,
       image: p.imageURL ?? null,
       category: p.category ? { id: p.category.id, name: p.category.name } : null,
+      // The unit as a LINK, next to the code older clients still read. Only
+      // the identity and the name — the flags that decide sorting tolerance
+      // and the weight rule belong to the units screen, not to a material
+      // listing that never acts on them.
+      unit: p.unit
+        ? {
+            id: p.unit.id,
+            code: p.unit.code,
+            name_en: p.unit.nameEn,
+            name_ar: p.unit.nameAr,
+          }
+        : null,
+      unit_id: p.unitId ?? null,
       unit_type: p.unitType,
       is_active: p.isActive,
       odoo_product_id: p.odooProductId ?? null,
@@ -666,7 +633,6 @@ export class AdminCatalogService {
       updated_at: p.updatedAt,
     };
   }
-
   // --- helpers --------------------------------------------------------------
   private applyStatus(qb: any, alias: string, status: 'active' | 'inactive' | 'all') {
     if (status === 'active') qb.andWhere(`${alias}.isActive = true`);

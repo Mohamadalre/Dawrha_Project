@@ -253,3 +253,198 @@
 
 ## ملاحظات تحقّق
 - **جولة 2026-07-16:** `tsc --noEmit` نظيف · **154/154 اختبار** (حُدّث fixture واحد في `shift-change-request.service.spec` ليعكس عقد DRIVER الجديد) · الجانب الأودو: ترقية 0 أخطاء + 12/12 + تحقق شل وبصري كامل (انظر `PROJECT_LOG.md` جلسة 2026-07-16). **مطلوب بعد السحب: `npm run migration:run`**.
+
+---
+
+## جولة 2026-07-19 — انقطاعات Redis الدورية (ECONNABORTED/ECONNRESET كل ~90 ثانية)
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 73 | **السبب الجذري بيئي وليس في الكود**: خدمة `redis-server` مثبّتة داخل WSL Ubuntu كانت في حلقة إعادة تشغيل لا نهائية (systemd: `start operation timed out` → terminate → restart كل 90 ثانية بالضبط، عداد المحاولات تجاوز 25). كل دورة كانت تخطف `127.0.0.1:6379` عبر `wslrelay` من وكيل Docker (`com.docker.backend`) ثم تموت قاطعةً **كل** اتصالات ioredis دفعة واحدة | بيئة WSL (لا ملفات مشروع) | ✅ | `wsl -u root systemctl disable --now redis-server` — تعطيل نهائي للخدمة المتروكة؛ المنفذ 6379 صار حصرياً لحاوية Docker `redis` (التي تحمل بيانات التطبيق أصلاً). للتراجع: `systemctl enable --now redis-server` داخل WSL |
+| 74 | **تحصين دفاعي**: `keepAlive: 10_000` + `connectTimeout: 10_000` على اتصالي ioredis (العميل العام + BullMQ) — مجسات TCP keepalive كل 10 ثوانٍ بدل افتراضي Windows (ساعتان) كي تنجو الاتصالات الخاملة من وكيل منافذ Docker Desktop | `core/redis/redis.module.ts` · `core/queue/queue.module.ts` | ✅ | إعداد وقائي فقط — ثبت بالاختبار أنه لم يكن سبب المشكلة (الانقطاع كان يضرب الاتصالين معاً بنفس اللحظة) |
+
+**منهجية التشخيص (للمرجع)**: اختبار خمول 4 دقائق باتصالين (default مقابل keepAlive) أظهر انقطاعاً متزامناً لكليهما كل 90 ثانية بتوقيتات ثابتة → ليس idle-timeout بل حدث خارجي دوري → `Get-NetTCPConnection -LocalPort 6379` كشف مستمعَين متنافسين (`wslrelay` + `com.docker.backend`) → `journalctl -u redis-server` داخل WSL أكّد حلقة الانهيار بنفس التوقيتات.
+
+## ملاحظات تحقّق
+- **جولة 2026-07-19:** `tsc --noEmit` نظيف · إعادة اختبار الخمول 4 دقائق بعد الإصلاح: **صفر انقطاعات** + `run_id` عبر localhost يطابق حاوية Docker (`5887b080…`) · لا حاجة لأي هجرة أو seed.
+
+---
+
+## جولة 2026-07-20 — إزالة راوتات تغيير الوردية + وردية السائق في الدفع لأودو + إحصائيات السائقين
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 75 | **حذف كل راوتات طلبات تغيير الوردية** (تدقيق بطلب صريح: لا راوت إضافة/تعديل وردية، لا طلب تغيير وردية، لا عرض طلبات سائقين، لا إضافة شاحنة) | حُذفت: `truck/shift-change-request.controller.ts` (الكنترولران COLLECTOR+Admin) و`shift-change-request.service.ts` و`dto/shift-change-request.dto.ts` وspec الخدمة · عُدّل `truck.module.ts` | ✅ | إسناد/تغيير وردية السائق صار **حصراً في أودو** (شاشة "إسناد سائق لشاحنة" أدمن+مدير مستودع). كيان `ShiftChangeRequest` وwebhook القرار `shift-change-decision` باقيان (بيانات تاريخية + وظائف قديمة محتملة بالطابور). تدقيق البقية: `shift.controller` قراءة فقط (GET /shifts) ✅ · `truck.controller` قراءة فقط ✅ · قائمة طلبات السائقين محذوفة أصلاً من account-management ✅ |
+| 76 | **دفع طلب السائق يشمل ورديته** | `odoo-sync.processor.ts` (`pushDriverRequest`) · `odoo.service.ts` (`createDriverRequest`) | ✅ | وردية onboarding للسائق (`profile.shiftId` → `shift.odooShiftId`) تُرسل كـ `shift_odoo_id` — أودو يخزنها بـ `recycle.driver.request.shift_id` وتظهر بشاشتي Drivers وتفلتر شاشة الإسناد ("وردية السائق تأتي مع معلوماته") |
+| 77 | **إحصائيات السائقين والشاحنات** | `reports/statistics.service.ts` + `statistics.controller.ts` | ✅ | `getDriverStats()` جديد: total (COLLECTOR) / active / assigned_to_truck (عدّ الإسنادات 1:1) / without_truck + راوت `GET /api/v1/admin/reports/drivers` + قسم `drivers` ضمن `overview`. عدد الشاحنات موجود أصلاً بـ `getTruckStats()` وضمن overview |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-20:** `tsc --noEmit` نظيف · **148/148 اختبار (23 suites)** — الفارق عن 154/24 هو حزمة اختبارات خدمة طلبات تغيير الوردية المحذوفة عمداً مع الميزة · الجانب الأودو: ترقية 0 أخطاء + 12/12 + 15/15 فحص شل لدورة الإسناد + تحقق بصري كامل (انظر `PROJECT_LOG.md` جلسة 2026-07-20). لا هجرات جديدة.
+
+---
+
+## جولة 2026-07-21 — دورة طلب تغيير الوردية v2 + مرايا مستودع + مشاكل الشاحنة + حظر إجباري
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 78 | **دورة طلب تغيير الوردية (v2 — قرار المدير)** | `truck/shift-change-request.{controller,service,dto}.ts` (أُعيدت مبنيّة للسائق فقط) · `truck.module.ts` | ✅ | السائق الفعّال **الذي يملك شاحنة** يطلب وردية سائقين **من مستودعه** (ليست الحالية) بسبب إلزامي. راوتات COLLECTOR: `POST /shift-change-requests` (كل الشروط + لا طلب فعّال مكرر) · `GET /mine` (الأحدث أولاً) · `GET /available-shifts` (ورديات مستودعه عدا الحالية) · `DELETE /:id` (pending فقط → يحذف من النظامين عبر `enqueueCancelShiftChange`). القرار يتم بأودو؛ webhook `shift-change-decision` صار `{status: PROCESSING\|ACCEPTED(+truck_odoo_id)\|REJECTED}` — المعالج يحرّك الحالة وينقل الإسناد (المرآة) عند القبول |
+| 79 | **مرآة مستودع السائق + مستودع الوردية** | هجرة `1784500000000` · `shift.entity.ts` (+odooWarehouseId) · `collector-profile.entity.ts` (+warehouse) · `odoo.service.ts` (fetchShifts+warehouse_id) · `odoo-sync.processor.ts` (syncFleet يملأ odooWarehouseId؛ applyDriverDecision يحل warehouse_odoo_id + warehouse_change_only) · webhook DTO (+warehouse_odoo_id/warehouse_change_only) | ✅ | قبول السائق بأودو يرسل مستودعه؛ نقل المستودع (warehouse_change_only) يحدّث المرآة بلا تغيير حالة ولا إشعار. الوردية مرتبطة بمستودع فيفلتر طلب السائق على ورديات مستودعه |
+| 80 | **حظر إجباري لكل الأدوار** | `odoo-sync.processor.ts` (BLOCKED يمسح refresh+fcm لأجهزة السائق) · `account-management.service.ts` (`blockStatus` يمسح أجهزة أي حساب يحظره أدمن الباك ايند) | ✅ | تسجيل خروج فوري (فناء التوكن) + معالِج BLOCKED يمنع الدخول حتى الرفع. مطبّق على السائق (قرار أودو) وعلى المواطن/المؤسسة/المعمل/الجهة الحرة (أدمن الباك ايند) |
+| 81 | **my-truck محسّن + إشعار القبول** | `truck/assignment.service.ts` (getMyAssignment: +warehouse{id,odoo,name}؛ رسالة "سيتم إسنادك قريباً") · `i18n/{ar,en}` (driverApproved + shiftChangeAccepted{+shift}) | ✅ | الشاحنة + مستودعها + الوردية بأوقاتها، وإلا رسالة الانتظار. إشعار قبول السائق: "سيتم إسنادك لسيارة قريباً" |
+| 82 | **مشاكل الشاحنة** | `truck/truck-problem.{controller,service}.ts` + `entities/truck-problem.entity.ts` + هجرة `truck_problems` · `odoo.service.ts` (createTruckProblem) · processor (PUSH_TRUCK_PROBLEM) | ✅ | `POST /truck-problems` (multipart: سبب إلزامي + حتى 5 صور عبر Cloudinary) → دفع بالطابور لأودو `recycle.truck.problem` — يقرأه مدير المستودع (قراءة فقط). لا شيء يعود |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-21:** `tsc --noEmit` نظيف · **148/148 اختبار (23 suite)** · هجرة `1784500000000` نُفّذت بنجاح · الجانب الأودو: ترقية 0 أخطاء + 12/12 + 16/16 فحص شل للدورة كاملة + تقرير PDF السائق (36KB) + تحقق بصري بالمتصفح (مدير+أدمن) — انظر `D:/ite-odoo/odoo19-docker/PROJECT_LOG.md` جلسة 2026-07-21.
+
+---
+
+## جولة 2026-07-22 — استلام/تسليم السيارة (Handover) + حضور السائقين + كرون إشعارات الوردية
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 83 | **كيان الحيازة + هجرة + tolerance للوردية** | `truck/entities/truck-handover.entity.ts` + `enums/handover-status.enum.ts` + هجرة `1784600000000` + `shift.entity.ts` (tolerance) + `odoo.service.fetchShifts` + `processor.syncFleet` | ✅ | `truck_handovers` (صف فريد driver+shift+workDate، حارسا إشعار)؛ `shifts.tolerance` مرآة من أودو (recycle.shift.tolerance) |
+| 84 | **خدمة + راوتات الاستلام/التسليم** | `truck/handover.service.ts` + `shift-window.util.ts` + `driver.controller.ts` + `truck.module.ts` + استثناءات | ✅ | `POST /driver/pickup` · `POST /driver/dropoff` (سبب إلزامي) · `GET /driver/handover-status`. قيود نافذة الوردية (لا استلام قبل البدء/لا تسليم قبل النهاية) + استثناء الشاحنة المعطّلة (لا تُستلَم، وتُسلَّم بأي وقت) + منع الحيازة المزدوجة والشاحنة الممسوكة من آخر. دفع أودو عبر الطابور |
+| 85 | **كرون إشعارات الوردية** | `maintenance/handover-cron.service.ts` + `maintenance.module.ts` + i18n `handoverMissedPickup`/`handoverLateDropoff` | ✅ | كل 5د (worker): بدء بلا استلام / نهاية بلا تسليم → إشعار السائق (FCM) + إشعار المدير (نداء أودو `backend_alert_manager`) مع دقائق التأخير من هامش الوردية؛ مرة واحدة لكل حدث |
+| 86 | **مزامنة أودو للحيازة** | `odoo.service.ts` (createTruckHandover/closeTruckHandover/notifyHandoverAlertManager) + constants/service/processor (PUSH_HANDOVER_PICKUP/DROPOFF) | ✅ | إنشاء مرآة على الاستلام، إغلاقها على التسليم (idempotent)، وتنبيه المدير للـ missed/late |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-22:** `tsc` نظيف · **148/148 اختبار** + سبك `handover.service.spec` **6/6** (بساعة مثبّتة) · هجرة `1784600000000` نُفّذت · الجانب الأودو: ترقية 0 أخطاء + 12/12 + 5/5 فحص شل + تحقق بصري لشاشة "حضور السائقين" — انظر `D:/ite-odoo/odoo19-docker/PROJECT_LOG.md` جلسة 2026-07-22.
+
+---
+
+## جولة 2026-07-23 — لوحة قاعدة البيانات (DB Dashboard، شبيهة phpMyAdmin) مدمجة
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 87 | **لوحة DB مدمجة بالباك ايند** (ليست مشروعاً منفصلاً) | `src/db-dashboard/*` مسجّل بـ `AppModule` | ✅ | تعيد استخدام اتصال TypeORM نفسه لـ `dawrha_db` (بلا اتصال جديد). دخول مستقل من `.env` (`DBBOARD_USER/PASSWORD`، توكن بـ `DBBOARD_SECRET`←`JWT_ACCESS_SECRET`). راوتات تحت `/api/db-admin` (VERSION_NEUTRAL): login · tables · schema · rows(بترقيم) · POST/PATCH/DELETE. القيم بارامترية + أسماء الجداول/الأعمدة مُتحقَّقة من information_schema ومقتبَسة (لا حقن). الإضافة/التعديل/الحذف تتطلب PK؛ بلا PK = عرض فقط. الواجهة **ملف React واحد** `ui.html` (CDN + Babel runtime classic، بلا build) يُخدَم من الكنترولر |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-23:** `tsc` نظيف · تحقق حي على `dawrha_db` (48 جدولاً): دخول ✓، عرض الجداول والمخطط والبيانات ✓، **CRUD كامل من الواجهة** (إضافة 14→15، تعديل مع PK للقراءة فقط، حذف بتأكيد 15→14) ✓، رفض اسم جدول غير موجود 404، حذف صف غير موجود 404. الرابط: `http://localhost:3000/api/db-admin`.
+
+---
+
+## جولة 2026-07-24 — نطاق الوردية (عامة/خاصة) على الباك ايند
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 88 | **مرآة نطاق الوردية** | `shift/entities/shift.entity.ts` + هجرة `1784700000000` | ✅ | عمودان جديدان `is_global` (bool) + `odoo_warehouse_ids` (int[])؛ `odoo_warehouse_id` المفرد بقي خامداً. الهجرة تعبّئ من العمود القديم (بلا مستودع=عامة، بمستودع=خاصة به). نُفّذت |
+| 89 | **مزامنة النطاق من أودو** | `odoo.service.fetchShifts` + `odoo-sync.processor.syncFleet` | ✅ | `fetchShifts` يقرأ `is_global`+`warehouse_ids`؛ `syncFleet` يعبّئ `isGlobal`+`odooWarehouseIds` (والمفرد للتوافق) |
+| 90 | **Onboarding: العامة فقط** | `shift/shift.service.ts` (`list`+`getDriverShiftOrThrow`) | ✅ | السائق غير المقبول بلا مستودع → يرى/يقبل **الورديات السائق العامة فقط** (`isGlobal:true`) |
+| 91 | **تغيير الوردية: عامة أو مستودعه** | `truck/shift-change-request.service.ts` (`availableShifts`+`create`) | ✅ | المسموح = `isGlobal` **أو** مستودع السائق ضمن `odooWarehouseIds` (بدل مقارنة المستودع المفرد) |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-24:** `tsc` نظيف · **154/154 اختبار** · هجرة `1784700000000` نُفّذت. الجانب الأودو: ترقية 0 أخطاء (v19.0.1.23.0) + post-migrate + **11/11 فحص شل** لقواعد النطاق/الوقت + إصلاح CSS وصل الشريط الجانبي بالنافبار — انظر `PROJECT_LOG.md` جلسة 2026-07-24.
+
+---
+
+## جولة 2026-07-24 (تكملة) — راوتات ورديات السائق + متانة الربط + مرآة السائقين فقط
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 92 | **راوتا ورديات السائق (بدل القديم)** | `shift/shift.controller.ts` + `shift.service.ts` + `shift.exceptions.ts` + `shift.module.ts` | ✅ | حُذف `GET /shifts`. `GET /shifts/onboarding` (PENDING_PROFILE+COLLECTOR → العامة فقط، id لـ add-information). `GET /shifts/home` (ACTIVE+COLLECTOR → العامة+مستودعه، id لـ shift-change). حُرّاس per-route + حقن CollectorProfile. تحقق: 401 بلا توكن، 404 للقديم |
+| 93 | **متانة الربط أودو→باك (تسوية)** | `odoo-sync/fleet-reconcile.service.ts` (جديد) + `odoo-sync.service.ts` (`enqueueSyncFleetReconcile`) + `odoo-sync.module.ts` | ✅ | كرون كل 10د + مزامنة عند الإقلاع (OnModuleInit) + jobId مقسّم على الدقيقة (لا تكدّس). `syncFleet` قراءة كاملة idempotent → أي انقطاع يُغلق خلال دورة. + `.env ODOO_WEBHOOK_SECRET` + بارامترا أودو |
+| 94 | **إصلاح تحويل وقت الوردية** | `odoo-sync.processor.ts` (`odooFloatToTime`) | ✅ | أودو يخزن Float (8=08:00, 17.0333=17:02)؛ كان يسبب `invalid input syntax for type time` ويجمّد كل مزامنة. تقريب للدقيقة، 0 صالحة (منتصف الليل) |
+| 95 | **المرآة ورديات السائقين فقط** | `odoo.service.fetchShifts` + `db/seeds/shift-seed.ts` | ✅ | دومين `shift_type=driver` (ورديات الموظفين تبقى بأودو). seed تحوّل لتنظيف الورديات اليتيمة (odooShiftId=NULL) + حُذفت الوهمية Morning/Evening |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-24 (تكملة):** `tsc` نظيف · **154/154 اختبار** · الراوتان مُعرّفان والحُرّاس فعّالة. إثبات حي: إضافة وردية بأودو ظهرت بالمرآة خلال ثوانٍ، حذفها انمسح، 202/403 للسرّ. المرآة: 5 ورديات سائقين محوّلة الأوقات صحيح. أودو: 5/5 فحص تكرار طبق-الأصل. تفاصيل: `PROJECT_LOG.md` جلسة 2026-07-24 (تكملة).
+
+---
+
+## جولة 2026-07-25 — مراجعة/تعديل طلب الأونبوردنغ لكل دور + تدقيق الـ APIs
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 96 | **عرض الطلب المقدَّم لكل دور** | `onboarding/services/onboarding-submission.service.ts` (جديد) + 4 كنترولرات | ✅ | `GET /onboarding/{institution\|factory\|external-partner\|collector}/submission` — يرجّع التتابعية كاملة حسب الدور (steps + information + location + documents + materials) مع **اسم المحافظة** وحالة كل ملف. متاح فقط للحالات PENDING_APPROVAL / REJECTED / NEED_CHANGES. خدمة واحدة عامة عبر `ProfileResolver` + خريطة إعدادات لكل دور |
+| 97 | **تعديل الموقع** | نفس الخدمة + `dto/update-location.dto.ts` | ✅ | `PATCH .../location` — PATCH جزئي (كل حقل اختياري لكن مُتحقَّق منه)، **PENDING_APPROVAL حصراً** (وإلا 403). للسائق: إعادة دفع فورية لأودو |
+| 98 | **استبدال ملف مرفوع** | نفس الخدمة | ✅ | `PATCH .../documents/:mediaId` — ملكية صارمة، **PENDING_APPROVAL حصراً**، ويرفض الملفات المرفوضة (403) موجّهاً لمسار إعادة الرفع. الشريك الخارجي بلا هذا المسار (لا يملك خطوة documents) |
+| 99 | **NEED_CHANGES حصراً عند رفض صورة** | `account-management/dto/update-account-status.dto.ts` | ✅ | حُذفت NEED_CHANGES من الحالات التي يضبطها الأدمن يدوياً — تُضبط فقط من `updateMediaStatus` عند رفض ملف محدد، وإلا يعلق المستخدم بحالة بلا ملف مرفوض ليعيد رفعه |
+| 100 | **إصلاح: الحساب كان يغادر NEED_CHANGES مبكراً** | `media/media.service.ts` | ✅ | مع رفض عدة ملفات، إعادة رفع أولها كانت تُرجع الحساب PENDING_APPROVAL رغم بقاء ملفات مرفوضة. صار يعود للمراجعة **فقط عند عدم بقاء أي ملف مرفوض** (+ اختبار جديد) |
+| 101 | **توحيد إصدار الـ API** | `media/media.controller.ts` · `notification/notification.controller.ts` | ✅ | كانا **بلا إصدار** (`/api/media`, `/api/notifications`) بينما كل المشروع `/api/v1/...`. صارا مثبَّتين على المسارين معاً عبر `VERSION_NEUTRAL + '1'` — توحيد **بلا كسر** أي عميل حالي |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-25:** `tsc` نظيف · **155/155 اختبار** (+1 جديد) · 11 راوت جديد مُعرَّف. اختبار حي: عرض الطلب أرجع التتابعية والمحافظة والوردية والملفات؛ تعديل الموقع 200 و**انعكس بأودو فوراً**؛ استبدال ملف 200؛ استبدال ملف مرفوض 403؛ إعادة رفع المرفوض 200؛ إعادة رفع غير مرفوض 400؛ التعديل والحساب REJECTED 403؛ بلا توكن 401؛ المساران `/api/...` و`/api/v1/...` كلاهما 200. بيانات الاختبار أُعيدت لأصلها.
+
+---
+
+## جولة 2026-07-25 (تكملة) — تعديل المعلومات لكل رول + كاش قوائم الأدمن + مستودعات
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 102 | **تعديل المعلومات لكل رول** | `onboarding/dto/update-information.dto.ts` (جديد) + `onboarding-submission.service.updateInformation` + 4 كنترولرات | ✅ | `PATCH /onboarding/{role}/information` — DTO مستقل لكل دور (منع تسريب حقول دور لآخر)، خريطة DTO→عمود لكل رول، تحقق من `institutionTypeId`/`shiftId` (وردية سائق عامة فعّالة)، و409 نظيف عند تكرار قيمة فريدة. PENDING_APPROVAL حصراً |
+| 103 | **السائق لا يعدّل الإحداثيات** | `onboarding-submission.service.updateLocation` | ✅ | إرسال `coordinates` من دور COLLECTOR → 403 (نقطته تُلتقط من التطبيق وتُستخدم بالتوزيع)؛ يعدّل العنوان والوصف فقط |
+| 104 | **كاش قوائم طلبات الأدمن** | `account-management/providers/applications-cache.service.ts` (جديد) + `account-management.service` + `account-management.module` | ✅ | كاش بنمط **عدّاد النسخة** (نفس CatalogCacheService): المفتاح يحمل النسخة، والإبطال `INCR` واحد O(1) بلا SCAN. TTL 2د كشبكة أمان. fail-open للقاعدة عند أي خطأ Redis |
+| 105 | **إبطال الكاش عند كل تغيير** | `account-management.service` (updateStatus / updateMediaStatus / blockStatus) + `onboarding-submission.service.afterEdit` | ✅ | كل قرار أدمن (قبول/رفض/رفض صورة/حظر) **وكل تعديل من الطالب نفسه** يُبطل كاش دوره — فلا يقرأ المراجِع بيانات ما قبل التعديل |
+| 106 | **باك: عرض مستودع محدد + تعديله** | `warehouse/warehouse-admin.{controller,service}.ts` + `dto/update-warehouse.dto.ts` (جديد) | ✅ | كانا **ناقصين**. `GET /admin/warehouses/:id` بنفس شكل صف القائمة، و`PATCH /admin/warehouses/:id` (اسم/رمز/عنوان/محافظة/إحداثيات/سعة/تفعيل) مع 409 على تكرار الرمز. المدير ومعرّف أودو وأرقام المخزون مستثناة عمداً |
+| 107 | **أودو: إدارة المستودع** | `models/warehouse.py` + `dashboard_admin.xml` + `recycle_admin_dashboard.js` + i18n | ✅ | بشاشة المستودع: **إضافة منطقة** (اسم+نوع، منع تكرار الاسم)، **حذف منطقة** (ممنوع إن كان فيها أي سجل مخزون)، **تغيير المدير** (يعرض غير المسنَدين؛ القديم يبقى دوره manager ويُفكّ عنه المستودع فلا تُفتح له لوحته)، **تعديل بيانات المستودع** (حقول بيضاء فقط). كلها admin-only |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-25 (تكملة):** `tsc` نظيف · **155/155 اختبار** · 4 راوتات information + راوتا المستودع مُعرَّفة. اختبار حي: السائق يرسل إحداثيات → **403**؛ يعدّل العنوان → 200؛ يعدّل رقمه الوطني → 200 و**ظهر بأودو فوراً** (`national_id=74123569875`). أودو: **8/8 فحص شل** لإدارة المستودع (إضافة/تكرار مرفوض/نوع خاطئ مرفوض/حذف فارغة/منع حذف ذات مخزون/قائمة المدراء/تعديل/اسم فارغ مرفوض). Postman: مجلد "طلبي" بكل دور + راوتا المستودع.
+
+---
+
+## جولة 2026-07-25 (تكملة 2) — سجلّ السائق + كوليكشن الأدمن الكامل
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 108 | **إصلاح: زر إضافة منطقة كان يطلب اختيار مستودع** | `recycle_admin_dashboard.js` + `dashboard_admin.xml` | ✅ | كان في **دالتان بنفس الاسم** `openZoneCreate` — الثانية (كود ميت من شاشة المناطق العامة) تُظلّل الأولى بجافاسكربت، فالزر يفتح الشاشة العامة ذات قائمة المستودعات. أُعيدت تسمية الخاصة بالمستودع إلى `openWarehouseZoneCreate`/`confirmWarehouseZoneCreate` — الآن تُسنَد المنطقة تلقائياً للمستودع المفتوح بلا أي اختيار |
+| 109 | **سجلّ بلاغات الشاحنة للسائق** | `truck/truck-problem.{service,controller}.ts` | ✅ | `GET /api/v1/truck-problems/mine?page&limit` — الأحدث أولاً + ترقيم، مقصور على بلاغات السائق نفسه، ويظهر `synced_with_odoo` للربط مع ما يراه المدير |
+| 110 | **ترقيم سجلّ طلبات تغيير الوردية** | `truck/shift-change-request.{service,controller}.ts` | ✅ | `GET /api/v1/shift-change-requests/mine?page&limit` — كل طلباته بأي حالة، الأحدث أولاً + `pagination` (كان يرجع كل الصفوف بلا ترقيم) |
+| 111 | **كوليكشن أدمن مستقل ومرتّب** | `postman/Dawrha.admin.postman_collection.json` (جديد) | ✅ | **54 راوت = كل راوتات الأدمن بلا نقص** (تحقق آلي: MISSING=0 / EXTRA=0 مقابل جدول الراوتات الحيّ)، بـ11 مجلداً **بترتيب التشغيل**: تقارير → وحدات → حالات → محافظات → تصنيفات → منتجات → تسعير → عروض → طلبات تصنيفات → مستودعات → مراجعة الطلبات. كل راوت بوصف عربي وبودي مطابق للـ DTO الفعلي، وعلامة ⚙️ لما يُزامَن مع أودو |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-25 (تكملة 2):** `tsc` نظيف · **155/155 اختبار** · الراوتان الجديدان مُعرَّفان ويعملان ببيانات حقيقية مع `pagination` صحيح (`current_page/total_pages/total_count/limit/has_next/has_prev`) · مطابقة آلية بين الكوليكشن وجدول الراوتات: **54/54 بلا نقص أو زيادة**.
+
+---
+
+## جولة 2026-07-26 — إيقاف عاصفة الإشعارات وتوحيد Redis
+
+**التشخيص:** ما كانت مشكلة تعدّد Redis. الفحص أثبت وجود **Redis واحدة فقط** (حاوية دوكر) — نفس `run_id` من كل المسارات، و`wslrelay` مجرد تمرير منفذ من Docker Desktop لا خادم ثانٍ. السبب الحقيقي **حلقة تغذية راجعة لا نهائية**.
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 112 | **الجذر: فشل دائم كان يُعاد 3 مرات** | `notification/processors/notification.processor.ts` | ✅ | مستخدم بلا جهاز مسجَّل **لن** يصير عنده جهاز بالمحاولة 2 أو 3. استُبدل `Error` بـ **`UnrecoverableError`** فيفشل فوراً بلا إعادة |
+| 113 | **المُضخِّم: كرون يعيد جدولة المستحيل** | `notification/notification.service.ts` + `queues/notification.queue.ts` | ✅ | كرون الـ5 دقائق كان يلتقط كل FAILED ويعيد إدخالها → تفشل → يلتقطها ثانية… للأبد. أُضيفت `PERMANENT_FAILURE_REASONS` ويستثنيها الاستعلام؛ الصفوف تبقى FAILED مرئية للدعم |
+| 114 | **تراكم غير محدود بالطابور** | `notification/notification.service.ts` | ✅ | `removeOnFail: false` كان يحتفظ بكل مهمة فاشلة للأبد: **31 إشعاراً ولّدت 11,651 مهمة ميتة** بـRedis. صار `{ count: 500 }` |
+| 115 | **ضجيج إعادة اتصال روتينية** | `core/queue/queue.module.ts` | ✅ | بروكسي منافذ Docker Desktop على ويندوز يقطع الاتصالات الخاملة، فتعيد كل اتصالات BullMQ الاتصال وتنجح **دائماً من المحاولة 1**. صارت المحاولة 1 `debug` (روتينية) وما بعدها يبقى `warn` (مشكلة حقيقية) |
+| 116 | **توحيد Redis** | البيئة | ✅ | أُزيلت حزم `redis-server`/`redis-tools` من WSL Ubuntu نهائياً (كانت معطّلة لكنها قنبلة تعارض موقوتة)، وحُذفت حاوية دوكر ميتة قديمة. **بقيت حاوية `redis` واحدة على 6379**. خدمة ويندوز Redis: Stopped+Disabled |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-26:** `tsc` نظيف · **155/155 اختبار**. قياس فعلي قبل/بعد على 3 دقائق تشغيل: أخطاء FCM **مئات → 0** · تحذيرات إعادة المحاولة **مئات → 0** · تحذيرات Redis **18 → 0** · مفاتيح الطابور **11,656 → 2** · إجمالي أسطر ERROR **0**. الكرون صار يطبع «No failed notifications to retry» بدل إعادة جدولة 31 إشعاراً محكوماً بالفشل.
+
+---
+
+## جولة 2026-07-26 (تكملة) — إصلاح مزامنات كانت تفشل بصمت منذ البداية
+
+**التشخيص:** الباك ايند كان يدفع لموديلات **غير موجودة** بأودو، فترجع 404 وتفشل بصمت بعد 3 محاولات — أي أن وحدات القياس وحالات المادة **لم تُزامن ولا مرة** منذ كتابة الكود.
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 117 | **موديلان وهميان بأودو** | `models/catalog_reference.py` (جديد) + `__init__.py` + `ir.model.access.csv` | ✅ | `recycle.measurement.unit` و`recycle.material.condition` **لم يكونا موجودين إطلاقاً**. أُنشئا بنفس العقد الذي يكتبه `odoo.service.ts` (name/code/allows_tolerance و name/code/sort_order) + قيد تفرّد على code + صلاحيات أدمن/قراءة. v19.0.1.25.0 |
+| 118 | **المحافظة: تسمية مقابل مفتاح** | `odoo/odoo.service.ts` | ✅ | أودو يخزّن Selection **بالمفتاح** (`damascus`) والباك يرسل **التسمية** (`Damascus`) → كان يرفض إنشاء أي مستودع. أُضيف `toOdooGovernorateKey` يقبل المفتاح أو الاسم الإنكليزي أو **العربي**، والمجهول يمرّ كما هو ليبلّغ عنه أودو لا أن نخمّنه |
+| 119 | **نوع المنطقة بحروف كبيرة** | نفس الملف + الكوليكشن | ✅ | `zone_type` بأودو Selection صغير الحروف — تُطبَّع الآن. وصُحّح المثال بالكوليكشن (`receiving` لا `RECEIVING`) |
+| 120 | **سجلّ مضلِّل: "will retry" لما لا إعادة** | `notification/processors/notification.processor.ts` | ✅ | كان يطبع "will retry" حتى للوظائف التي استنفدت محاولاتها أو الدائمة الفشل — فيبدو السجل كحلقة لا نهائية وهي غير موجودة. صار: الفشل الدائم `info` بلا ضجيج، وإعلان الإعادة **فقط عند إعادة فعلية**، و«exhausted all N attempts» عند النفاد |
+
+## ملاحظات تحقّق
+- **جولة 2026-07-26 (تكملة):** `tsc` نظيف · **155/155 اختبار**. إثبات حي بعد الإصلاح: وحدة قياس → ظهرت بأودو (`recycle_measurement_unit`) ✓ · حالة مادة → ظهرت (`recycle_material_condition`) ✓ · مستودع بـ`governorate:"Damascus"` → خُزّن `damascus` مع 4 مناطق ✓ · تصنيف → ظهر بـ`recycle_product_category` ✓ · صفر أخطاء مزامنة جديدة. بيانات الاختبار حُذفت من النظامين.
+- ⚠️ **درس تشغيلي مهم:** ترقية الموديول بـ`--stop-after-init` تعدّل قاعدة البيانات لكن **الخادم الشغّال يبقى بسجلّه القديم بالذاكرة** — لازم `docker restart odoo19` بعد أي موديل جديد وإلا استمر 404.
+
+---
+
+## جولة 2026-07-26 (تكملة 2) — تدقيق آلي شامل للعقد + إعادة فتح المستودع
+
+**المنهج:** بدل ملاحقة كل خطأ وحده، بنيت **تدقيقاً آلياً**: يستخرج كل حقل يكتبه `odoo.service.ts` لكل موديل، ويقارنه بسكيما أودو الحيّة (`_fields`). كشف 12 بلاغاً — **9 إيجابيات كاذبة** (مفاتيح عابرة تُحلّ بـ`pop` داخل `create`؛ تحققت من كل واحدة يدوياً) و**3 مشاكل حقيقية**.
+
+| # | البند | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 121 | **`price` غير موجود بـ`recycle.product`** | `odoo/odoo.service.ts` | ✅ | المُعالج **لا يرسل** سعراً أصلاً، لكن `createProduct` كان يضيف `price` من نفسه → أودو يرفض → 3 محاولات → **التعويض يحذف المنتج من الباك ايند**. أودو يحمل أسعاراً لكل شريحة (`price_factory`/`price_free_facility`) تُكتب عبر مزامنة التسعير. حُذف الحقل |
+| 122 | **`recycle.product.condition.price` غير موجود** | `models/catalog_reference.py` | ✅ | ثالث موديل وهمي — تسعير المنتج حسب الحالة كان يفشل بصمت. أُنشئ بالعقد الحرفي (product_id, tier, condition_code, price) + تفرّد على الثلاثي + صلاحيات |
+| 123 | **إعادة فتح المستودع (سيناريو كامل)** | `models/warehouse.py` + XML + JS + i18n | ✅ | `action_cancel_closing` (من `closing`) و`action_reopen_warehouse` (من `inactive` → يعيد `active=True` ويمسح `closed_at`). **القاعدة الجوهرية موثّقة بالكود: لا إعادة ربط تلقائية لأي موظف أو شاحنة** — الفترة قد تطول وقد انتقلوا لمستودعات أخرى، فالربط التلقائي يخلق تعارضاً. ولا تُستدعى دوال الإغلاق عكسياً. زر لكل حالة + رسالة تنبيه صريحة |
+| 124 | **بودي التسعير خاطئ بالكوليكشن** | `postman/Dawrha.admin.postman_collection.json` | ✅ | كان `{condition, price:{...}}` والصحيح `{individual, company, factory:[{condition,price}], free_facility:[...]}` — صُحّح مع تنبيه أن الحالة يجب أن تكون موجودة فعلاً |
+
+## ملاحظات تحقّق
+- **التدقيق الآلي بعد الإصلاح: `TOTAL PROBLEMS: 0` — ✅ كل حقل يكتبه الباك موجود بأودو** (11 موديلاً).
+- **إثبات حي:** منتج → وصل أودو (id=29) و**بقي بالباك بحالة SYNCED** (لم يُحذف) ✓ · حالة مادة → وصلت ✓ · تسعير → سطران بأودو (factory 150 / free_facility 90) ✓ · **صفر أخطاء مزامنة**.
+- **إعادة الفتح: 18/18 فحص شل** — رفض من `active`، إلغاء الإغلاق بلا إعادة ربط، إعادة الفتح تُرجع `active=True`، قائمة الموظفين فارغة، ظهور بالاستعلامات، والتاريخ (شحنات + سجلات تعيين) لم يُمسّ.
+- **Redis/الكرون:** حاوية واحدة · صفر حزم WSL · صفر `ERROR` · صفر تحذيرات Redis · الكرونات تعمل (تسوية الأسطول ×3، إشعارات ×3 «لا شيء لإعادته»).
+- `tsc` نظيف · **155/155 اختبار** · بيانات الاختبار حُذفت من النظامين.

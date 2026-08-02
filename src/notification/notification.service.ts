@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, Not, In } from 'typeorm';
 import { Queue } from 'bullmq';
 import { Notification } from './entities/notification.entity';
 import { UserDevice } from '@src/auth/entities/user-device.entity';
@@ -13,6 +13,7 @@ import { NotificationJobPayload } from './interfaces/notification-payload.interf
 import {
   NOTIFICATION_BACKOFF_DELAY_MS,
   NOTIFICATION_MAX_ATTEMPTS,
+  PERMANENT_FAILURE_REASONS,
   NOTIFICATION_QUEUE_NAME,
   NOTIFICATION_SEND_JOB_NAME,
 } from './queues/notification.queue';
@@ -76,7 +77,11 @@ export class NotificationService {
           delay: NOTIFICATION_BACKOFF_DELAY_MS,
         },
         removeOnComplete: true,
-        removeOnFail: false,
+        // Keep only the most recent failures for debugging. `false` kept EVERY
+        // failed job forever: 31 doomed notifications had already piled up
+        // 11,651 dead jobs in Redis, which is what starved the connection and
+        // triggered the "Queue Redis retry" warnings.
+        removeOnFail: { count: 500 },
       },
     );
 
@@ -241,11 +246,18 @@ export class NotificationService {
     try {
       winstonLogger.log('info', 'Starting retry of failed notifications...', { channel: 'jobs' });
 
-      // Find all failed notifications (limit to 100 per run to avoid overload)
+      // Failed notifications worth retrying (max 100 per run).
+      //
+      // PERMANENT failures are excluded: re-enqueuing a notification for a user
+      // who has no registered device can never succeed, so every run would
+      // re-queue it, it would fail again, and this cron would feed itself
+      // forever — thousands of doomed jobs hammering Redis and drowning the
+      // logs. Those rows stay FAILED and visible; they are simply not retried.
       const failedNotifications = await this.notificationRepository.find({
         where: {
           status: NotificationStatus.FAILED,
           deletedAt: IsNull(),
+          failureReason: Not(In(PERMANENT_FAILURE_REASONS)),
         },
         take: 100,
         order: {

@@ -153,6 +153,27 @@ export class OnboardingService {
   }
 
   /**
+   * Copy the mobile given at the information step onto the ACCOUNT.
+   *
+   * The number lived only on the profile — `institutionPhone`, `factoryPhone`,
+   * `externalPartnerPhone` — one column per role, three places to look. So
+   * `accounts.phone` sat empty for every applicant who signed up with an email,
+   * and every screen that reads the account rather than the profile (the
+   * reviewer's listing, the account details, anything generic) showed a
+   * facility with no phone number at all while the number was right there one
+   * join away.
+   *
+   * Written only when the account has none: a person who set a phone on their
+   * own account is not overruled by a form about their premises.
+   */
+  protected async mirrorPhoneOntoAccount(accountId: string, phone?: string) {
+    if (!phone) return;
+    const account = await this.acccountRepo.findOne({ where: { id: accountId } });
+    if (!account || account.phone) return;
+    await this.acccountRepo.update(accountId, { phone });
+  }
+
+  /**
    * Validates waste category IDs and returns the entities
    *
    * @param ids - Array of waste category IDs
@@ -160,6 +181,9 @@ export class OnboardingService {
    */
   async checkWasteType(ids: string[]) {
     const uniqueIds = [...new Set(ids)];
+    if (!uniqueIds.length) {
+      throw new BadRequestException('Choose at least one waste category');
+    }
 
     const wasteTypes = await this.wasteCategoryRepo.find({
       where: {
@@ -168,7 +192,38 @@ export class OnboardingService {
     });
 
     if (wasteTypes.length !== uniqueIds.length) {
-      throw new BadRequestException('Some waste categories are invalid');
+      // NAMES the ids that were not found.
+      //
+      // "Some waste categories are invalid" told an applicant sending six ids
+      // that one of them was wrong and left them to find out which by
+      // bisection. The ids are in the request they just sent, so saying which
+      // ones failed costs nothing and is the difference between a fixable
+      // error and a guessing game.
+      const found = new Set(wasteTypes.map((w) => w.id));
+      const missing = uniqueIds.filter((id) => !found.has(id));
+      throw new BadRequestException({
+        message:
+          missing.length === uniqueIds.length
+            ? 'None of these waste categories exist'
+            : 'Some of these waste categories do not exist',
+        errorCode: 'WASTE_CATEGORY_NOT_FOUND',
+        // The offending ids, so a client can highlight them rather than clear
+        // the whole selection.
+        invalid_ids: missing,
+      });
+    }
+
+    // Inactive categories are refused too. A switched-off category is one the
+    // admin has taken out of circulation, and letting an application select it
+    // stores an interest in a material nobody can be quoted for — which
+    // surfaces much later as a buyer whose catalogue is mysteriously empty.
+    const inactive = wasteTypes.filter((w) => !w.isActive);
+    if (inactive.length) {
+      throw new BadRequestException({
+        message: 'Some of these waste categories are no longer available',
+        errorCode: 'WASTE_CATEGORY_INACTIVE',
+        invalid_ids: inactive.map((w) => w.id),
+      });
     }
 
     return wasteTypes;

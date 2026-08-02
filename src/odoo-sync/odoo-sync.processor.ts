@@ -14,36 +14,67 @@ import {
 import { OdooSyncStatus } from '@src/waste-management/enums/odoo-sync-status.enum';
 import { PricingTier } from '@src/waste-management/enums/pricing-tier.enum';
 import { Account } from '@src/user/entities/account.entity';
+import { Province } from '@src/user/entities/location/province.entity';
 import { Role } from '@src/user/enums/role.enum';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
+import { warehouseStateFromOdoo } from '@src/warehouse/enums/warehouse-state.enum';
+import { DeliveryTariff } from '@src/warehouse/entities/delivery-tariff.entity';
+import { tariffScopeFromOdoo } from '@src/warehouse/enums/delivery-tariff-scope.enum';
+import { Order } from '@src/order/entities/order.entity';
+import { OrderPart } from '@src/order/entities/order-part.entity';
+import { OrderStatus, canTransition } from '@src/order/enums/order-status.enum';
+import {
+  OrderPartStatus,
+  canTransitionPart,
+} from '@src/order/enums/order-part-status.enum';
+import {
+  autoAdvanceAfterPreparation,
+  resolvePartStatus,
+} from '@src/order/order-event-map';
+import { deriveOrderStatus } from '@src/order/derive-order-status';
+import { DistanceCache } from '@src/order/entities/distance-cache.entity';
 import { TruckEntity } from '@src/truck/entities/truck.entity';
 import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
 import { ShiftChangeRequest } from '@src/truck/entities/shift-change-request.entity';
 import { ShiftChangeRequestStatus } from '@src/truck/enums/shift-change-request-status.enum';
+import { TruckProblem } from '@src/truck/entities/truck-problem.entity';
+import { TruckHandover } from '@src/truck/entities/truck-handover.entity';
 import { TruckStatus } from '@src/truck/enums/truck-status.enum';
 import { Shift, ShiftType } from '@src/shift/entities/shift.entity';
 import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
+import { UserDevice } from '@src/auth/entities/user-device.entity';
 import { Media, OwnerType, statusMedia } from '@src/media/entities/media.entity';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
+import { WarehouseManager } from '@src/warehouse/entities/warehouse-manager.entity';
 import { NotificationService } from '@src/notification/notification.service';
 import { NotificationType } from '@src/notification/enums/notification-type.enum';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
+import { truckTypeFromOdoo } from '@src/truck/enums/truck-type.enum';
 import {
+  CancelShiftChangePayload,
   CreateWarehousePayload,
   DeleteCategoryPayload,
   DeleteProductPayload,
   DeleteConditionPayload,
+  DeleteProvincePayload,
+  CancelOrderPartPayload,
+  OrderEventPayload,
+  PushOrderPartPayload,
+  UpdateWarehousePayload,
   DeleteUnitPayload,
   DriverDecisionPayload,
   PushDriverRequestPayload,
+  PushHandoverPayload,
   PushShiftChangePayload,
+  PushTruckProblemPayload,
   ShiftChangeDecisionPayload,
   ODOO_JOBS,
   ODOO_SYNC_QUEUE,
   SyncCategoryPayload,
   SyncConditionPayload,
   SyncProductPayload,
+  SyncProvincePayload,
   SyncUnitPayload,
   SyncWarehousePayload,
   UpdatePricingPayload,
@@ -51,6 +82,36 @@ import {
 
 /** Unified logging context/channel for all Odoo-sync worker output. */
 const LOG_META = { context: 'OdooSyncProcessor', channel: 'jobs' } as const;
+
+/** One (product, condition) bucket while summing Odoo's per-zone stock rows. */
+interface InventoryTotal {
+  odooProductId: number;
+  conditionCode: string;
+  productName?: string;
+  quantity: number;
+  reserved: number;
+}
+
+/**
+ * Odoo stores shift times as a FLOAT hour (8 = 08:00, 17.0333… = 17:02) while
+ * our `shifts.start_time` / `end_time` are Postgres `time` columns. Passing the
+ * raw number through made every fleet sync die with
+ * `invalid input syntax for type time: "8"`, which silently froze the whole
+ * mirror — so the conversion happens here, once.
+ *
+ * Returns null for a missing/invalid value (the caller then keeps the previous
+ * value). Note 0 is VALID (midnight) and must not be treated as absent.
+ */
+function odooFloatToTime(value: unknown): string | null {
+  const f = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(f) || f < 0) return null;
+  // Round to the nearest minute, carrying 59.5+ up to the next hour and
+  // wrapping 24:00 back to 00:00.
+  const totalMinutes = Math.round(f * 60) % (24 * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+}
 
 @Processor(ODOO_SYNC_QUEUE)
 export class OdooSyncProcessor extends WorkerHost {
@@ -69,10 +130,22 @@ export class OdooSyncProcessor extends WorkerHost {
     private readonly warehouseRepo: Repository<Warehouse>,
     @InjectRepository(WarehouseInventory)
     private readonly inventoryRepo: Repository<WarehouseInventory>,
+    @InjectRepository(WarehouseManager)
+    private readonly warehouseManagerRepo: Repository<WarehouseManager>,
     @InjectRepository(MeasurementUnit)
     private readonly unitRepo: Repository<MeasurementUnit>,
     @InjectRepository(MaterialCondition)
     private readonly conditionRepo: Repository<MaterialCondition>,
+    @InjectRepository(Province)
+    private readonly provinceRepo: Repository<Province>,
+    @InjectRepository(DeliveryTariff)
+    private readonly tariffRepo: Repository<DeliveryTariff>,
+    @InjectRepository(Order)
+    private readonly orderRepo: Repository<Order>,
+    @InjectRepository(OrderPart)
+    private readonly orderPartRepo: Repository<OrderPart>,
+    @InjectRepository(DistanceCache)
+    private readonly distanceCacheRepo: Repository<DistanceCache>,
     @InjectRepository(TruckEntity)
     private readonly truckRepo: Repository<TruckEntity>,
     @InjectRepository(TruckAssignmentEntity)
@@ -83,6 +156,12 @@ export class OdooSyncProcessor extends WorkerHost {
     private readonly collectorRepo: Repository<CollectorProfile>,
     @InjectRepository(ShiftChangeRequest)
     private readonly shiftChangeRepo: Repository<ShiftChangeRequest>,
+    @InjectRepository(TruckProblem)
+    private readonly truckProblemRepo: Repository<TruckProblem>,
+    @InjectRepository(TruckHandover)
+    private readonly handoverRepo: Repository<TruckHandover>,
+    @InjectRepository(UserDevice)
+    private readonly userDeviceRepo: Repository<UserDevice>,
     @InjectRepository(Media)
     private readonly mediaRepo: Repository<Media>,
   ) {
@@ -98,13 +177,25 @@ export class OdooSyncProcessor extends WorkerHost {
     [ODOO_JOBS.UPDATE_PRICING]: (job) => this.updatePricing(job.data as UpdatePricingPayload),
     [ODOO_JOBS.CREATE_WAREHOUSE]: (job) => this.createWarehouse(job.data as CreateWarehousePayload),
     [ODOO_JOBS.SYNC_WAREHOUSE]: (job) => this.syncWarehouse(job.data as SyncWarehousePayload),
+    [ODOO_JOBS.UPDATE_WAREHOUSE]: (job) => this.updateWarehouse(job.data as UpdateWarehousePayload),
     [ODOO_JOBS.SYNC_UNIT]: (job) => this.syncUnit(job.data as SyncUnitPayload),
     [ODOO_JOBS.DELETE_UNIT]: (job) => this.deleteUnit(job.data as DeleteUnitPayload),
+    [ODOO_JOBS.SYNC_PROVINCE]: (job) => this.syncProvince(job.data as SyncProvincePayload),
+    [ODOO_JOBS.DELETE_PROVINCE]: (job) => this.deleteProvince(job.data as DeleteProvincePayload),
+    [ODOO_JOBS.SYNC_ALL_PROVINCES]: () => this.syncAllProvinces(),
+    [ODOO_JOBS.PUSH_ORDER_PART]: (job) => this.pushOrderPart(job.data as PushOrderPartPayload),
+    [ODOO_JOBS.CANCEL_ORDER_PART]: (job) => this.cancelOrderPart(job.data as CancelOrderPartPayload),
+    [ODOO_JOBS.APPLY_ORDER_EVENT]: (job) => this.applyOrderEvent(job.data as OrderEventPayload),
+    [ODOO_JOBS.SYNC_DELIVERY_TARIFFS]: () => this.syncDeliveryTariffs(),
     [ODOO_JOBS.SYNC_CONDITION]: (job) => this.syncCondition(job.data as SyncConditionPayload),
     [ODOO_JOBS.DELETE_CONDITION]: (job) => this.deleteCondition(job.data as DeleteConditionPayload),
     [ODOO_JOBS.SYNC_FLEET]: () => this.syncFleet(),
     [ODOO_JOBS.PUSH_DRIVER_REQUEST]: (job) => this.pushDriverRequest(job.data as PushDriverRequestPayload),
     [ODOO_JOBS.PUSH_SHIFT_CHANGE]: (job) => this.pushShiftChange(job.data as PushShiftChangePayload),
+    [ODOO_JOBS.CANCEL_SHIFT_CHANGE]: (job) => this.cancelShiftChange(job.data as CancelShiftChangePayload),
+    [ODOO_JOBS.PUSH_TRUCK_PROBLEM]: (job) => this.pushTruckProblem(job.data as PushTruckProblemPayload),
+    [ODOO_JOBS.PUSH_HANDOVER_PICKUP]: (job) => this.pushHandoverPickup(job.data as PushHandoverPayload),
+    [ODOO_JOBS.PUSH_HANDOVER_DROPOFF]: (job) => this.pushHandoverDropoff(job.data as PushHandoverPayload),
     [ODOO_JOBS.APPLY_DRIVER_DECISION]: (job) => this.applyDriverDecision(job.data as DriverDecisionPayload),
     [ODOO_JOBS.APPLY_SHIFT_CHANGE_DECISION]: (job) =>
       this.applyShiftChangeDecision(job.data as ShiftChangeDecisionPayload),
@@ -176,6 +267,10 @@ export class OdooSyncProcessor extends WorkerHost {
       const odooId = await this.odoo.createProduct({
         name: product.name,
         categoryOdooId: product.category.odooCategoryId,
+        // Odoo only accepts a unit it mirrors from this backend, so the
+        // material carries its unit CODE across instead of being given
+        // whatever default Odoo happens to hold.
+        unitCode: product.unitType,
       });
       product.odooProductId = odooId;
     }
@@ -221,9 +316,13 @@ export class OdooSyncProcessor extends WorkerHost {
       await this.odoo.replaceConditionPrices(
         product.odooProductId,
         odooTier,
-        rows
-          .filter((r) => r.conditionCode)
-          .map((r) => ({ conditionCode: r.conditionCode!, price: Number(r.price) })),
+        // A material with no conditions is priced once for the tier; that row
+        // has a null conditionCode and MUST travel too — filtering it out left
+        // such materials priceless on the Odoo side.
+        rows.map((r) => ({
+          conditionCode: r.conditionCode ?? null,
+          price: Number(r.price),
+        })),
       );
     }
   }
@@ -261,6 +360,10 @@ export class OdooSyncProcessor extends WorkerHost {
       latitude: warehouse.latitude != null ? Number(warehouse.latitude) : undefined,
       longitude: warehouse.longitude != null ? Number(warehouse.longitude) : undefined,
       governorate: warehouse.governorate ?? undefined,
+      // Odoo now REQUIRES an address on creation, so it has to travel. Without
+      // this every backend-created warehouse would be refused on the far side
+      // and sit failing in the queue forever.
+      address: warehouse.address ?? undefined,
       zones: warehouse.zones ?? undefined,
     });
 
@@ -304,20 +407,35 @@ export class OdooSyncProcessor extends WorkerHost {
   // --- Material conditions (backend -> Odoo) ----------------------------------
   /** Pushes an admin-managed grade so the Odoo sorting UI can offer it. */
   private async syncCondition(payload: SyncConditionPayload) {
-    const condition = await this.conditionRepo.findOne({ where: { id: payload.conditionId } });
+    const condition = await this.conditionRepo.findOne({
+      where: { id: payload.conditionId },
+      relations: ['product'],
+    });
     if (!condition) return;
+
+    // The grade travels WITH its material. Odoo's sorter grades a specific
+    // material, so a grade pushed without one would appear on every material's
+    // picker — which is exactly the global list this move got rid of.
+    const productOdooId = condition.product?.odooProductId;
+    if (!productOdooId) {
+      // The material has not reached Odoo yet; the product sync will bring the
+      // grade along, and the reconcile pass re-pushes anything still missing.
+      return;
+    }
 
     if (condition.odooConditionId) {
       await this.odoo.updateMaterialCondition(condition.odooConditionId, {
         name: condition.nameEn,
         code: condition.code,
         sort_order: condition.sortOrder,
+        product_odoo_id: productOdooId,
       });
     } else {
       condition.odooConditionId = await this.odoo.createMaterialCondition({
         name: condition.nameEn,
         code: condition.code,
         sortOrder: condition.sortOrder,
+        productOdooId,
       });
     }
     condition.odooSyncStatus = OdooSyncStatus.SYNCED;
@@ -328,12 +446,380 @@ export class OdooSyncProcessor extends WorkerHost {
     await this.odoo.deleteMaterialCondition(payload.odooConditionId);
   }
 
+  /**
+   * Pushes a backend warehouse edit to Odoo.
+   *
+   * Without this the two drifted: an admin renaming a warehouse here saw the new
+   * name, while every Odoo screen, order and report kept the old one.
+   */
+  private async updateWarehouse(payload: UpdateWarehousePayload) {
+    const warehouse = await this.warehouseRepo.findOne({
+      where: { id: payload.warehouseId },
+    });
+    if (!warehouse?.odooWarehouseId) return;
+    await this.odoo.updateRecycleWarehouse(warehouse.odooWarehouseId, {
+      name: warehouse.name,
+      code: warehouse.code,
+      capacity: warehouse.capacity,
+    });
+  }
+
+  // --- Buyer orders -----------------------------------------------------------
+  /**
+   * Pushes one part of a buyer's order into Odoo, where a warehouse works it.
+   *
+   * Idempotent on both sides: Odoo keys on the part id, and a part that already
+   * carries an `odooOrderId` short-circuits here — a retry must never make a
+   * second warehouse prepare the same goods.
+   */
+  private async pushOrderPart(payload: PushOrderPartPayload) {
+    const part = await this.orderPartRepo.findOne({
+      where: { id: payload.partId },
+      relations: ['order', 'warehouse', 'lines'],
+    });
+    if (!part || part.odooOrderId) return;
+
+    const warehouseOdooId = part.warehouse?.odooWarehouseId;
+    if (!warehouseOdooId) {
+      throw new Error(`Warehouse ${part.warehouseId} is not synced to Odoo yet`);
+    }
+
+    const account = await this.accountRepo.findOne({
+      where: { id: part.order.buyerAccountId },
+    });
+
+    // How many parts this buyer order was split into, and which one this is.
+    // Odoo needs both: a SPLIT order is approved by the administrator as one
+    // decision, not by each warehouse manager for their own piece — a buyer
+    // waiting on three warehouses should not have their order half-approved
+    // and stuck. Without the group id Odoo sees three unrelated orders and has
+    // no way to know they are one.
+    const siblingCount = await this.orderPartRepo.count({
+      where: { orderId: part.orderId },
+    });
+
+    const result = await this.odoo.pushOrderPart({
+      part_id: part.id,
+      order_id: part.orderId,
+      part_sequence: part.sequence,
+      part_count: siblingCount,
+      factory_id: part.order.buyerProfileId,
+      customer_name: account?.name ?? 'Buyer',
+      customer_email: account?.email ?? undefined,
+      warehouse_odoo_id: warehouseOdooId,
+      // Odoo prices by buyer tier, and the two roles differ only in delivery.
+      order_type:
+        part.order.buyerRole === Role.FACTORY ? 'factory' : 'free_facility',
+      lines: (part.lines ?? []).map((line) => ({
+        product_odoo_id: line.odooProductId as number,
+        quantity: Number(line.quantity),
+        condition: line.conditionCode ?? null,
+        price_unit: Number(line.unitPrice),
+      })),
+    });
+
+    part.odooOrderId = result.odoo_id;
+    await this.orderPartRepo.save(part);
+
+    // Reserve only after the order exists in Odoo: the reservation lives on
+    // that record, and reserving before it exists would leave stock held by
+    // nothing.
+    const reservation = await this.odoo.reserveOrderStock(result.odoo_id);
+    part.stockReserved = reservation?.reserved === true;
+    await this.orderPartRepo.save(part);
+
+    if (!part.stockReserved) {
+      winstonLogger.warn(
+        `Order part ${part.id} could not reserve stock in ${part.warehouse?.name}`,
+        LOG_META,
+      );
+    }
+  }
+
+  /** The buyer cancelled before the goods were committed. */
+  private async cancelOrderPart(payload: CancelOrderPartPayload) {
+    const part = await this.orderPartRepo.findOne({
+      where: { id: payload.partId },
+    });
+    if (!part?.odooOrderId) return;
+    await this.odoo.cancelOrderPart(part.id, payload.reason);
+    part.stockReserved = false;
+    await this.orderPartRepo.save(part);
+  }
+
+  /**
+   * Applies one thing a warehouse did to the buyer's order.
+   *
+   * The event → status mapping is a lookup table, and an unrecognised event is
+   * ignored rather than guessed at: inventing a status from an event we do not
+   * understand is how an order ends up claiming to be somewhere it is not.
+   */
+  private async applyOrderEvent(payload: OrderEventPayload) {
+    const part = await this.orderPartRepo.findOne({
+      where: { id: payload.partId },
+      relations: ['order'],
+    });
+    if (!part) {
+      winstonLogger.warn(
+        `Odoo reported on unknown order part ${payload.partId}`,
+        LOG_META,
+      );
+      return;
+    }
+
+    // Odoo may have created the order without our push recording the id.
+    if (!part.odooOrderId) {
+      part.odooOrderId = payload.odooOrderId;
+    }
+    if (payload.invoiceNumber) part.invoiceNumber = payload.invoiceNumber;
+    if (payload.outputZone) part.outputZoneName = payload.outputZone;
+    if (payload.rejectReason) part.rejectReason = payload.rejectReason;
+
+    const target = resolvePartStatus(payload.event, payload.handoverType);
+    if (target && canTransitionPart(part.status, target)) {
+      part.status = target;
+      this.stampPart(part, target);
+
+      // A collection order is ready the instant it is prepared; a delivery
+      // waits for the manager to release it to a carrier.
+      const next = autoAdvanceAfterPreparation(target, part.order.fulfilmentMode);
+      if (next && canTransitionPart(part.status, next)) {
+        part.status = next;
+      }
+    }
+
+    // Whatever stops the part also ends its hold on the stock.
+    if (
+      part.status === OrderPartStatus.REJECTED ||
+      part.status === OrderPartStatus.STOCK_DEDUCTED
+    ) {
+      part.stockReserved = false;
+    }
+    await this.orderPartRepo.save(part);
+
+    await this.refreshOrderStatus(part.orderId);
+  }
+
+  /**
+   * Recomputes the buyer-facing status from every part. Derived rather than
+   * set, because a split order that moved on while one warehouse was still
+   * working would be telling the buyer something they could act on and be
+   * wrong about.
+   */
+  private async refreshOrderStatus(orderId: string) {
+    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    if (!order) return;
+    const parts = await this.orderPartRepo.find({ where: { orderId } });
+
+    const derived = deriveOrderStatus(order.fulfilmentMode, parts);
+    if (!derived || derived === order.status) return;
+    if (!canTransition(order.status, derived)) return;
+
+    order.status = derived;
+    const now = new Date();
+    if (derived === OrderStatus.PREPARING) order.preparingAt = now;
+    if (derived === OrderStatus.DELIVERED) order.deliveredAt = now;
+    await this.orderRepo.save(order);
+    winstonLogger.info(
+      `Order ${order.orderNumber} is now ${derived}`,
+      LOG_META,
+    );
+  }
+
+  private stampPart(part: OrderPart, status: OrderPartStatus): void {
+    const now = new Date();
+    const stamps: Partial<Record<OrderPartStatus, () => void>> = {
+      [OrderPartStatus.STOCK_DEDUCTED]: () => (part.stockDeductedAt = now),
+      [OrderPartStatus.IN_OUTPUT_ZONE]: () => (part.finishedAt = now),
+      [OrderPartStatus.DISPATCHED]: () => (part.dispatchedAt = now),
+      [OrderPartStatus.DELIVERED]: () => (part.deliveredAt = now),
+    };
+    stamps[status]?.();
+  }
+
+  // --- Delivery tariffs (Odoo → backend) -------------------------------------
+  /**
+   * Rebuilds the delivery-pricing mirror from Odoo, which authors it.
+   *
+   * A full replace, not a diff: the table is tiny, and replacing it means a
+   * tariff the admin DELETED in Odoo actually disappears here — a diff would
+   * leave it behind and keep quoting a price that no longer exists.
+   */
+  private async syncDeliveryTariffs() {
+    const rows = await this.odoo.fetchDeliveryTariffs();
+
+    // Resolve Odoo warehouse ids to backend ids in ONE query rather than one
+    // lookup per row.
+    const odooWarehouseIds = rows
+      .map((r) => r.odoo_warehouse_id)
+      .filter((id): id is number => typeof id === 'number');
+    const warehouses = odooWarehouseIds.length
+      ? await this.warehouseRepo.find({
+          where: { odooWarehouseId: In(odooWarehouseIds) },
+        })
+      : [];
+    const warehouseByOdooId = new Map(
+      warehouses.map((w) => [w.odooWarehouseId as number, w.id]),
+    );
+
+    const keptIds: string[] = [];
+    for (const row of rows) {
+      const scope = tariffScopeFromOdoo(row.scope);
+      if (!scope) continue; // unknown scope: skip rather than mis-price
+
+      let tariff = await this.tariffRepo.findOne({
+        where: { odooTariffId: row.odoo_id },
+      });
+      if (!tariff) {
+        tariff = this.tariffRepo.create({ odooTariffId: row.odoo_id });
+      }
+      tariff.scope = scope;
+      tariff.warehouseId =
+        warehouseByOdooId.get(row.odoo_warehouse_id) ?? undefined;
+      // Odoo sends the backend's OWN province uuid (a related field on the
+      // tariff's province), so this links directly with no name matching.
+      tariff.provinceId = row.province_backend_id ?? undefined;
+      tariff.baseFee = String(row.base_fee ?? 0);
+      tariff.ratePerKm = String(row.rate_per_km ?? 0);
+      tariff.minFee = String(row.min_fee ?? 0);
+      tariff.currency = row.currency || 'JOD';
+      tariff.isActive = row.active !== false;
+      tariff.syncedAt = new Date();
+      const saved = await this.tariffRepo.save(tariff);
+      keptIds.push(saved.id);
+    }
+
+    // Anything Odoo no longer reports was deleted there.
+    const stale = await this.tariffRepo.find();
+    const removed = stale.filter((t) => !keptIds.includes(t.id));
+    for (const t of removed) await this.tariffRepo.delete(t.id);
+
+    winstonLogger.info(
+      `Delivery tariffs mirrored: ${keptIds.length} kept, ${removed.length} removed`,
+      LOG_META,
+    );
+  }
+
+  // --- Governorates (backend → Odoo) -----------------------------------------
+  /**
+   * Mirrors one governorate into Odoo, where warehouses link to it instead of
+   * to a hard-coded Selection. Keyed by the backend uuid on the Odoo side, so
+   * a rename updates the same row and never spawns a second 'Damascus'.
+   */
+  private async syncProvince(payload: SyncProvincePayload) {
+    const province = await this.provinceRepo.findOne({
+      where: { id: payload.provinceId },
+    });
+    if (!province) return;
+    await this.odoo.upsertProvince({
+      id: province.id,
+      name_en: province.name_en,
+      name_ar: province.name_ar,
+    });
+  }
+
+  /**
+   * The admin deleted a governorate here. Odoo ARCHIVES its copy rather than
+   * unlinking it: warehouses created while it existed still point at it, and
+   * that history has to survive the delete.
+   */
+  private async deleteProvince(payload: DeleteProvincePayload) {
+    await this.odoo.archiveProvince(payload.backendProvinceId);
+  }
+
+  /**
+   * Full governorate re-push (startup + reconcile cron). A single push can be
+   * lost while Odoo is down; this replays the whole list, so the mirror
+   * converges without anyone re-saving each row by hand.
+   */
+  private async syncAllProvinces() {
+    const provinces = await this.provinceRepo.find();
+    const result = await this.odoo.syncAllProvinces(
+      provinces.map((p) => ({
+        id: p.id,
+        name_en: p.name_en,
+        name_ar: p.name_ar,
+      })),
+    );
+    winstonLogger.info(
+      `Governorate sync: ${result?.synced ?? provinces.length} mirrored, ` +
+        `${result?.archived ?? 0} archived in Odoo`,
+      LOG_META,
+    );
+  }
+
   // --- Warehouse info + inventory (Odoo → backend) ----------------------------
   /**
    * Mirrors one warehouse FROM Odoo: master data (name/code — Odoo-side edits
    * win) and then the stock lines. Triggered by the admin sync endpoint and by
    * the Odoo webhooks, so any change in Odoo lands here within seconds.
    */
+  /**
+   * Mirror the manager Odoo assigned to a warehouse into `warehouse_managers`.
+   *
+   * Odoo owns this assignment — its admin dashboard has the "Change Manager"
+   * action and the backend deliberately has none — so the row here is a copy,
+   * matched on `odooUserId` rather than on email: an admin correcting a typo in
+   * someone's address must not create a second manager.
+   *
+   * A REMOVED assignment is mirrored too. Leaving the old row behind would be
+   * the worse failure of the two: the API would keep naming someone who is no
+   * longer responsible for the site, which reads as fact rather than as stale
+   * data.
+   *
+   * Failures are logged, not thrown: the caller's real work is the stock sync,
+   * and losing a whole inventory refresh because a manager lookup timed out
+   * would trade a small staleness for a large one.
+   */
+  private async mirrorWarehouseManager(warehouse: Warehouse): Promise<void> {
+    try {
+      const odooManager = await this.odoo.fetchWarehouseManager(
+        warehouse.odooWarehouseId,
+      );
+
+      const existing = await this.warehouseManagerRepo.findOne({
+        where: { warehouse: { id: warehouse.id } },
+        relations: ['warehouse'],
+      });
+
+      if (!odooManager) {
+        if (existing) {
+          await this.warehouseManagerRepo.remove(existing);
+          winstonLogger.info(
+            `Warehouse ${warehouse.name} has no manager in Odoo — the mirrored one was dropped`,
+            LOG_META,
+          );
+        }
+        return;
+      }
+
+      // Matched on the Odoo user id, so the same person moving between
+      // warehouses updates one row instead of accumulating them.
+      let manager =
+        (await this.warehouseManagerRepo.findOne({
+          where: { odooUserId: odooManager.id },
+        })) ?? this.warehouseManagerRepo.create({ odooUserId: odooManager.id });
+
+      manager.fullName = odooManager.name ?? manager.fullName ?? '';
+      manager.email = odooManager.email || odooManager.login || manager.email;
+      manager.phone = odooManager.phone || manager.phone || '';
+      manager.warehouse = warehouse;
+      await this.warehouseManagerRepo.save(manager);
+
+      // The previous holder, if somebody else now has the job.
+      if (existing && existing.id !== manager.id) {
+        await this.warehouseManagerRepo.remove(existing);
+      }
+    } catch (error) {
+      winstonLogger.warn(
+        `Could not mirror the manager of warehouse ${warehouse.name}: ${
+          (error as Error)?.message ?? error
+        }`,
+        LOG_META,
+      );
+    }
+  }
+
   private async syncWarehouse(payload: SyncWarehousePayload) {
     const warehouse = await this.warehouseRepo.findOne({ where: { id: payload.warehouseId } });
     if (!warehouse) return;
@@ -343,31 +829,106 @@ export class OdooSyncProcessor extends WorkerHost {
     if (info) {
       if (info.name) warehouse.name = info.name;
       if (info.code) warehouse.code = info.code;
+      if (info.governorate) warehouse.governorate = info.governorate;
+      // A warehouse that MOVED invalidates every cached distance to it: those
+      // rows price deliveries per kilometre, so keeping them would charge
+      // buyers for a journey to where the warehouse used to be.
+      const moved =
+        (info.latitude != null && String(info.latitude) !== warehouse.latitude) ||
+        (info.longitude != null && String(info.longitude) !== warehouse.longitude);
+      if (info.latitude != null) warehouse.latitude = String(info.latitude);
+      if (info.longitude != null) warehouse.longitude = String(info.longitude);
+      if (moved) {
+        await this.distanceCacheRepo.delete({ warehouseId: warehouse.id });
+        winstonLogger.info(
+          `Warehouse ${warehouse.name} moved — cached distances to it were dropped`,
+          LOG_META,
+        );
+      }
+      // Lifecycle comes from Odoo, which owns closing/reopening. Order
+      // allocation reads it, so a warehouse put into `closing` there stops
+      // receiving new orders here within one sync.
+      // Capacity and address are edited in Odoo and were never read back, so
+      // the backend kept whatever it was created with. Capacity is the worse
+      // of the two: load is reported as a percentage of it, so the two systems
+      // showed different fullness for the same building.
+      if (info.capacity != null && info.capacity !== false) {
+        warehouse.capacity = Number(info.capacity) || undefined;
+      }
+      if (info.address) warehouse.address = info.address;
+      warehouse.state = warehouseStateFromOdoo(info.state);
+      // The province link travels as the backend's OWN uuid (a related field on
+      // recycle.warehouse), so this is a direct assignment — no name matching.
+      warehouse.provinceId = info.province_backend_id || warehouse.provinceId;
     }
+
+    // 1b) The manager Odoo assigned to this warehouse.
+    //
+    //     This was missing, and it is why `GET /admin/warehouses` reported
+    //     `manager: null` for a warehouse that visibly HAS one in Odoo. The
+    //     read APIs join the relation correctly — there was simply no row in
+    //     `warehouse_managers` to join to, because nothing but two manual
+    //     admin routes (`:id/sync-manager`, `import-from-odoo`) ever wrote one.
+    //     So the manager appeared only after somebody remembered to call a
+    //     sync by hand, which is not a synchronisation — it is a chore.
+    await this.mirrorWarehouseManager(warehouse);
 
     // 2) Stock lines — one mirror row per (product, condition). The sorter in
     //    Odoo grades every processed quantity, so lines carry condition_code;
     //    unsorted stock arrives without one and lands under UNGRADED.
     const lines = await this.odoo.fetchWarehouseInventory(warehouse.odooWarehouseId);
 
-    const seenRowIds = new Set<string>();
+    // Odoo keeps ONE stock row per (product, condition, STORAGE ZONE), so the
+    // same grade of the same material appears several times — once per zone.
+    // The mirror is zone-agnostic (the backend never picks zones; the output
+    // employee does, inside Odoo), so the rows are SUMMED first. Writing them
+    // one by one would let the last zone overwrite the others and the mirror
+    // would report a fraction of the real stock.
+    const totals = new Map<string, InventoryTotal>();
     for (const line of lines) {
       const odooProductId = Array.isArray(line.product_id) ? line.product_id[0] : line.product_id;
+      if (!odooProductId) continue;
       const productName = Array.isArray(line.product_id) ? line.product_id[1] : undefined;
+      // The Odoo field is `condition` (recycle.stock). Unsorted stock has none
+      // and lands under UNGRADED.
       const conditionCode =
-        typeof line.condition_code === 'string' && line.condition_code
-          ? line.condition_code.toUpperCase()
+        typeof line.condition === 'string' && line.condition
+          ? line.condition.toUpperCase()
           : UNGRADED_CONDITION;
 
+      const key = `${odooProductId}|${conditionCode}`;
+      const acc = totals.get(key) ?? {
+        odooProductId,
+        conditionCode,
+        productName,
+        quantity: 0,
+        reserved: 0,
+      };
+      acc.productName = acc.productName ?? productName;
+      acc.quantity += Number(line.quantity ?? 0);
+      acc.reserved += Number(line.reserved_qty ?? 0);
+      totals.set(key, acc);
+    }
+
+    const seenRowIds = new Set<string>();
+    for (const acc of totals.values()) {
       let row = await this.inventoryRepo.findOne({
-        where: { warehouseId: warehouse.id, odooProductId, conditionCode },
+        where: {
+          warehouseId: warehouse.id,
+          odooProductId: acc.odooProductId,
+          conditionCode: acc.conditionCode,
+        },
       });
       if (!row) {
-        row = this.inventoryRepo.create({ warehouseId: warehouse.id, odooProductId, conditionCode });
+        row = this.inventoryRepo.create({
+          warehouseId: warehouse.id,
+          odooProductId: acc.odooProductId,
+          conditionCode: acc.conditionCode,
+        });
       }
-      row.productName = productName ?? row.productName;
-      row.quantity = String(line.quantity ?? 0);
-      row.reservedQuantity = String(line.reserved_quantity ?? 0);
+      row.productName = acc.productName ?? row.productName;
+      row.quantity = String(acc.quantity);
+      row.reservedQuantity = String(acc.reserved);
       row.syncedAt = new Date();
       const saved = await this.inventoryRepo.save(row);
       seenRowIds.add(saved.id);
@@ -403,8 +964,26 @@ export class OdooSyncProcessor extends WorkerHost {
       if (!shift) shift = this.shiftRepo.create({ name: os.name });
       shift.odooShiftId = os.id;
       shift.name = os.name ?? shift.name;
-      if (os.start_time) shift.startTime = os.start_time;
-      if (os.end_time) shift.endTime = os.end_time;
+      const start = odooFloatToTime(os.start_time);
+      const end = odooFloatToTime(os.end_time);
+      if (start) shift.startTime = start;
+      if (end) shift.endTime = end;
+      // Scope mirror. A GLOBAL shift applies to every warehouse (and is the
+      // only kind an unaccepted driver can pick during onboarding). A SPECIFIC
+      // shift lists its warehouses; drivers may only request changes into a
+      // shift that is global OR that includes their own warehouse.
+      shift.isGlobal = !!os.is_global;
+      shift.odooWarehouseIds = os.is_global
+        ? []
+        : (Array.isArray(os.warehouse_ids) ? os.warehouse_ids : []);
+      // Keep the deprecated single column roughly meaningful for any legacy
+      // reader: the first warehouse, or null when global / unset.
+      shift.odooWarehouseId = shift.odooWarehouseIds.length
+        ? shift.odooWarehouseIds[0]
+        : null;
+      // Grace margin (minutes) — the handover crons use it as the pickup/
+      // dropoff tolerance.
+      shift.tolerance = Number.isFinite(os.tolerance) ? os.tolerance : 0;
       // Audience mirrors Odoo: only DRIVER shifts reach the driver app.
       shift.shiftType = os.shift_type === 'warehouse' ? ShiftType.WAREHOUSE : ShiftType.DRIVER;
       shift.isActive = true;
@@ -425,6 +1004,7 @@ export class OdooSyncProcessor extends WorkerHost {
       const isNew = !truck;
       const prevWarehouseId = truck?.warehouseId ?? null;
       if (!truck) truck = this.truckRepo.create({ odooTruckId: ot.id, status: TruckStatus.ACTIVE });
+      truck.truckType = truckTypeFromOdoo(ot.truck_type);
       truck.model = ot.model ?? truck.model ?? '';
       truck.year = ot.year ?? truck.year ?? 0;
       truck.plateNumber = ot.plate_number ?? truck.plateNumber;
@@ -557,7 +1137,12 @@ export class OdooSyncProcessor extends WorkerHost {
   private async pushDriverRequest(payload: PushDriverRequestPayload) {
     const account = await this.accountRepo.findOne({ where: { id: payload.accountId } });
     if (!account) return;
-    const profile = await this.collectorRepo.findOne({ where: { account: { id: account.id } } });
+    // `province` is joined so Odoo receives the province NAME (it has no
+    // provinces table of its own — showing a raw uuid there would be useless).
+    const profile = await this.collectorRepo.findOne({
+      where: { account: { id: account.id } },
+      relations: ['province'],
+    });
     if (!profile) return;
 
     // The Odoo admin reviews the uploaded documents inline, so ship them
@@ -566,12 +1151,40 @@ export class OdooSyncProcessor extends WorkerHost {
       where: { ownerId: profile.id, ownerType: OwnerType.COLLECTOR },
     });
 
+    // The driver's shift travels with his info: he picked it during
+    // onboarding (a mirror of an Odoo driver shift), so Odoo's assignment
+    // screen can filter drivers by shift.
+    const shift = profile.shiftId
+      ? await this.shiftRepo.findOne({ where: { id: profile.shiftId } })
+      : null;
+
+    // PostGIS stores the point as { type:'Point', coordinates:[lng, lat] }.
+    const coords = (profile as any).coordinates?.coordinates;
+    const [longitude, latitude] = Array.isArray(coords) ? coords : [null, null];
+
     await this.odoo.createDriverRequest({
       backendDriverId: profile.id,
       name: account.name,
       email: account.email,
       phone: account.phone ?? null,
-      images: media.map((m) => ({ mediaId: m.id, fileType: m.fileType, url: m.url })),
+      nationalId: profile.NationalID ?? null,
+      shiftOdooId: shift?.odooShiftId ?? null,
+      // Prefer Arabic (the Odoo admin UI is Arabic-first), fall back to English.
+      provinceName: profile.province?.name_ar || profile.province?.name_en || null,
+      address: (profile as any).address ?? null,
+      locationNote: (profile as any).DesscriptLocation ?? null,
+      latitude: typeof latitude === 'number' ? latitude : null,
+      longitude: typeof longitude === 'number' ? longitude : null,
+      // The reviewer's verdict travels with each file. The push is an upsert
+      // that replaces Odoo's whole image list, so sending files alone reset the
+      // judgement on every document the driver had not touched.
+      images: media.map((m) => ({
+        mediaId: m.id,
+        fileType: m.fileType,
+        url: m.url,
+        status: m.status,
+        reuploadRequested: !!m.reuploadRequestedAt,
+      })),
     });
   }
 
@@ -583,6 +1196,39 @@ export class OdooSyncProcessor extends WorkerHost {
     });
     if (!profile?.account) return;
 
+    // Resolve the mirrored warehouse row when Odoo tells us which warehouse
+    // the driver belongs to (on acceptance, or on an admin warehouse move).
+    const warehouse = payload.warehouseOdooId
+      ? await this.warehouseRepo.findOne({ where: { odooWarehouseId: payload.warehouseOdooId } })
+      : null;
+
+    // Pure warehouse move (admin relocated the driver in Odoo): update the
+    // mirror only — no status change, no notification.
+    if (payload.warehouseChangeOnly) {
+      if (warehouse) {
+        profile.warehouseId = warehouse.id;
+        await this.collectorRepo.save(profile);
+      }
+      return;
+    }
+
+    // The reviewer marked a document unacceptable and NOTHING ELSE.
+    //
+    // Rejecting a document and telling the driver to replace it used to be one
+    // act, so the reviewer could not mark the first of four documents bad
+    // without ending the review and sending him off to start fixing. This
+    // branch is the first half on its own: the mirror moves so his re-upload
+    // route will accept the file later, and he is told nothing.
+    if (payload.documentsOnly) {
+      if (payload.rejectedMediaIds?.length) {
+        await this.mediaRepo.update(
+          { id: In(payload.rejectedMediaIds), ownerId: profile.id },
+          { status: statusMedia.REJECTED },
+        );
+      }
+      return;
+    }
+
     // Odoo controls the whole driver lifecycle: explicit status wins
     // (BLOCKED / NEED_CHANGES / ...); plain approved maps to ACTIVE/REJECTED.
     const newStatus =
@@ -590,13 +1236,51 @@ export class OdooSyncProcessor extends WorkerHost {
       (payload.approved ? AccountStatus.ACTIVE : AccountStatus.REJECTED);
     await this.accountRepo.update(profile.account.id, { accountStatus: newStatus });
 
+    if (warehouse) {
+      profile.warehouseId = warehouse.id;
+      await this.collectorRepo.save(profile);
+    }
+
+    // A BLOCKED driver is thrown out immediately: wiping every device's
+    // refresh + FCM token kills token renewal (his short-lived access token
+    // simply expires), and the login strategy's BLOCKED handler refuses any
+    // new sign-in until Odoo unblocks him.
+    if (newStatus === AccountStatus.BLOCKED) {
+      await this.userDeviceRepo.update(
+        { accountId: profile.account.id },
+        { refreshToken: '', fcmToken: '' },
+      );
+    }
+
     // Documents the Odoo admin flagged: mark them REJECTED so the driver's
     // re-upload endpoint (PATCH /media/:id/reupload) accepts exactly those.
     // Ownership is enforced — only this driver's media can be touched.
+    //
+    // `requestReupload` additionally records them as ASKED FOR. That record,
+    // not the rejection, is what releases him back into the queue once he has
+    // answered: a document rejected but never requested is one he was never
+    // told about and cannot see, and counting it would hold him in
+    // NEED_CHANGES for ever with nothing on his screen left to fix.
     if (payload.rejectedMediaIds?.length) {
       await this.mediaRepo.update(
         { id: In(payload.rejectedMediaIds), ownerId: profile.id },
-        { status: statusMedia.REJECTED },
+        payload.cancelReupload
+          ? // The reviewer gave up waiting. The request is withdrawn and the
+            // status is deliberately left alone: a document they called
+            // unacceptable stays unacceptable, so accepting the driver is still
+            // blocked by it while rejecting him is now possible. Clearing the
+            // status here would turn "I stopped waiting" into "I accept what
+            // you sent", silently.
+            { reuploadRequestedAt: null, reuploadReason: null }
+          : {
+              status: statusMedia.REJECTED,
+              ...(payload.requestReupload
+                ? {
+                    reuploadRequestedAt: new Date(),
+                    reuploadReason: payload.rejectionReason ?? null,
+                  }
+                : {}),
+            },
       );
     }
 
@@ -614,45 +1298,168 @@ export class OdooSyncProcessor extends WorkerHost {
       }
     }
 
-    const statusMessages: Record<string, [string, string]> = {
-      [AccountStatus.ACTIVE]: ['Driver request approved', 'Your driver account has been approved.'],
+    const statusMessages: Record<string, [string, string, string?, string?]> = {
+      [AccountStatus.ACTIVE]: [
+        'Driver request approved',
+        'Your request has been approved. You will be assigned to a truck soon.',
+        'notifications.driverApproved.title',
+        'notifications.driverApproved.body',
+      ],
       [AccountStatus.REJECTED]: ['Driver request rejected', `Your driver request was rejected. ${payload.rejectionReason ?? ''}`.trim()],
       [AccountStatus.BLOCKED]: ['Account blocked', `Your driver account has been blocked. ${payload.rejectionReason ?? ''}`.trim()],
       [AccountStatus.NEED_CHANGES]: ['Changes requested', `Please update your information. ${payload.rejectionReason ?? ''}`.trim()],
+      // The admin re-opened a previously rejected application. Without this
+      // entry the lookup fell through to the REJECTED message and told the
+      // driver he was rejected — the exact opposite of what happened.
+      [AccountStatus.PENDING_APPROVAL]: payload.cancelReupload
+        ? // The driver is looking at a screen telling him to re-upload
+          // something nobody is waiting for any more. Reusing the generic
+          // "re-opened" wording would leave that demand standing.
+          [
+            'No documents needed from you',
+            'The document request was withdrawn. Your application is under review again with what you already sent.',
+          ]
+        : [
+            'Driver request re-opened',
+            'Your driver request is under review again.',
+          ],
     };
-    const [title, body] = statusMessages[newStatus] ?? statusMessages[AccountStatus.REJECTED];
-    await this.notifyDriver(profile.account.id, title, body);
+    const [title, body, titleKey, bodyKey] =
+      statusMessages[newStatus] ?? statusMessages[AccountStatus.REJECTED];
+    await this.notifyDriver(profile.account.id, title, body, titleKey, bodyKey);
   }
 
   // --- Shift-change requests (backend -> Odoo -> backend) ----------------------
-  /** Mirrors a driver's shift-change request to Odoo where the admin decides. */
+  /**
+   * Mirrors a driver's shift-change request to Odoo where his WAREHOUSE
+   * MANAGER decides (pending → processing → accepted-with-a-truck/rejected).
+   */
   private async pushShiftChange(payload: PushShiftChangePayload) {
     const request = await this.shiftChangeRepo.findOne({
       where: { id: payload.requestId },
-      relations: ['driver', 'driver.account', 'truck', 'shift'],
+      relations: ['driver', 'driver.account', 'driver.shift', 'driver.warehouse', 'shift'],
     });
+    // Deleted before the job ran (driver cancelled a still-queued push).
     if (!request) return;
+
+    const requestedShiftOdooId = request.shift?.odooShiftId;
+    if (!requestedShiftOdooId) {
+      winstonLogger.warn(
+        `Shift-change ${request.id} not pushed: requested shift has no Odoo id`,
+        LOG_META,
+      );
+      return;
+    }
 
     const odooId = await this.odoo.createShiftChangeRequest({
       backendRequestId: request.id,
       backendDriverId: request.driverId,
       driverName: request.driver?.account?.name ?? '',
-      truckOdooId: request.truck?.odooTruckId ?? null,
-      shiftOdooId: request.shift?.odooShiftId ?? null,
+      requestedShiftOdooId,
+      currentShiftOdooId: request.driver?.shift?.odooShiftId ?? null,
+      reason: request.reason ?? '',
+      warehouseOdooId: request.driver?.warehouse?.odooWarehouseId ?? null,
     });
     request.odooRequestId = odooId;
     await this.shiftChangeRepo.save(request);
   }
 
-  /** Applies the Odoo admin's decision: swap the assignment or reject with reason. */
+  /** Driver cancelled his still-PENDING request → remove the Odoo mirror too. */
+  private async cancelShiftChange(payload: CancelShiftChangePayload) {
+    await this.odoo.cancelShiftChangeRequest(payload.backendRequestId);
+  }
+
+  // --- Truck problems (backend -> Odoo, read-only there) -----------------------
+  /** Mirrors a driver's truck-problem report for his warehouse manager to read. */
+  private async pushTruckProblem(payload: PushTruckProblemPayload) {
+    const problem = await this.truckProblemRepo.findOne({
+      where: { id: payload.problemId },
+      relations: ['driver', 'driver.account', 'driver.warehouse'],
+    });
+    if (!problem) return;
+
+    // The truck he is currently on (if any) gives the manager context.
+    const assignment = await this.assignmentRepo.findOne({
+      where: { driverId: problem.driverId },
+      relations: ['truck'],
+    });
+
+    const odooId = await this.odoo.createTruckProblem({
+      backendProblemId: problem.id,
+      backendDriverId: problem.driverId,
+      driverName: problem.driver?.account?.name ?? '',
+      reason: problem.reason,
+      imageUrls: problem.images ?? [],
+      truckOdooId: assignment?.truck?.odooTruckId ?? null,
+      warehouseOdooId: problem.driver?.warehouse?.odooWarehouseId ?? null,
+    });
+    problem.odooProblemId = odooId;
+    await this.truckProblemRepo.save(problem);
+  }
+
+  // --- Truck handovers (backend -> Odoo, manager reads "Driver Attendance") -----
+  /** Mirrors a PICKUP: create the Odoo handover row. */
+  private async pushHandoverPickup(payload: PushHandoverPayload) {
+    const h = await this.handoverRepo.findOne({
+      where: { id: payload.handoverId },
+      relations: ['driver', 'driver.account', 'truck', 'shift', 'warehouse'],
+    });
+    if (!h || !h.pickedUpAt) return;
+
+    const odooId = await this.odoo.createTruckHandover({
+      backendHandoverId: h.id,
+      backendDriverId: h.driverId,
+      driverName: h.driver?.account?.name ?? '',
+      truckOdooId: h.truck?.odooTruckId ?? null,
+      shiftOdooId: h.shift?.odooShiftId ?? null,
+      warehouseOdooId: h.warehouse?.odooWarehouseId ?? null,
+      workDate: h.workDate,
+      pickedUpAt: this.odooDatetime(h.pickedUpAt),
+    });
+    h.odooHandoverId = odooId;
+    await this.handoverRepo.save(h);
+  }
+
+  /** Mirrors a DROPOFF: close the Odoo handover row (idempotent by backend id). */
+  private async pushHandoverDropoff(payload: PushHandoverPayload) {
+    const h = await this.handoverRepo.findOne({ where: { id: payload.handoverId } });
+    if (!h || !h.droppedOffAt) return;
+    await this.odoo.closeTruckHandover({
+      backendHandoverId: h.id,
+      droppedOffAt: this.odooDatetime(h.droppedOffAt),
+      dropoffReason: h.dropoffReason ?? null,
+      lateMinutes: h.lateDropoffMinutes ?? 0,
+    });
+  }
+
+  /** Odoo stores naive UTC datetimes as 'YYYY-MM-DD HH:MM:SS'. */
+  private odooDatetime(d: Date): string {
+    return new Date(d).toISOString().slice(0, 19).replace('T', ' ');
+  }
+
+  /**
+   * Applies the warehouse manager's move (made in Odoo) on a shift-change
+   * request. PENDING → PROCESSING → ACCEPTED (he reserved a truck of the
+   * requested shift) or REJECTED with a reason. Terminal states never change.
+   */
   private async applyShiftChangeDecision(payload: ShiftChangeDecisionPayload) {
     const request = await this.shiftChangeRepo.findOne({
       where: { id: payload.requestId },
-      relations: ['driver', 'driver.account', 'truck', 'shift'],
+      relations: ['driver', 'driver.account', 'shift'],
     });
-    if (!request || request.status !== ShiftChangeRequestStatus.PENDING) return;
+    if (!request) return;
+    const terminal = [ShiftChangeRequestStatus.ACCEPTED, ShiftChangeRequestStatus.REJECTED];
+    if (terminal.includes(request.status)) return;
 
-    if (!payload.approved) {
+    if (payload.status === 'PROCESSING') {
+      if (request.status === ShiftChangeRequestStatus.PENDING) {
+        request.status = ShiftChangeRequestStatus.PROCESSING;
+        await this.shiftChangeRepo.save(request);
+      }
+      return;
+    }
+
+    if (payload.status === 'REJECTED') {
       request.status = ShiftChangeRequestStatus.REJECTED;
       request.rejectionReason = payload.rejectionReason ?? null;
       await this.shiftChangeRepo.save(request);
@@ -669,12 +1476,26 @@ export class OdooSyncProcessor extends WorkerHost {
       return;
     }
 
-    // Approved: move the driver's assignment to the requested truck + shift.
-    let row = await this.assignmentRepo.findOne({ where: { driverId: request.driverId } });
-    if (!row) row = this.assignmentRepo.create({ driverId: request.driverId, assignedAt: new Date() });
-    row.truckId = request.truckId;
-    row.shiftId = request.shiftId;
-    await this.assignmentRepo.save(row);
+    // ACCEPTED: the manager reserved this truck for the driver's NEW shift.
+    // Odoo (fleet master) already created its own assignment row and pinged
+    // SYNC_FLEET — the moves below make the mirror consistent immediately
+    // instead of waiting for that job.
+    const truck = payload.truckOdooId
+      ? await this.truckRepo.findOne({ where: { odooTruckId: payload.truckOdooId } })
+      : null;
+    if (!truck) {
+      winstonLogger.warn(
+        `Shift-change ${request.id} accepted without a known truck (odoo id ${payload.truckOdooId}) — waiting for SYNC_FLEET`,
+        LOG_META,
+      );
+    } else {
+      let row = await this.assignmentRepo.findOne({ where: { driverId: request.driverId } });
+      if (!row) row = this.assignmentRepo.create({ driverId: request.driverId, assignedAt: new Date() });
+      row.truckId = truck.id;
+      row.shiftId = request.shiftId;
+      await this.assignmentRepo.save(row);
+      request.truckId = truck.id;
+    }
 
     if (request.driver) {
       request.driver.shiftId = request.shiftId;
@@ -688,10 +1509,10 @@ export class OdooSyncProcessor extends WorkerHost {
       await this.notifyDriver(
         request.driver.account.id,
         'Shift change accepted',
-        `Your shift change request was approved; you are now on truck "${request.truck?.plateNumber ?? ''}".`,
+        `Your shift and truck were changed; you are now on shift "${request.shift?.name ?? ''}" with truck "${truck?.plateNumber ?? ''}".`,
         'notifications.shiftChangeAccepted.title',
         'notifications.shiftChangeAccepted.body',
-        { plate: request.truck?.plateNumber ?? '-' },
+        { plate: truck?.plateNumber ?? '-', shift: request.shift?.name ?? '-' },
       );
     }
   }

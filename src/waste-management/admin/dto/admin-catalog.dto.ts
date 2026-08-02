@@ -101,10 +101,17 @@ export class CreateProductDto {
   @IsString()
   image?: string;
 
-  @Transform(normalizeUnitCode)
-  @IsString()
-  @MaxLength(20)
-  unit_type: string;
+  /**
+   * The material's unit, given by ID — exactly like `category_id`.
+   *
+   * REQUIRED, and the only way to name a unit here. The code (`unit_type`) was
+   * accepted for a while and is not any more: a code is a label that can be
+   * renamed and re-used, so two callers sending "KG" could mean two different
+   * rows, and a material's unit decides how every quantity of it is read. An id
+   * names one row for good.
+   */
+  @IsUUID()
+  unit_id: string;
 
   @IsOptional()
   @IsBoolean()
@@ -130,11 +137,10 @@ export class UpdateProductDto {
   @IsString()
   image?: string;
 
+  /** Same as on create: by ID, and only by ID. */
   @IsOptional()
-  @Transform(normalizeUnitCode)
-  @IsString()
-  @MaxLength(20)
-  unit_type?: string;
+  @IsUUID()
+  unit_id?: string;
 
   @IsOptional()
   @IsBoolean()

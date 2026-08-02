@@ -11,6 +11,7 @@ describe('MediaService', () => {
   let cloudinary: any;
   let profileResolver: any;
   let profileRepo: any;
+  let applicationsCache: any;
 
   const file = { buffer: Buffer.from('x') } as any;
 
@@ -23,6 +24,9 @@ describe('MediaService', () => {
       update: jest.fn().mockResolvedValue({ affected: 1 }),
       find: jest.fn().mockResolvedValue([]),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      // Rejected documents still outstanding after a re-upload. Default 0 =
+      // this was the last one, so the account may go back under review.
+      count: jest.fn().mockResolvedValue(0),
     };
     accountRepo = { update: jest.fn().mockResolvedValue({ affected: 1 }) };
     cloudinary = {
@@ -32,7 +36,22 @@ describe('MediaService', () => {
     profileRepo = { findOne: jest.fn() };
     profileResolver = { getRepo: jest.fn().mockReturnValue(profileRepo) };
 
-    service = new MediaService(mediaRepo, accountRepo, cloudinary, {} as any, {} as any, profileResolver, { enqueuePushDriverRequest: jest.fn() } as any);
+    // An applicant answering a request moves their own account back into the
+    // reviewer's queue, so the cached listings have to be dropped.
+    applicationsCache = {
+      invalidate: jest.fn().mockResolvedValue(undefined),
+    };
+
+    service = new MediaService(
+      mediaRepo,
+      accountRepo,
+      cloudinary,
+      {} as any,
+      {} as any,
+      profileResolver,
+      { enqueuePushDriverRequest: jest.fn() } as any,
+      applicationsCache,
+    );
   });
 
   const rejected = {
@@ -74,16 +93,59 @@ describe('MediaService', () => {
       const res = await service.reuploadRejectedImage(file, 'm1', 'u1', Role.FACTORY);
 
       expect(cloudinary.uploadFile).toHaveBeenCalled();
+      // The replacement takes the old one's place, and closes the request it
+      // answers — leaving the request open would keep asking for a document
+      // that has just arrived.
       expect(mediaRepo.update).toHaveBeenCalledWith('m1', {
         url: 'new-url',
         publicId: 'new-pub',
         status: statusMedia.PENDING,
+        reuploadRequestedAt: null,
+        reuploadReason: null,
       });
       expect(accountRepo.update).toHaveBeenCalledWith('u1', {
         accountStatus: AccountStatus.PENDING_APPROVAL,
       });
       expect(cloudinary.deleteFile).toHaveBeenCalledWith('old-pub');
       expect(res.image).toBe('new-url');
+    });
+
+    it('keeps the account in NEED_CHANGES while another document is still ASKED FOR', async () => {
+      mediaRepo.findOne.mockResolvedValue(rejected);
+      profileRepo.findOne.mockResolvedValue({ id: 'p1' });
+      // One more document is still outstanding after this re-upload.
+      mediaRepo.count.mockResolvedValue(1);
+
+      await service.reuploadRejectedImage(file, 'm1', 'u1', Role.FACTORY);
+
+      // The file itself is refreshed…
+      expect(mediaRepo.update).toHaveBeenCalledWith('m1', {
+        url: 'new-url',
+        publicId: 'new-pub',
+        status: statusMedia.PENDING,
+        reuploadRequestedAt: null,
+        reuploadReason: null,
+      });
+      // …but the account must NOT leave NEED_CHANGES yet, otherwise the
+      // applicant loses the "fix your documents" signal.
+      expect(accountRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('counts what is still REQUESTED, not what is still rejected', async () => {
+      // The difference is the trap. A reviewer can now reject a document
+      // without asking for it — rejection is silent, requesting it is the
+      // deliberate act — so an account can carry a rejected document the
+      // applicant was never told about and cannot see. Counting rejections
+      // would hold them in NEED_CHANGES for ever, having replaced everything
+      // they were actually asked for, with nothing left on their screen to fix.
+      mediaRepo.findOne.mockResolvedValue(rejected);
+      profileRepo.findOne.mockResolvedValue({ id: 'p1' });
+
+      await service.reuploadRejectedImage(file, 'm1', 'u1', Role.FACTORY);
+
+      const [{ where }] = mediaRepo.count.mock.calls[0];
+      expect(where).toHaveProperty('reuploadRequestedAt');
+      expect(where).not.toHaveProperty('status');
     });
   });
 

@@ -12,6 +12,7 @@ import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { AuditService } from '@src/waste-management/common/providers/audit.service';
 import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
 import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
+import { ProductConditionsService } from '@src/waste-management/admin/product-conditions.service';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { TransformInterceptor } from '@src/common/interceptors/transform.interceptor';
@@ -63,7 +64,29 @@ describe('PricingController (integration)', () => {
         { provide: CatalogCacheService, useValue: { invalidate: jest.fn() } },
         {
           provide: ConditionsService,
-          useValue: { validateActiveCode: jest.fn(async (c: string) => String(c).toUpperCase()) },
+          useValue: {
+            validateActiveCode: jest.fn(async (c: string) => String(c).toUpperCase()),
+            labelMapFor: jest.fn(async () => new Map()),
+          },
+        },
+        {
+          // The pricing shape is decided by the MATERIAL now, so the test has
+          // to declare which grades the product under test has.
+          provide: ProductConditionsService,
+          useValue: {
+            hasConditions: jest.fn().mockResolvedValue(true),
+            activeCodes: jest.fn().mockResolvedValue(['EXCELLENT']),
+            // A price is linked to its grade BY ID, so both entry points —
+            // the id and the legacy code — resolve to the grade row.
+            findByCodeForProduct: jest.fn(async (_p: string, code: string) => ({
+              id: `cond-${code}`,
+              code,
+            })),
+            resolveForProduct: jest.fn(async (id: string) => ({
+              id,
+              code: 'EXCELLENT',
+            })),
+          },
         },
       ],
     })
@@ -90,11 +113,13 @@ describe('PricingController (integration)', () => {
     await app.close();
   });
 
-  it('POST /admin/waste/products/:id/pricing sets all four tiers (201 + envelope)', async () => {
+  // 200, not 201: this REPLACES the price list of an existing product — an
+  // upsert on a sub-resource, so nothing new is created at a new URL.
+  it('POST /admin/waste/products/:id/pricing sets all four tiers (200 + envelope)', async () => {
     const res = await request(app.getHttpServer())
       .post(`/admin/waste/products/${PRODUCT_ID}/pricing`)
       .send({ individual: 0.3, company: 0.27, factory: [{ condition: 'EXCELLENT', price: 0.25 }], free_facility: [{ condition: 'EXCELLENT', price: 0.26 }] })
-      .expect(201);
+      .expect(200);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.pricing).toEqual({

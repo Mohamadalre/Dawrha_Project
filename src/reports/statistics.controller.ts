@@ -33,6 +33,13 @@ export class StatisticsController {
     return { message: 'Truck statistics fetched successfully', result };
   }
 
+  @Get('drivers')
+  @Permissions('admin.reports.view')
+  async drivers() {
+    const result = await this.statistics.getDriverStats();
+    return { message: 'Driver statistics fetched successfully', result };
+  }
+
   @Get('warehouses')
   @Permissions('admin.reports.view')
   async warehouses() {

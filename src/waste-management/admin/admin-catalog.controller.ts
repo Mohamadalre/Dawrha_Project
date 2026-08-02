@@ -45,8 +45,7 @@ export class AdminCatalogController {
   @Post('categories')
   @Permissions('admin.waste.create')
   async createCategory(@CurrentUser() user, @Body() dto: CreateCategoryDto) {
-    const result = await this.adminCatalog.createCategory(user.id, dto);
-    return { message: result.message, result };
+    return this.adminCatalog.createCategory(user.id, dto);
   }
 
   @Put('categories/:categoryId')
@@ -56,8 +55,7 @@ export class AdminCatalogController {
     @Param('categoryId', ParseUUIDPipe) categoryId: string,
     @Body() dto: UpdateCategoryDto,
   ) {
-    const result = await this.adminCatalog.updateCategory(user.id, categoryId, dto);
-    return { message: result.message, result };
+    return this.adminCatalog.updateCategory(user.id, categoryId, dto);
   }
 
   @Delete('categories/:categoryId')
@@ -115,8 +113,7 @@ export class AdminCatalogController {
   @Post('offers')
   @Permissions('admin.waste.create')
   async createOffer(@CurrentUser() user, @Body() dto: CreateOfferDto) {
-    const result = await this.adminCatalog.createOffer(user.id, dto);
-    return { message: result.message, result };
+    return this.adminCatalog.createOffer(user.id, dto);
   }
 
   @Put('offers/:offerId')
@@ -126,8 +123,7 @@ export class AdminCatalogController {
     @Param('offerId', ParseUUIDPipe) offerId: string,
     @Body() dto: UpdateOfferDto,
   ) {
-    const result = await this.adminCatalog.updateOffer(user.id, offerId, dto);
-    return { message: result.message, result };
+    return this.adminCatalog.updateOffer(user.id, offerId, dto);
   }
 
   @Delete('offers/:offerId')
@@ -150,8 +146,7 @@ export class AdminCatalogController {
   @Post('units')
   @Permissions('admin.waste.create')
   async createUnit(@CurrentUser() user, @Body() dto: CreateUnitDto) {
-    const result = await this.adminCatalog.createUnit(user.id, dto);
-    return { message: result.message, result };
+    return this.adminCatalog.createUnit(user.id, dto);
   }
 
   @Put('units/:unitId')
@@ -161,8 +156,7 @@ export class AdminCatalogController {
     @Param('unitId', ParseUUIDPipe) unitId: string,
     @Body() dto: UpdateUnitDto,
   ) {
-    const result = await this.adminCatalog.updateUnit(user.id, unitId, dto);
-    return { message: result.message, result };
+    return this.adminCatalog.updateUnit(user.id, unitId, dto);
   }
 
   @Delete('units/:unitId')
@@ -174,38 +168,10 @@ export class AdminCatalogController {
     return this.adminCatalog.deleteUnit(user.id, unitId);
   }
 
-  // Material conditions (grades) — dynamic, pushed to the Odoo sorting UI
-  @Get('conditions')
-  @Permissions('admin.waste.manage')
-  async listConditions() {
-    const result = await this.adminCatalog.listConditions();
-    return { message: 'Conditions fetched successfully', result };
-  }
-
-  @Post('conditions')
-  @Permissions('admin.waste.create')
-  async createCondition(@CurrentUser() user, @Body() dto: CreateConditionDto) {
-    const result = await this.adminCatalog.createCondition(user.id, dto);
-    return { message: result.message, result };
-  }
-
-  @Put('conditions/:conditionId')
-  @Permissions('admin.waste.update')
-  async updateCondition(
-    @CurrentUser() user,
-    @Param('conditionId', ParseUUIDPipe) conditionId: string,
-    @Body() dto: UpdateConditionDto,
-  ) {
-    const result = await this.adminCatalog.updateCondition(user.id, conditionId, dto);
-    return { message: result.message, result };
-  }
-
-  @Delete('conditions/:conditionId')
-  @Permissions('admin.waste.delete')
-  async deleteCondition(
-    @CurrentUser() user,
-    @Param('conditionId', ParseUUIDPipe) conditionId: string,
-  ) {
-    return this.adminCatalog.deleteCondition(user.id, conditionId);
-  }
+  // Material grades are NOT managed here any more.
+  //
+  // They belong to a MATERIAL, not to a global vocabulary — the grades that
+  // describe scrap paper say nothing useful about copper — so they live under
+  // /admin/waste/products/:productId/conditions (ProductConditionsController).
+  // Keeping a flat collection here is what made them global in the first place.
 }

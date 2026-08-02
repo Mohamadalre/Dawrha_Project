@@ -19,6 +19,7 @@ describe('PricingService', () => {
   let audit: any;
   let cache: any;
   let conditions: any;
+  let productConditions: any;
 
   const dto = {
     individual: 0.3,
@@ -46,6 +47,25 @@ describe('PricingService', () => {
     cache = { invalidate: jest.fn().mockResolvedValue(undefined) };
     conditions = {
       validateActiveCode: jest.fn(async (code: string) => String(code).toUpperCase()),
+      // Grade NAMES are resolved per material — two materials may both have a
+      // 'GOOD' and they are different grades of different things.
+      labelMapFor: jest.fn(async () => new Map([['p1:GOOD', 'جيدة']])),
+    };
+    // The material decides the pricing shape now, so the spec has to say which
+    // grades the material under test actually has.
+    productConditions = {
+      hasConditions: jest.fn().mockResolvedValue(true),
+      activeCodes: jest.fn().mockResolvedValue(['EXCELLENT']),
+      // A price is linked to its grade BY ID, so the code path resolves the
+      // row rather than storing a bare string.
+      findByCodeForProduct: jest.fn(async (_p: string, code: string) => ({
+        id: `cond-${code.toLowerCase()}`,
+        code,
+      })),
+      resolveForProduct: jest.fn(async (id: string) => ({
+        id,
+        code: 'EXCELLENT',
+      })),
     };
 
     service = new PricingService(
@@ -57,6 +77,7 @@ describe('PricingService', () => {
       audit,
       cache,
       conditions,
+      productConditions,
     );
   });
 
@@ -210,7 +231,14 @@ describe('PricingService', () => {
       const result: any = await service.getCurrentPricing('p1');
 
       expect(result.pricing.individual).toBe(0.3);
-      expect(result.pricing.factory).toEqual([{ condition: 'GOOD', price: 0.25 }]);
+      expect(result.pricing.factory).toHaveLength(1);
+      expect(result.pricing.factory[0]).toMatchObject({
+        condition: 'GOOD',
+        // Named as well as coded: a code alone identifies nothing to a reader,
+        // because it is unique only within its material.
+        condition_name: 'جيدة',
+        price: 0.25,
+      });
       expect(result.pricing.company).toBeNull();
       expect(result.pricing.free_facility).toEqual([]);
     });

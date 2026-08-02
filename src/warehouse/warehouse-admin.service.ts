@@ -11,19 +11,43 @@ import { v4 as uuidv4 } from 'uuid';
 import { Warehouse } from './entities/warehouse.entity';
 import {
   WarehouseCodeExistsException,
+  WarehouseNameExistsException,
   WarehouseNotFoundException,
   WarehouseNotSyncedException,
+  WarehouseProvinceNotFoundException,
 } from './exceptions/warehouse.exceptions';
 import { WarehouseManager } from './entities/warehouse-manager.entity';
 import { WarehouseInventory } from './entities/warehouse-inventory.entity';
+import { Product } from '@src/waste-management/entities/product.entity';
 import { TruckEntity } from '@src/truck/entities/truck.entity';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
+import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { OdooService } from '@src/odoo/odoo.service';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { OdooSyncStatus } from '@src/waste-management/enums/odoo-sync-status.enum';
 import { buildPagination, PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 import { StockStatus } from '@src/waste-management/enums/stock-status.enum';
 import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
+import { Province } from '@src/user/entities/location/province.entity';
+import { MeasurementUnit } from '@src/waste-management/entities/measurement-unit.entity';
+
+/** A warehouse's stock, counted per unit — kilograms and pieces do not add up. */
+export interface WarehouseStockSummary {
+  total_items: number;
+  totals_by_unit: {
+    unit_id: string | null;
+    unit_code: string;
+    total_quantity: number;
+    total_reserved: number;
+    total_available: number;
+  }[];
+  last_sync: Date | null;
+}
+
+/** Matches Odoo's three-decimal quantities — floats otherwise show 0.30000000004. */
+function round3(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
 
 @Injectable()
 export class WarehouseAdminService {
@@ -40,7 +64,13 @@ export class WarehouseAdminService {
     private readonly truckRepo: Repository<TruckEntity>,
     private readonly odoo: OdooService,
     private readonly odooSync: OdooSyncService,
+    @InjectRepository(Product)
+    private readonly productRepo: Repository<Product>,
     private readonly conditionsService: ConditionsService,
+    // The governorate is resolved to a real row before a warehouse is saved —
+    // a typed name cannot be checked against anything.
+    @InjectRepository(Province)
+    private readonly provinceRepo: Repository<Province>,
   ) {}
 
   /**
@@ -50,17 +80,71 @@ export class WarehouseAdminService {
    * warehouse never lingers in the backend without its Odoo counterpart.
    * The admin assigns a manager later inside Odoo (synced via sync-manager).
    */
+  /**
+   * Is this code already a warehouse's, ignoring case and padding?
+   *
+   * Case-INSENSITIVE, matching the unique index. The old check compared the
+   * code exactly, so "wh1" sailed past a database already holding "WH1" and
+   * failed at the insert instead — and to everyone who writes a code on
+   * paperwork or reads one over the phone, those are the same warehouse.
+   */
+  private async codeTaken(code: string, exceptId?: string): Promise<boolean> {
+    const qb = this.warehouseRepo
+      .createQueryBuilder('w')
+      .where('upper(btrim(w.code)) = upper(btrim(:code))', { code });
+    if (exceptId) qb.andWhere('w.id != :exceptId', { exceptId });
+    return (await qb.getCount()) > 0;
+  }
+
+  /**
+   * Is this NAME already in use?
+   *
+   * Case- and padding-insensitive, exactly as the code check is and for the
+   * same reason: to everyone who reads a name off paperwork or hears it over
+   * the phone, "Damascus Main" and "damascus main " are one warehouse, and a
+   * rule that disagrees with its users is one they walk past by accident.
+   *
+   * Matches Odoo's own `_check_name_unique`, so a name refused on one side is
+   * refused on the other — two systems disagreeing about what is allowed is how
+   * a create succeeds locally and then fails forever in the sync queue.
+   */
+  private async nameTaken(name: string, exceptId?: string): Promise<boolean> {
+    const qb = this.warehouseRepo
+      .createQueryBuilder('w')
+      .where('upper(btrim(w.name)) = upper(btrim(:name))', { name });
+    if (exceptId) qb.andWhere('w.id != :exceptId', { exceptId });
+    return (await qb.getCount()) > 0;
+  }
+
   async create(dto: CreateWarehouseDto) {
-    const existing = await this.warehouseRepo.findOne({ where: { code: dto.code } });
-    if (existing) throw new WarehouseCodeExistsException();
+    if (await this.codeTaken(dto.code)) throw new WarehouseCodeExistsException();
+    if (await this.nameTaken(dto.name)) throw new WarehouseNameExistsException();
+
+    // The governorate is REQUIRED and resolved to a real row before anything is
+    // saved. Order allocation matches buyers to warehouses by this id, so a
+    // warehouse without one holds stock that no order can ever be routed to —
+    // and the failure surfaces later as "no warehouse can fulfil this", which
+    // points nowhere near here.
+    const province = await this.provinceRepo.findOne({
+      where: { id: dto.provinceId },
+    });
+    if (!province) throw new WarehouseProvinceNotFoundException();
 
     const warehouse = this.warehouseRepo.create({
-      name: dto.name,
-      code: dto.code,
+      name: dto.name.trim(),
+      // Stored trimmed: a trailing space makes two codes that print alike and
+      // compare differently, and the one nobody can see is the one that breaks.
+      code: dto.code.trim(),
       latitude: dto.latitude != null ? String(dto.latitude) : undefined,
       longitude: dto.longitude != null ? String(dto.longitude) : undefined,
       address: dto.address,
-      governorate: dto.governorate,
+      provinceId: province.id,
+      // The NAME is a mirror of the row above, kept because listings, reports
+      // and the Odoo payload all read it. Written from the resolved province
+      // and never from free text, so the two cannot disagree. Arabic is the
+      // stored label — it is what Odoo's province mirror displays and what the
+      // paperwork carries; the English name is one join away when needed.
+      governorate: province.name_ar || province.name_en,
       zones: dto.zones?.map((z) => ({ name: z.name, type: z.type })),
       odooSyncStatus: OdooSyncStatus.PENDING,
       isActive: true,
@@ -182,10 +266,36 @@ export class WarehouseAdminService {
     }
   }
 
-  async list(query: PaginationQueryDto & { status?: string }) {
+  async list(query: PaginationQueryDto & { status?: string; search?: string }) {
     const qb = this.warehouseRepo.createQueryBuilder('w').leftJoinAndSelect('w.manager', 'm');
     if (query.status === 'active') qb.andWhere('w.isActive = true');
     if (query.status === 'inactive') qb.andWhere('w.isActive = false');
+
+    // CLOSED warehouses are NOT filtered out by default, and that is the point.
+    // A warehouse that has stopped taking new work still holds stock, still has
+    // open orders shipping out of it, and is still the answer to "where is my
+    // material". Hiding it from the listing hides the very rows an admin needs
+    // while a site winds down. `status` is there for whoever wants one side.
+
+    if (query.search?.trim()) {
+      // Partial and case-insensitive, over the NAME and the CODE.
+      //
+      // Both, because an admin arrives at a warehouse from either direction:
+      // they half-remember what it is called, or they are holding paperwork
+      // that carries only the code. One search box that answers both is one
+      // fewer decision before typing.
+      //
+      // Matching whole words would mean already knowing the answer to the
+      // question being asked.
+      qb.andWhere('(w.name ILIKE :search OR w.code ILIKE :search)', {
+        search: `%${query.search.trim()}%`,
+      });
+    }
+
+    // Newest first. The warehouse an admin is looking for is almost always the
+    // one just created — alphabetical order buries it at whatever letter it
+    // happens to start with.
+    qb.orderBy('w.createdAt', 'DESC').addOrderBy('w.id', 'DESC');
 
     qb.skip((query.page - 1) * query.limit).take(query.limit);
     const [rows, total] = await qb.getManyAndCount();
@@ -196,7 +306,7 @@ export class WarehouseAdminService {
 
     const warehouses = rows.map((w) => {
         const summary =
-          summaries.get(w.id) ?? { total_items: 0, total_quantity: 0, last_sync: null };
+          summaries.get(w.id) ?? { total_items: 0, totals_by_unit: [], last_sync: null };
         return {
           warehouse_id: w.id,
           odoo_warehouse_id: w.odooWarehouseId,
@@ -230,73 +340,110 @@ export class WarehouseAdminService {
     return { warehouses, pagination: buildPagination(total, query.page, query.limit) };
   }
 
-  async inventory(warehouseId: string) {
-    const warehouse = await this.warehouseRepo.findOne({ where: { id: warehouseId } });
-    if (!warehouse) throw new WarehouseNotFoundException();
-
-    const rows = await this.inventoryRepo.find({ where: { warehouseId } });
-    const conditionLabels = await this.conditionsService.labelMap();
-
-    // Rows are mirrored per (product, condition) — group them so the admin sees
-    // each material once with its grade breakdown (الحالة + كميتها).
-    interface ProductEntry {
-      odoo_product_id?: number;
-      product_name?: string;
-      quantity: number;
-      reserved_quantity: number;
-      reorder_level: number;
-      last_sync?: Date;
-      conditions: Record<string, unknown>[];
-    }
-    const byProduct = new Map<string, ProductEntry>();
-    for (const r of rows) {
-      const key = String(r.odooProductId);
-      let entry = byProduct.get(key);
-      if (!entry) {
-        entry = {
-          odoo_product_id: r.odooProductId,
-          product_name: r.productName,
-          quantity: 0,
-          reserved_quantity: 0,
-          reorder_level: r.reorderLevel,
-          last_sync: r.syncedAt,
-          conditions: [],
-        };
-        byProduct.set(key, entry);
-      }
-      const qty = Number(r.quantity);
-      const reserved = Number(r.reservedQuantity);
-      entry.quantity += qty;
-      entry.reserved_quantity += reserved;
-      entry.reorder_level = Math.max(entry.reorder_level, r.reorderLevel);
-      if (r.syncedAt && (!entry.last_sync || r.syncedAt > entry.last_sync)) entry.last_sync = r.syncedAt;
-      entry.conditions.push({
-        condition: r.conditionCode,
-        condition_label: conditionLabels.get(r.conditionCode) ?? r.conditionCode,
-        quantity: qty,
-        reserved_quantity: reserved,
-        available: Math.max(qty - reserved, 0),
-      });
-    }
-
-    let criticalCount = 0;
-    const inventory = [...byProduct.values()].map((entry) => {
-      const status = this.stockStatus(entry.quantity, entry.reorder_level);
-      if (status === StockStatus.OUT_OF_STOCK || entry.quantity <= entry.reorder_level) criticalCount++;
-      return { ...entry, stock_status: status };
+  /**
+   * ONE warehouse, in exactly the same shape the listing returns — so a client
+   * can reuse the same rendering code for a row and for its detail screen.
+   */
+  async detail(warehouseId: string) {
+    const w = await this.warehouseRepo.findOne({
+      where: { id: warehouseId },
+      relations: ['manager'],
     });
+    if (!w) throw new WarehouseNotFoundException();
+
+    const summaries = await this.stockSummaries([w.id]);
+    const truckCounts = await this.truckCounts([w.id]);
+    const summary = summaries.get(w.id) ?? {
+      total_items: 0, totals_by_unit: [], last_sync: null,
+    };
 
     return {
-      warehouse_id: warehouse.id,
-      warehouse_name: warehouse.name,
-      last_sync_from_odoo: warehouse.lastOdooSync ?? null,
-      inventory,
-      summary: {
-        total_items_count: inventory.length,
-        total_quantity: rows.reduce((s, r) => s + Number(r.quantity), 0),
-        critical_stock_count: criticalCount,
+      warehouse_id: w.id,
+      odoo_warehouse_id: w.odooWarehouseId,
+      name: w.name,
+      code: w.code,
+      location: {
+        latitude: w.latitude ? Number(w.latitude) : null,
+        longitude: w.longitude ? Number(w.longitude) : null,
+        address: w.address ?? null,
+        governorate: w.governorate ?? null,
       },
+      capacity: w.capacity ?? null,
+      current_load: Number(w.currentLoad),
+      truck_count: truckCounts.get(w.id) ?? 0,
+      load_percentage: w.capacity
+        ? +((Number(w.currentLoad) / w.capacity) * 100).toFixed(2)
+        : null,
+      manager: w.manager
+        ? {
+            manager_id: w.manager.id,
+            name: w.manager.fullName,
+            phone: w.manager.phone,
+            email: w.manager.email,
+          }
+        : null,
+      stock_summary: summary,
+      status: w.isActive ? 'active' : 'inactive',
+      synced_with_odoo: !!w.lastOdooSync,
+      last_odoo_sync: w.lastOdooSync ?? null,
     };
+  }
+
+  /**
+   * Edit a warehouse's own details.
+   *
+   * Deliberately NOT editable here: `odooWarehouseId`, the manager link and
+   * the stock figures. Odoo owns the manager assignment (its dashboard has the
+   * change-manager action) and the load figures come from the inventory sync —
+   * letting an admin type over them would silently desync the two systems.
+   */
+  async update(warehouseId: string, dto: UpdateWarehouseDto) {
+    const w = await this.warehouseRepo.findOne({ where: { id: warehouseId } });
+    if (!w) throw new WarehouseNotFoundException();
+
+    // Only what this side owns. Location, governorate and the lifecycle are
+    // edited in Odoo — it is the operational system — and flow back through
+    // SYNC_WAREHOUSE. Accepting them here too would let the two overwrite each
+    // other with whichever wrote last, which is how the pair silently drifts.
+    if (dto.name !== undefined) {
+      // Checked for the same reason the code is: the name is what every human
+      // uses — it is on the paperwork, on the shipment screen, in the order the
+      // driver is handed. Two warehouses sharing one is a load delivered to the
+      // wrong building by somebody who read the right name.
+      if (await this.nameTaken(dto.name, warehouseId)) {
+        throw new WarehouseNameExistsException();
+      }
+      w.name = dto.name.trim();
+    }
+    if (dto.code !== undefined) {
+      // Checked here, not only caught at the insert: a refusal that names the
+      // rule is something the admin can act on, and the database error was
+      // being translated into a message that did not say which field.
+      if (await this.codeTaken(dto.code, warehouseId)) {
+        throw new WarehouseCodeExistsException();
+      }
+      w.code = dto.code.trim();
+    }
+    if (dto.capacity !== undefined) w.capacity = dto.capacity;
+
+    try {
+      await this.warehouseRepo.save(w);
+    } catch (err: any) {
+      // `code` is unique — return a clean 409 rather than a driver 500.
+      if (err?.code === '23505') {
+        throw new ConflictException('A warehouse with this code already exists');
+      }
+      throw err;
+    }
+    // The edit has to reach Odoo, or the two drift: an admin renaming a
+    // warehouse here saw the new name while every Odoo screen, order and report
+    // kept the old one. Queued, so a brief Odoo outage cannot fail the save.
+    try {
+      await this.odooSync.enqueueUpdateWarehouse({ warehouseId });
+    } catch {
+      // A queue hiccup — the admin's edit still stands locally.
+    }
+    return this.detail(warehouseId);
   }
 
   async sync(warehouseId: string, forceFullSync = false) {
@@ -330,28 +477,75 @@ export class WarehouseAdminService {
   }
 
   /** Aggregated stock summary for many warehouses in ONE query (avoids N+1). */
+  /**
+   * Per-warehouse stock figures, TOTALLED PER UNIT.
+   *
+   * There used to be one `total_quantity`, and it was arithmetic on things that
+   * cannot be added: 400 kg of scrap paper plus 30 car batteries came back as
+   * "430". That number is not merely imprecise, it is meaningless — it changes
+   * when a material is re-measured in tonnes without a single kilogram moving,
+   * and there is no unit anyone could write beside it. An admin reading it was
+   * reading a quantity of nothing.
+   *
+   * So the answer is one row per unit. Counts of THINGS stay addable and remain
+   * a single number; quantities do not and never were.
+   *
+   * One query for every warehouse on the page, grouped by (warehouse, unit) in
+   * the database — an admin opening a list of twenty should not pay for twenty
+   * round trips, and the alternative was N+1.
+   */
   private async stockSummaries(
     warehouseIds: string[],
-  ): Promise<Map<string, { total_items: number; total_quantity: number; last_sync: Date | null }>> {
-    const map = new Map<string, { total_items: number; total_quantity: number; last_sync: Date | null }>();
+  ): Promise<Map<string, WarehouseStockSummary>> {
+    const map = new Map<string, WarehouseStockSummary>();
     if (warehouseIds.length === 0) return map;
 
     const rows = await this.inventoryRepo
       .createQueryBuilder('i')
+      // The unit lives on the MATERIAL, and the mirror rows carry only Odoo's
+      // product id — so the join is the only way to know what is being counted.
+      .leftJoin(Product, 'p', 'p.odoo_product_id = i.odooProductId')
+      .leftJoin(MeasurementUnit, 'u', 'u.id = p.unit_id OR u.code = p.unit_type')
       .select('i.warehouseId', 'warehouseId')
-      .addSelect('COUNT(*)', 'items')
+      .addSelect('u.id', 'unitId')
+      .addSelect('COALESCE(u.code, p.unit_type)', 'unitCode')
+      .addSelect('COUNT(DISTINCT i.odooProductId)', 'materials')
       .addSelect('COALESCE(SUM(i.quantity), 0)', 'quantity')
+      .addSelect('COALESCE(SUM(i.reservedQuantity), 0)', 'reserved')
       .addSelect('MAX(i.syncedAt)', 'lastSync')
       .where('i.warehouseId IN (:...ids)', { ids: warehouseIds })
       .groupBy('i.warehouseId')
+      .addGroupBy('u.id')
+      .addGroupBy('u.code')
+      .addGroupBy('p.unit_type')
       .getRawMany();
 
     for (const r of rows) {
-      map.set(r.warehouseId, {
-        total_items: Number(r.items),
-        total_quantity: Number(r.quantity),
-        last_sync: r.lastSync ?? null,
+      let entry = map.get(r.warehouseId);
+      if (!entry) {
+        entry = { total_items: 0, totals_by_unit: [], last_sync: null };
+        map.set(r.warehouseId, entry);
+      }
+      const quantity = Number(r.quantity);
+      const reserved = Number(r.reserved);
+      entry.total_items += Number(r.materials);
+      entry.totals_by_unit.push({
+        unit_id: r.unitId ?? null,
+        // A material whose unit link is dangling still holds real stock; it is
+        // bucketed under its raw code rather than dropped, because hiding it
+        // would understate the warehouse.
+        unit_code: r.unitCode ?? 'UNKNOWN',
+        total_quantity: round3(quantity),
+        total_reserved: round3(reserved),
+        total_available: round3(Math.max(quantity - reserved, 0)),
       });
+      if (r.lastSync && (!entry.last_sync || r.lastSync > entry.last_sync)) {
+        entry.last_sync = r.lastSync;
+      }
+    }
+
+    for (const entry of map.values()) {
+      entry.totals_by_unit.sort((a, b) => a.unit_code.localeCompare(b.unit_code));
     }
     return map;
   }

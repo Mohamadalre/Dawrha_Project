@@ -2,7 +2,8 @@
 
 > **اقرأ هذا الملف وحده في بداية أي جلسة** بدل إعادة قراءة ملفات المشروع.
 > المرافقان: **API_REFERENCE.md** (توصيف كل endpoint: يأخذ/يرجع/السيناريو) · **FIXES.md** (سجل كل جولة إصلاح #1–67+ مرقّمة) · **ORDERS_DESIGN.md** (تصميم الطلبيات — لم يُنفَّذ).
-> آخر تحديث: 2026-07-16 · Stack: NestJS 11 + TS 5.7 + PostgreSQL/TypeORM + Redis/ioredis + BullMQ + Socket.IO + Firebase + Cloudinary + **Odoo (addon مخصص `recycle_warehouse`)**.
+> آخر تحديث: 2026-07-24 · Stack: NestJS 11 + TS 5.7 + PostgreSQL/TypeORM + Redis/ioredis + BullMQ + Socket.IO + Firebase + Cloudinary + **Odoo (addon مخصص `recycle_warehouse`)**.
+> **آخر جولة (2026-07-24):** نطاق الوردية — `shifts.isGlobal`+`odooWarehouseIds` (هجرة `1784700000000`)؛ onboarding يعرض الورديات العامة فقط؛ تغيير الوردية = عامة أو مستودع السائق. تفاصيل: FIXES #88–91.
 
 ## 0. تشغيل وتحقق
 
@@ -39,18 +40,18 @@
 | waste/admin | CRUD تصنيفات/منتجات/**عروض (بحالة + target_roles)**/وحدات/حالات + Odoo jobs |
 | waste/admin/pricing | تسعير: فردي+مؤسسات رقم واحد، **معمل+جهة حرة لكل حالة** + أرشيف كامل |
 | waste/suggestions, category-requests, common | اقتراحات · طلبات تصنيفات المؤسسات · (Audit, AssignedCategory, CatalogCache, Units, Conditions, Seeder) |
-| Truck | **قراءة فقط** لأسطول ممرأى من Odoo + تتبّع Socket.IO + طلبات تبديل الوردية (تقديم/عرض — القرار في Odoo). الشاحنات تُؤلَّف في Odoo (`recycle.truck`)؛ عند إضافة شاحنة أو تغيّر إسناد مستودعها يصل webhook `/odoo/webhooks/fleet` (سر `x-odoo-webhook-secret`) → `SYNC_FLEET` يُعيد المرآة **ويُشعر كل أدمن** (truckAdded/truckAssignmentChanged...) |
+| Truck | أسطول ممرأى من Odoo (قراءة) + تتبّع Socket.IO + **راوتات السائق فقط**: `GET /driver/my-truck` (شاحنة+مستودعها+وردية أو "سيتم إسنادك قريباً") · **استلام/تسليم**: `POST /driver/pickup` · `POST /driver/dropoff` (سبب إلزامي) · `GET /driver/handover-status` — قيود نافذة الوردية (لا استلام قبل البدء/لا تسليم قبل النهاية، والمعطّلة تُسلَّم بأي وقت) + كرون worker يُشعر السائق (FCM) والمدير (أودو) عند بدء بلا استلام/نهاية بلا تسليم؛ حضور السائقين شاشة عرض-فقط بأودو تحت الورديات · `shift-change-requests` v2 (السائق يطلب وردية مستودعه بسبب؛ `POST`/`GET mine`/`GET available-shifts`/`DELETE :id` قيد-الانتظار→حذف من النظامين؛ **القرار للمدير في أودو**) · `POST /truck-problems` (سبب+صور→ يقرأها مدير المستودع بأودو قراءة فقط، ويُشعَر). إسناد سائق↔شاحنة↔وردية + حظر/تعطيل حصراً بشاشات أودو. `SYNC_FLEET` يُعيد المرآة ويُشعر الأدمن |
 | Shift | قراءة فقط (تُدار في Odoo؛ Morning/Evening seed كـ bootstrap). `shift_type` (DRIVER/WAREHOUSE) + `is_active`: `GET /shifts` يعيد ورديات DRIVER الفعالة فقط؛ حذف الوردية في Odoo يحذف/يعطّل مرآتها |
 | Warehouse | إنشاء (backend→Odoo، مع governorate)، استيراد، جرد **مجمّعاً بالحالات**، sync، `truck_count` |
 | Odoo / OdooSync | عميل JSON-RPC وحيد (جلسة مكاشة Redis 25د + timeout 10s) · طابور `waste-odoo-sync` (handler-map) + **كل الـ webhooks** |
-| Reports / Maintenance | إحصائيات الأدمن · كرونات تنظيف بالـ worker فقط |
+| Reports / Maintenance | إحصائيات الأدمن (`overview/accounts/trucks/drivers/warehouses/catalog` — `drivers` أُضيف 2026-07-20) · كرونات تنظيف بالـ worker فقط |
 
 ## 3. مخطط قاعدة البيانات (سطر لكل جدول — SnakeNaming)
 
 **الهوية**: `accounts` (role, accountStatus, provider) · `user_devices` (refreshToken hashed, fcmToken, language; UQ account+device) · بروفايلات 1:1 لكل دور · materials 1:1 + جداول ربط `*_waste_category` (تصنيفات الـ onboarding) · `provinces`, `locations` (geography Point) · `institution_types` · `account_progress` · `permissions`+`role_permissions` · `media` (polymorphic + status) · `notifications` (+فهرس user,is_read,created_at).
 **السوق**: `waste_categories` (odooCategoryId) · `products` (unitType code, odooProductId) · `measurement_units` (**ديناميكية**: code, is_weight, **allows_tolerance**, odooUnitId) · `material_conditions` (**ديناميكية**: code, sort_order, odooConditionId) · `product_pricing`(+`_history`) (tier + **condition_code** null للفردي/المؤسسات) · `offers` (**condition_code + target_roles[]** null=للجميع) · `carts`+`cart_items` (snapshot سعر/وحدة/**condition_code**) · `product_suggestions` · `category_requests` · `audit_logs`.
-**المستودعات**: `warehouses` (odooWarehouseId, zones jsonb, **governorate**) · `warehouse_inventory` (**صف لكل مستودع+منتج+حالة**؛ UQ ثلاثي؛ UNGRADED=غير مفروز) · `warehouse_managers`.
-**الأسطول (مرآة Odoo)**: `trucks` (odooTruckId UQ, **warehouse_id FK**) · `shifts` (odooShiftId) · `truck_assignments` (odooAssignmentId; UQ truck+shift; 1:1 سائق) · `shift_change_requests` (odooRequestId) · `truck_location_logs`.
+**المستودعات**: `warehouses` (odooWarehouseId, zones jsonb, **governorate**) · `warehouse_inventory` (**صف لكل مستودع+منتج+حالة**؛ UQ ثلاثي؛ UNGRADED=غير مفروز) · `warehouse_managers` · `collector_profiles.warehouse_id` (مستودع السائق، مرآة من قرار أودو — 2026-07-21).
+**الأسطول (مرآة Odoo)**: `trucks` (odooTruckId UQ, **warehouse_id FK**) · `shifts` (odooShiftId, **odooWarehouseId, tolerance**) · `truck_assignments` (odooAssignmentId; UQ truck+shift; 1:1 سائق) · `shift_change_requests` (odooRequestId, **reason**, truck_id nullable — يملؤه المدير عند القبول) · `truck_problems` (odooProblemId, driver, reason, images jsonb) · `truck_handovers` (**استلام/تسليم**: driver+shift+workDate فريد، pickedUpAt/droppedOffAt/dropoffReason/lateDropoffMinutes/status، حارسا إشعار) · `truck_location_logs`.
 
 ## 4. تكامل Odoo — القلب (اتجاهان، كتابة عبر الطابور حصراً)
 

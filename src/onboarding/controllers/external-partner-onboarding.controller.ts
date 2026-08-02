@@ -1,4 +1,8 @@
-import { Controller, UseGuards, Post, Body, Req,UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, UseGuards, Post, Get, Patch, Body, Req,UseInterceptors, UploadedFile } from '@nestjs/common';
+import { UpdateLocationDto } from '../dto/update-location.dto';
+ import { UpdateMaterialsOrderDto } from '../dto/update-materials.dto';
+import { UpdateInformationExternalPartnerDto } from '../dto/update-information.dto';
+import { OnboardingSubmissionService } from '../services/onboarding-submission.service';
 import { RolesGuard } from '@src/auth/guards/roles.guard';
 import { Roles } from '@src/auth/decorators/roles.decorator';
 import { Role } from '@src/user/enums/role.enum';
@@ -23,7 +27,63 @@ import { ExternalPartnerOnboardingService } from '../services/external-partner-o
   version: '1'
 })
 export class ExternalPartnerOnboardingController {
-  constructor(private readonly externalPartnerOnboardingService: ExternalPartnerOnboardingService) {}
+  constructor(
+    private readonly externalPartnerOnboardingService: ExternalPartnerOnboardingService,
+    private readonly submissionService: OnboardingSubmissionService,
+  ) {}
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Submitted application: review + corrections (class-level
+  // @AccountsStatus(PENDING_PROFILE) is overridden per handler).
+  // This role has NO documents step (see ONBOARDING_STEPS), so there is no
+  // document-replacement endpoint here.
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** The application as submitted, in step order (info → location → materials). */
+  @Get('submission')
+  @Roles(Role.EXTERNAL_PARTNER)
+  @AccountsStatus(
+    AccountStatus.PENDING_APPROVAL,
+    AccountStatus.REJECTED,
+    AccountStatus.NEED_CHANGES,
+  )
+  async getSubmissionExternalPartner(@Req() req) {
+    const result = await this.submissionService.getSubmission(req.user.id, Role.EXTERNAL_PARTNER);
+    return { message: 'Application fetched successfully', result };
+  }
+
+  /** Correct the submitted information while the application is pending approval. */
+  @Patch('information')
+  @Roles(Role.EXTERNAL_PARTNER)
+  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  async updateInformationExternalPartner(
+    @Body() dto: UpdateInformationExternalPartnerDto,
+    @Req() req,
+  ) {
+    const result = await this.submissionService.updateInformation(
+      req.user.id, Role.EXTERNAL_PARTNER, dto);
+    return { message: 'Information updated successfully', result };
+  }
+
+
+  /** Correct the submitted materials while the application is pending approval. */
+  @Patch('materials')
+  @Roles(Role.EXTERNAL_PARTNER)
+  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  async updateMaterialsExternalPartner(@Body() dto: UpdateMaterialsOrderDto, @Req() req) {
+    const result = await this.submissionService.updateMaterials(
+      req.user.id, Role.EXTERNAL_PARTNER, dto);
+    return { message: 'Materials updated successfully', result };
+  }
+  /** Correct the registered location while the application is pending approval. */
+  @Patch('location')
+  @Roles(Role.EXTERNAL_PARTNER)
+  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  async updateLocationExternalPartner(@Body() dto: UpdateLocationDto, @Req() req) {
+    const result = await this.submissionService.updateLocation(
+      req.user.id, Role.EXTERNAL_PARTNER, dto);
+    return { message: 'Location updated successfully', result };
+  }
 
   /**
    * Adds external partner information during onboarding

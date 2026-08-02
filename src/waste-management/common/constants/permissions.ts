@@ -12,6 +12,7 @@ export const WASTE_PERMISSIONS = {
   'waste.products.view': 'View products',
   'waste.products.suggest': 'Suggest new products',
   'waste.products.availability': 'View per-warehouse product availability',
+  'waste.products.popular': 'View the most-ordered materials',
   'waste.materials.view': 'View products under the categories selected in onboarding',
   'waste.offers.view': 'View offers',
   'waste.categories.request': 'Request additional assigned categories',
@@ -32,6 +33,8 @@ export const WASTE_PERMISSIONS = {
   'admin.trucks.view': 'View trucks and live tracking',
   'admin.trucks.manage': 'Create and manage trucks',
   'admin.shifts.manage': 'Edit work shift times',
+  'admin.delivery.rate.view': 'View the per-kilometre delivery rate',
+  'admin.delivery.rate.manage': 'Set the per-kilometre delivery rate',
 } as const;
 
 export type WastePermissionKey = keyof typeof WASTE_PERMISSIONS;
@@ -42,6 +45,10 @@ const BUYER_PERMISSIONS: WastePermissionKey[] = [
   'waste.products.view',
   'waste.offers.view',
   'waste.products.suggest',
+  // Held by EVERY buyer role. The list is ranked globally and then filtered to
+  // what the reader's tier can actually buy, so it is safe for all of them and
+  // useful to all of them.
+  'waste.products.popular',
   'cart.view',
   'cart.manage',
 ];

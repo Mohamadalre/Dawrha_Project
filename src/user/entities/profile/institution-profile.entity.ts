@@ -43,7 +43,20 @@ export class InstitutionProfile extends LocationBase {
   institutionName: string;
 
 
-  @Column({  nullable: false ,unique:true })
+  /**
+   * The institution's phone — a MOBILE.
+   *
+   * Held a landline, with a separate mobile column beside it. Two columns for
+   * one answer is two places to look and one of them is always the wrong one:
+   * a driver standing at a locked gate with a pallet on the truck needs the
+   * number of somebody who will pick up, and a building's landline is not it
+   * outside office hours. Factories and free facilities were already asked for
+   * a single mobile — so the same delivery was resolvable or not depending only
+   * on which kind of buyer it was going to.
+   *
+   * One column, not two, exactly as the free facility already does it.
+   */
+  @Column({ nullable: false, unique: true })
   institutionPhone: string;
 
   @Column({  nullable: false  , unique:true})

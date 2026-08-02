@@ -7,6 +7,7 @@ import {
   Query,
   UseGuards,
   ParseUUIDPipe,
+  VERSION_NEUTRAL,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
@@ -14,8 +15,13 @@ import { Account } from '@src/user/entities/account.entity';
 import { NotificationService } from './notification.service';
 import { NotificationQueryDto } from './dto/notification-query.dto';
 
+/**
+ * Mounted on BOTH `/api/notifications/...` and `/api/v1/notifications/...` —
+ * VERSION_NEUTRAL keeps existing (unversioned) clients working while `'1'`
+ * lines these routes up with the rest of the API. No breaking change.
+ */
 @UseGuards(JwtAuthGuard)
-@Controller('notifications')
+@Controller({ path: 'notifications', version: [VERSION_NEUTRAL, '1'] })
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 

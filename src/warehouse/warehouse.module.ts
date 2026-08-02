@@ -15,8 +15,34 @@ from './entities/warehouse-inventory.entity';
 import { WarehouseAdminService }
 from './warehouse-admin.service';
 
+import { DeliveryTariff }
+from './entities/delivery-tariff.entity';
+
+import { Product }
+from '@src/waste-management/entities/product.entity';
+import { MaterialCondition }
+from '@src/waste-management/entities/material-condition.entity';
+
+import { DeliveryQuoteService }
+from './providers/delivery-quote.service';
+
+import { DeliveryRate }
+from './entities/delivery-rate.entity';
+
+import { DeliveryRateService }
+from './providers/delivery-rate.service';
+
+import { DeliveryRateController }
+from './delivery-rate.controller';
+
 import { WarehouseAdminController }
 from './warehouse-admin.controller';
+
+import { InventoryController }
+from './inventory.controller';
+
+import { InventoryQueryService }
+from './providers/inventory-query.service';
 
 import { WasteCommonModule } from '@src/waste-management/common/waste-common.module';
 import { TruckEntity } from '@src/truck/entities/truck.entity';
@@ -43,6 +69,16 @@ from '../permission/permissions.module';
       Warehouse,
       WarehouseManager,
       WarehouseInventory,
+      DeliveryTariff,
+      // The per-kilometre rate the BACKEND admin authors. A separate table from
+      // the Odoo tariff mirror above, which the sync job replaces wholesale — a
+      // value written into that one would vanish on the next Odoo edit, with
+      // nothing to trace.
+      DeliveryRate,
+      Product,
+      // Grades belong to a material, and stock is held per grade — so a stock
+      // response that wants to name one by id has to read them.
+      MaterialCondition,
       TruckEntity,
     ]),
 
@@ -54,11 +90,19 @@ from '../permission/permissions.module';
 
   providers: [
     WarehouseAdminService,
+    DeliveryQuoteService,
+    DeliveryRateService,
+    InventoryQueryService,
   ],
 
   controllers: [
     WarehouseAdminController,
+    InventoryController,
+    DeliveryRateController,
   ],
+
+  // The order module prices delivery from the mirror Odoo authors.
+  exports: [DeliveryQuoteService, DeliveryRateService, TypeOrmModule],
 })
 
 export class WarehouseModule {}

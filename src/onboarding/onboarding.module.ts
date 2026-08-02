@@ -32,6 +32,12 @@ import { CoreModule } from '@src/core/core.module';
 import { OdooSyncModule } from '@src/odoo-sync/odoo-sync.module';
 import { NotificationModule } from '@src/notification/notification.module';
 import { ShiftModule } from '@src/shift/shift.module';
+import { ProvinceAdminController } from './controllers/province-admin.controller';
+import { ProvinceAdminService } from './services/province-admin.service';
+import { ProvinceUsageService } from './services/province-usage.service';
+import { OnboardingSubmissionService } from './services/onboarding-submission.service';
+import { Media } from '@src/media/entities/media.entity';
+import { AccountManagementModule } from '@src/account-management/account-management.module';
 
 
 
@@ -47,7 +53,8 @@ import { ShiftModule } from '@src/shift/shift.module';
        ExternalPartnerWasteCategory,
        InstitutionMaterial,
        FactoryMaterial,
-       ExternalPartnerMaterial
+       ExternalPartnerMaterial,
+       Media
 
       ]),
     AuthModule,
@@ -56,14 +63,20 @@ import { ShiftModule } from '@src/shift/shift.module';
     CommonModule,
     CoreModule,
     ShiftModule,
+    // For ApplicationsCacheService: an applicant's correction must drop the
+    // admin's cached listing pages.
+    AccountManagementModule,
   ],
-  controllers: [OnboardingController, InstitutionOnboardingController, FactoryOnboardingController, ExternalPartnerOnboardingController, CollectorOnboardingController],
+  controllers: [OnboardingController, InstitutionOnboardingController, FactoryOnboardingController, ExternalPartnerOnboardingController, CollectorOnboardingController, ProvinceAdminController],
   providers: [
     OnboardingService,
     InstitutionOnboardingService,
     CollectorOnboardingService,
     FactoryOnboardingService,
-    ExternalPartnerOnboardingService
+    ExternalPartnerOnboardingService,
+    ProvinceAdminService,
+    ProvinceUsageService,
+    OnboardingSubmissionService
   ],
   exports: [
     OnboardingService,

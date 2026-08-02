@@ -60,6 +60,30 @@ export class AccountStatusNotifier {
     await this.send(accountId, title, body, { event: status, reason: description ?? null });
   }
 
+  /**
+   * Fired when the reviewer WITHDRAWS a document request.
+   *
+   * They asked for something, changed their mind, and are now judging the
+   * application on what was already submitted. The applicant has to be told,
+   * because until this message arrives their screen still says "upload your
+   * licence again" — a demand nobody is waiting on any more, which they will
+   * either keep trying to satisfy or read as the app being broken.
+   *
+   * Deliberately not routed through `notifyStatusDecision`: that method
+   * returns silently for PENDING_APPROVAL, so this notice would have been
+   * written, sent nowhere, and never missed.
+   */
+  async notifyReviewResumed(accountId: string, reason?: string): Promise<void> {
+    await this.send(
+      accountId,
+      'لم يعد مطلوباً منك رفع مستندات',
+      reason
+        ? `تم التراجع عن طلب المستندات وطلبك قيد المراجعة مجدداً. ${reason}`
+        : 'تم التراجع عن طلب المستندات، وطلبك قيد المراجعة مجدداً بما قدّمته سابقاً.',
+      { event: AccountStatus.PENDING_APPROVAL, reason: reason ?? null },
+    );
+  }
+
   /** Fired when an admin blocks an account. */
   async notifyBlocked(accountId: string, reason?: string): Promise<void> {
     await this.send(

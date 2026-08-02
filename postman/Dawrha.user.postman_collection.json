@@ -1,0 +1,3006 @@
+{
+  "info": {
+    "name": "Dawrha — تطبيق المستخدم (Citizen)",
+    "_postman_id": "dawrha-user-1785600000000",
+    "description": "# راوتات تطبيق المستخدم — مرتّبة بترتيب الرحلة\n\nمجموعة **مستقلّة** للمواطن وحده. المجموعة الرئيسية تحمل الأدوار كلها معاً،\nوهي شكلٌ صحيح للاطّلاع وخاطئ للعمل: من يفتحها ليعمل على تطبيق المستخدم\nيمرّ على ٥٨ راوت أدمن و١٥ راوت سائق لا تخصّه، وما يخصّه مبعثر في ثلاثة مجلدات.\n\n## الترتيب\nالمجلدات مرتّبة كما يعيشها المستخدم: زائر ← حساب ← رئيسية ← سلة ← طلب ← ما بعد البيع.\n\n## التوكن\n- `{{citizenToken}}` — بعد `POST /auth/login/user-app` وتفعيل OTP.\n- `{{tempToken}}` — التوكن **المؤقّت** الذي يرجع من التسجيل/الدخول قبل إدخال OTP.\n- مجلد «زائر» بلا توكن إطلاقاً.\n\n## قواعد المسارات\n- البادئة `/api` وأغلب المسارات `v1` → `/api/v1/...`\n- **الاستثناء**: `notifications` و`media` تعملان بلا نسخة أيضاً → `/api/notifications/...`\n- الترويسة `x-lang: ar` أو `en` تحدّد لغة الرسائل والمحتوى الثابت.\n\n## ما ليس هنا ولماذا\n- `my-categories` / `my-materials` — للمؤسسات والمصانع: صلاحية `waste.materials.view`،\n  والمواطن لا يملكها لأنه لا يختار تصنيفات في التسجيل أصلاً.\n- `products/:id/availability` — للمصانع والمنشآت الحرّة: صلاحية `waste.products.availability`.\n- `waste/category-requests` — للمؤسسات وحدها: صلاحية `waste.categories.request`.\n\nصلاحيات المواطن كاملةً (من `ROLE_PERMISSIONS_MAP`):\n`waste.categories.view` · `waste.products.view` · `waste.offers.view` ·\n`waste.products.suggest` · `waste.products.popular` · `cart.view` · `cart.manage`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "server",
+      "value": "http://localhost"
+    },
+    {
+      "key": "port",
+      "value": "3000"
+    },
+    {
+      "key": "citizenToken",
+      "value": ""
+    },
+    {
+      "key": "tempToken",
+      "value": ""
+    },
+    {
+      "key": "refreshToken",
+      "value": ""
+    },
+    {
+      "key": "deviceId",
+      "value": "device-postman-1"
+    },
+    {
+      "key": "categoryId",
+      "value": ""
+    },
+    {
+      "key": "productId",
+      "value": ""
+    },
+    {
+      "key": "offerId",
+      "value": ""
+    },
+    {
+      "key": "itemId",
+      "value": ""
+    },
+    {
+      "key": "orderId",
+      "value": ""
+    },
+    {
+      "key": "partId",
+      "value": ""
+    },
+    {
+      "key": "locationId",
+      "value": ""
+    },
+    {
+      "key": "provinceId",
+      "value": ""
+    },
+    {
+      "key": "notificationId",
+      "value": ""
+    },
+    {
+      "key": "mediaId",
+      "value": ""
+    },
+    {
+      "key": "favouriteId",
+      "value": ""
+    },
+    {
+      "key": "accountId",
+      "value": ""
+    },
+    {
+      "key": "resetTicket",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0️⃣ زائر — قبل التسجيل (بلا توكن)",
+      "description": "ما يراه من فتح التطبيق ولم يسجّل بعد.\n\n**تُعرَض الأسعار هنا** خلافاً لمسارات `waste/public` العامة، لأن المسار نفسه\n(`user-app/guest`) يقول أيّ نوع مشترٍ سيصير هذا الزائر — فالرقم المعروض هو\nالرقم الذي سيُدفَع له فعلاً. ولا تظهر إلا المواد التي لها **سعر نافذ** لإحدى\nشريحتَي التطبيق: المادة المسعّرة لأحد لا يمكن شراؤها بعد التسجيل، وعرضها وعدٌ\nلن يُوفى.\n\nولا يوجد هنا أي راوت كتابة — الزائر بلا حساب تُعلَّق عليه سلّة وبلا موقع\nتُطابَق به المستودعات.",
+      "item": [
+        {
+          "name": "🗂️ التصنيفات",
+          "id": "usr1",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يأخذ**: `page` · `limit` (≤50) · `search` اختياري.\n\n**يرجع**: `{ categories[], pagination }`\nوكل تصنيف: `id` · `name` · `description` · `image` · `product_count`.\n\n**من الداتا بيز**: `waste_categories` (النشِطة وحدها)،\nمُصفّاة بـ `EXISTS` على `products` + `product_pricing` — أي أن التصنيف\nالذي كل مواده مسعّرة لشريحة أخرى **لا يظهر**. التصنيف الفارغ طريق مسدود:\nيضغطه الزائر فلا يجد شيئاً، ولا يتعلّم إلا أن الكتالوج ناقص.\n\n**لا يكتب شيئاً.**",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user-app/guest/categories?page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user-app",
+                "guest",
+                "categories"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📦 مواد تصنيف",
+          "id": "usr2",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يأخذ**: `categoryId` في المسار (UUID) · `page` · `limit`.\n\n**يرجع**: `{ products[], pagination }` وكل مادة:\n`id` · `name` · `image` · `category_name` · `unit_type` · `unit_label` ·\n`prices` · `has_offer` · `offer_price` · `discount_percentage` ·\n`currency` · `requires_login_to_order: true`.\n\n**من**: `products` ⋈ `waste_categories` ⋈ `product_pricing`\n(+ `measurement_units` لاسم الوحدة، و`offers` لأفضل عرض مُوجَّه لهذه الشريحة).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user-app/guest/categories/{{categoryId}}/products?page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user-app",
+                "guest",
+                "categories",
+                "{{categoryId}}",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🧱 كل المواد",
+          "id": "usr3",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يأخذ**: `page` · `limit` · `category_id` اختياري · `search` اختياري.\n\n**يرجع**: نفس شكل مواد التصنيف.\n\n**من**: `products` + `product_pricing` (سعر نافذ لشريحة التطبيق) + `offers`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user-app/guest/products?page=1&limit=10&search=",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user-app",
+                "guest",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔎 تفاصيل مادة",
+          "id": "usr4",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يأخذ**: `productId` في المسار.\n\n**يرجع**: `{ product }` بنفس حقول القائمة.\n\n**404** إذا كانت المادة غير نشِطة أو **بلا سعر نافذ** لهذه الشريحة —\nوجودها في الجدول لا يعني أنها معروضة للبيع.\n\n**من**: `products` + `product_pricing` + `material_conditions` (تسميات الدرجات).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user-app/guest/products/{{productId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user-app",
+                "guest",
+                "products",
+                "{{productId}}"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🎁 العروض",
+          "id": "usr5",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع**: `{ offers[], pagination }` وكل عرض:\n`offer_id` · `product_id` · `product_name` · `product_image` ·\n`offer_price` · `discount_percentage` · `condition` · `valid_from` · `valid_until`.\n\n**من**: `offers` ⋈ `products`، بشرط `is_active` و`valid_from <= NOW()`\nو`valid_until` فارغة أو مستقبلية، و**استهداف الشريحة**: عرضٌ موجَّه للمصانع\nلا يظهر في تطبيق المستخدم — الإعلان عن خصم لا يمكن للقارئ أخذه أسوأ من عدم الإعلان.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user-app/guest/offers?page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user-app",
+                "guest",
+                "offers"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔍 بحث موحّد",
+          "id": "usr6",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يأخذ**: `query` (مطلوب) · `page` · `limit`.\n\n**يرجع**: `{ query, categories[], products[], pagination: { categories, products } }`\n— صندوق بحث واحد فوق التصنيفات **والمواد** معاً. من يكتب «بلاستيك» لا يعرف\nأيّهما يسمّي، ومطالبته باختيار تبويب أولاً سؤال قاعدة البيانات لا سؤاله.\n\n**من**: `waste_categories` + `products` (بحث `ILIKE` على الاسم).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user-app/guest/search?query=بلاستيك&page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user-app",
+                "guest",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "بلاستيك"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣ الحساب — تسجيل ودخول",
+      "description": "التسجيل والدخول **لا يعطيان توكن الوصول مباشرة**: يرجع `tempToken`،\nثم يُفعَّل الحساب بـ OTP في المجلد التالي فيتحوّل إلى `accessToken`.\n\nالجهاز جزءٌ من الهوية لا زينة: `deviceId` يُسجَّل في `user_devices` مع الـ\nrefresh token و`fcmToken`، فالخروج من جهاز لا يُخرج البقية، والإشعار يصل\nالجهاز الصحيح.",
+      "item": [
+        {
+          "name": "🆕 تسجيل مواطن",
+          "id": "usr7",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**:\n- `fullName` — مطلوب.\n- `email` — مطلوب، صيغة بريد. **الهوية**، ولا يُعدَّل لاحقاً.\n- `password` — ٨–٦٤ حرفاً، وفيه حرف كبير وصغير ورقم أو رمز.\n- `phoneNumber` — رقم **سوري**: `9639XXXXXXXX`. يُطبَّع تلقائياً\n  (`09xx` و`+9639xx` تصل إلى الصيغة نفسها) قبل التحقق.\n\n**يرجع**: `{ message, result: { tempToken, ... } }` — توكن مؤقّت لا يفتح شيئاً\nسوى راوتَي OTP. ويُرسَل رمز التفعيل إلى البريد.\n\n**يكتب**: صفّاً في `accounts` (بحالة غير مفعّلة + `password_hash` بـ argon2)\nوصفّاً في `citizen_profiles`، ويسجّل الجهاز في `user_devices`.\nكلمة المرور **لا تُخزَّن أبداً** — يُخزَّن هاشها.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/register/citizen",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register",
+                "citizen"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"محمد أحمد\",\n  \"email\": \"user@example.com\",\n  \"password\": \"Passw0rd!\",\n  \"phoneNumber\": \"963931234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🆕 تسجيل بـ Google",
+          "id": "usr8",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `TokenId` — الـ `id_token` من جوجل (لا كلمة مرور) + بيانات الجهاز.\n\n**يرجع**: التوكنات مباشرة — **بلا OTP**، لأن جوجل تحقّقت من البريد فعلاً،\nوإعادة التحقّق منه تسأل المستخدم إثبات ما أُثبِت.\n\n**يكتب**: `accounts` (مع `google_id` وبلا `password_hash`) + `citizen_profiles` + `user_devices`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/register/citizen/google",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register",
+                "citizen",
+                "google"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"TokenId\": \"<google id_token>\",\n  \"deviceId\": \"{{deviceId}}\",\n  \"deviceType\": \"ANDROID\",\n  \"fcmToken\": \"<fcm>\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔑 دخول",
+          "id": "usr9",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `email` · `password` · `deviceId` (مطلوب) ·\n`deviceType` · `fcmToken` · `rememberMy` (اختيارية).\n\n**يرجع**: `{ accessToken, refreshToken }` للحساب المفعّل،\nأو `tempToken` إن كان الحساب لم يُفعَّل بعد فيُعاد إرسال OTP.\n\n`rememberMy` تُطيل عمر الـ refresh token لهذا **الجهاز وحده**.\n\n**من/إلى**: يقرأ `accounts`، ويكتب/يحدّث صفّ الجهاز في `user_devices`\n(refresh token مهشوم + آخر دخول + `fcm_token`).\n\n⚠️ المسار خاصّ بتطبيق المستخدم: `login/collector-app` و`login/factory-app`\nأبواب أخرى، ودخول المواطن منها مرفوض.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/login/user-app",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login",
+                "user-app"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"Passw0rd!\",\n  \"deviceId\": \"{{deviceId}}\",\n  \"deviceType\": \"ANDROID\",\n  \"fcmToken\": \"<fcm>\",\n  \"rememberMy\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔑 دخول بـ Google",
+          "id": "usr10",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يرجع** التوكنات مباشرة. **يقرأ** `accounts` بـ `google_id` ويكتب `user_devices`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/login/user-app/google",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login",
+                "user-app",
+                "google"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"TokenId\": \"<google id_token>\",\n  \"deviceId\": \"{{deviceId}}\",\n  \"rememberMy\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2️⃣ التفعيل واستعادة كلمة المرور",
+      "item": [
+        {
+          "name": "✅ تأكيد OTP",
+          "id": "usr11",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يحتاج**: `Bearer {{tempToken}}` — التوكن المؤقّت من التسجيل/الدخول.\n\n**يأخذ**: `otpCode` — **٥ أرقام** بالضبط · `deviceId` · `rememberMy`.\n\n**يرجع**: `{ accessToken, refreshToken }` — هنا يصير الحساب مفعّلاً.\nانسخ `accessToken` إلى متغيّر `citizenToken`.\n\n**يكتب**: يفعّل الصفّ في `accounts` ويبطل الرمز، ويكتب refresh token في `user_devices`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/otp/verify",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "otp",
+                "verify"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tempToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"otpCode\": \"12345\",\n  \"deviceId\": \"{{deviceId}}\",\n  \"rememberMy\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔄 إعادة إرسال OTP",
+          "id": "usr12",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "description": "**يحتاج** `{{tempToken}}` ولا يأخذ بودي. يولّد رمزاً جديداً ويرسله للبريد ويبطل السابق.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/otp/resend",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "otp",
+                "resend"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tempToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔓 نسيت كلمة المرور",
+          "id": "usr13",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `email`.\n\n**يرجع**: رسالة نجاح **سواء وُجد البريد أو لا** — الردّ المختلف يكشف\nأيّ العناوين مسجّلة عندنا لمن يجرّب قائمة بريد.\n\n**من/إلى**: يقرأ `accounts` ويكتب رمز الاستعادة عليه مع صلاحيته.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/password/forgot",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "password",
+                "forgot"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔄 إعادة إرسال رمز الاستعادة",
+          "id": "usr14",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/password/forgot/resend",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "password",
+                "forgot",
+                "resend"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✅ تأكيد رمز الاستعادة",
+          "id": "usr15",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `email` · `otpCode` (٥ أرقام).\n\n**يرجع**: `{ resetTicket }` — تذكرة لمرّة واحدة تُرسَل في الراوت التالي.\nالرمز نفسه لا يُقبَل لتغيير كلمة المرور: تذكرةٌ منفصلة تعني أن من التقط\nالرمز من إشعار على الشاشة لا يملك ما يكفي.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/password/verify",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "password",
+                "verify"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"otpCode\": \"12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔐 تعيين كلمة مرور جديدة",
+          "id": "usr16",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `email` · `resetTicket` · `newPassword` · `confirmPassword`\n(نفس شروط قوّة كلمة المرور في التسجيل).\n\n**يكتب**: `password_hash` جديد في `accounts` ويبطل التذكرة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/password/reset",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "password",
+                "reset"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"resetTicket\": \"{{resetTicket}}\",\n  \"newPassword\": \"NewPassw0rd!\",\n  \"confirmPassword\": \"NewPassw0rd!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3️⃣ الجلسة — التوكن والأجهزة",
+      "item": [
+        {
+          "name": "♻️ تجديد التوكن",
+          "id": "usr17",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يحتاج**: `Bearer {{refreshToken}}` لا `accessToken`.\n\n**يأخذ**: `deviceId` — والجهاز جزء من الشرط: توكن تجديد سُرِق من جهاز\nلا يُجدَّد على غيره.\n\n**يرجع**: زوجاً جديداً. **يحدّث** الصفّ في `user_devices`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/refresh-token",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh-token"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{refreshToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "♻️ تجديد التوكن المؤقّت",
+          "id": "usr18",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "لمن طال بقاؤه على شاشة OTP حتى انتهت صلاحية التوكن المؤقّت.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/temporary-token/refresh",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "temporary-token",
+                "refresh"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{tempToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📲 تحديث FCM Token",
+          "id": "usr19",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يكتب** `fcm_token` على صفّ الجهاز في `user_devices` — بدونه لا يصل إشعار.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/FCMToken",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "FCMToken"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"fcmToken\": \"<fcm>\",\n  \"deviceType\": \"ANDROID\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🌐 لغة الجهاز",
+          "id": "usr20",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `deviceId` · `language` (`ar` أو `en`).\n\n**لماذا على الجهاز لا على الحساب**: الإشعار يُرسَل والتطبيق مغلق،\nفلا ترويسة `x-lang` تُقرأ حينها — اللغة المحفوظة على الجهاز هي الوحيدة\nالمتاحة وقت الإرسال. **يكتب** `user_devices.language`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/device/language",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "device",
+                "language"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"language\": \"ar\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🚪 خروج",
+          "id": "usr21",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `deviceId`.\n\n**يمسح** refresh token و`fcm_token` من صفّ **هذا الجهاز وحده** في `user_devices`.\nالخروج من الهاتف لا يُخرج اللوحي.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/logout",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "logout"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4️⃣ الملف الشخصي",
+      "item": [
+        {
+          "name": "👤 ملفي",
+          "id": "usr22",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع**: `{ message, result: { account, profile } }`\n- `account` — صفّ `accounts` كاملاً **ما عدا `passwordHash`** (يُحذف قبل الإرجاع).\n- `profile` — صفّ `citizen_profiles` مع علاقاته (العناوين).\n\n**من**: `accounts` + `citizen_profiles` (+ `locations` + `provinces`).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user/profile",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user",
+                "profile"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل الملف",
+          "id": "usr23",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ** (كلها اختيارية): `name` ≤255 · `phone` (`+` ثم ٧–١٥ رقماً) · `description` ≤1000.\n\n**البريد غير موجود عمداً**: هو الهوية التي يُبنى عليها الدخول والاستعادة،\nوتغييره من شاشة تعديل عادية يعني نقل ملكية الحساب بضغطة.\n\n**يكتب**: `accounts` (الحقول المرسَلة فقط).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user/profile",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user",
+                "profile"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"محمد أحمد\",\n  \"phone\": \"+963931234567\",\n  \"description\": \"نبذة قصيرة\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔐 تغيير كلمة المرور",
+          "id": "usr24",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: الثلاثة مطلوبة. ويُرفض إن كانت الجديدة **مطابقة للقديمة**.\n\n**لماذا كلمة المرور الحالية**: التوكن قد يكون على جهاز تُرك مفتوحاً،\nوبدون هذا السؤال يستطيع من يمسك الجهاز أن يقفل صاحبه خارج حسابه.\n\n**يكتب**: `accounts.password_hash` بعد تحقّق argon2.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user/password",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user",
+                "password"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"Passw0rd!\",\n  \"newPassword\": \"NewPassw0rd!\",\n  \"confirmPassword\": \"NewPassw0rd!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5️⃣ العناوين (للمواطن وحده)",
+      "description": "المواطن يملك **عدّة** عناوين — بيت وعمل — وبقيّة الأدوار تضبط عنواناً\nواحداً في التسجيل. الراوتات الثلاثة ترفض أي دور آخر صراحةً.\n\n**والعنوان شرطُ الطلب**: `POST /orders/checkout` يرفض بـ 400 إن لم تكن\nهناك محافظة، لأن المستودعات تُطابَق بالمحافظة.",
+      "item": [
+        {
+          "name": "📍 عناويني",
+          "id": "usr25",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع**: مصفوفة، كل عنصر:\n`id` · `address` · `description` · `coordinates: [lng, lat]` · `province: { id }`.\n\n**من**: `citizen_profiles` ⋈ `locations` ⋈ `provinces`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user/locations",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user",
+                "locations"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة عنوان",
+          "id": "usr26",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**:\n- `coordinates` — مصفوفة **من عنصرين بالضبط**، بالترتيب `[lng, lat]`\n  (طول ثم عرض، ترتيب GeoJSON لا ترتيب خرائط جوجل — عكسها يضع دمشق في الصومال).\n- `address` — مطلوب · `descriptionAddress` — اختياري.\n- `provinceId` — UUID من `GET /onboarding/provinces`.\n\n**يرجع**: `{ id, message }`.\n\n**يكتب**: صفّاً في `locations` من نوع PostGIS `Point` مربوطاً بـ `citizen_profiles`،\nويُنشئ ملف المواطن إن لم يكن موجوداً.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user/locations",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user",
+                "locations"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coordinates\": [\n    36.2765,\n    33.5138\n  ],\n  \"address\": \"دمشق — المزة\",\n  \"descriptionAddress\": \"بجانب الحديقة\",\n  \"provinceId\": \"{{provinceId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف عنوان",
+          "id": "usr27",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "**يحذف** من `locations` بعد التأكّد أن العنوان **يخصّ حساب المُنادي** — وإلا 403.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/user/locations/{{locationId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "user",
+                "locations",
+                "{{locationId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏙️ المحافظات",
+          "id": "usr28",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع** `provinces` كاملة لملء قائمة الاختيار. **بلا توكن**.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/onboarding/provinces",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "onboarding",
+                "provinces"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6️⃣ الرئيسية — التصنيفات والمواد",
+      "description": "**الفرق الجوهري عن مجلد الزائر**: هنا الأسعار **بشريحة المُنادي**.\nالمواطن شريحته `INDIVIDUAL`، والمادة التي لا تحمل سعراً نافذاً لهذه الشريحة\n**غير موجودة بالنسبة له** — تُستبعَد داخل SQL لا بعد الجلب، فيبقى العدّ\nوحجم الصفحة صادقَين، والأهم: لا تصل سلّته أصلاً مادة لا يمكن أن يُحاسَب عليها.",
+      "item": [
+        {
+          "name": "🗂️ التصنيفات",
+          "id": "usr29",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**الصلاحية**: `waste.categories.view`.\n\n**يأخذ**: `page` · `limit` (≤50) · `search` · `sort` (`name` | `created_at`) · `order` (`asc` | `desc`).\n\n**يرجع**: `{ categories[], pagination: { current_page, total_pages, total_count, limit, has_next, has_prev } }`\nوكل تصنيف: `id` · `name` · `description` · `image` · `product_count` · `created_at` · `updated_at`.\n\n**مع `search`** يرتّب ما **يبدأ** بالنص المكتوب أولاً — ترتيب إكمال تلقائي لا ترتيب أبجدي.\n\n**من**: `waste_categories` + `EXISTS` على `products` و`product_pricing`\n(شريحة المُنادي وسعر نافذ الآن). النتيجة **مُخزَّنة مؤقّتاً** بمفتاح يشمل الشريحة —\nلولا ذلك لرأى المواطن قائمة المصنع.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/categories?page=1&limit=10&sort=name&order=asc&search=",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "categories"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "sort",
+                  "value": "name"
+                },
+                {
+                  "key": "order",
+                  "value": "asc"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📦 مواد تصنيف",
+          "id": "usr30",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**الصلاحية**: `waste.products.view`.\n\n**يأخذ**: `categoryId` بالمسار · `page` · `limit` ·\n`sort` (`name` | `price` | `popularity`) · `order` · `price_min` · `price_max`.\n\n**يرجع**: `{ category, products[], pagination }` وكل مادة:\n`id` · `name` · `description` · `image` · `category_id` · `category_name` ·\n`unit_type` · `unit_label` · `pricing: { individual, company, factory, free_facility, currency }` ·\n`has_offer` · `offer_price` · `discount_percentage` · `created_at`.\n\n`pricing.individual` هو سعر المواطن. (`condition_prices` تظهر لشرائح\nالمصانع والمنشآت الحرّة وحدها لأنها تشتري بالدرجة.)\n\n**من**: `products` ⋈ `waste_categories` ⋈ `product_pricing` ⋈ `offers`\n(+ `measurement_units` و`material_conditions` للتسميات).\n\n**والمادة داخل تصنيف مُعطَّل مُعطَّلة**: كان هذا ناقصاً، فكان تعطيل التصنيف\nيخفي العنوان وتبقى مواده تُعرَض وتُباع.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/categories/{{categoryId}}/products?page=1&limit=10&sort=name&order=asc&price_min=&price_max=",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "categories",
+                "{{categoryId}}",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "sort",
+                  "value": "name"
+                },
+                {
+                  "key": "order",
+                  "value": "asc"
+                },
+                {
+                  "key": "price_min",
+                  "value": ""
+                },
+                {
+                  "key": "price_max",
+                  "value": ""
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⚖️ الوحدات",
+          "id": "usr31",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع** الوحدات النشِطة وتسمياتها — تُملأ بها قائمة `unit_type` في السلّة والاقتراح.\n\n**من**: `measurement_units`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/units",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "units"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏷️ درجات مادة",
+          "id": "usr32",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع** درجات هذه المادة (ممتازة/جيدة…) بترتيبها.\n\n**والدرجات ملك المادة**: نفس الكود يعني شيئاً مختلفاً لمادتين مختلفتين،\nو**المادة بلا درجات أمر طبيعي** فيرجع مصفوفة فارغة — ليست خطأ.\n\n**من**: `material_conditions` بـ `product_id`.\n\nℹ️ المواطن يشتري بلا درجة (شريحته مسعّرة بسعر واحد)، والراوت مفيد للعرض.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/products/{{productId}}/conditions",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "products",
+                "{{productId}}",
+                "conditions"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⭐ الأكثر طلباً",
+          "id": "usr33",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**الصلاحية**: `waste.products.popular`.\n\n**يأخذ**: `limit` (افتراضي ١٠).\n\n**يرجع**: المواد الأكثر طلباً، مُرتَّبة عالمياً ثم **مُصفّاة لما يستطيع\nالمُنادي شراءه فعلاً** — الترتيب من الجميع والقائمة له.\n\n**من**: `order_part_lines` (تجميع) ⋈ `products` ⋈ `product_pricing`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/most-ordered?limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "most-ordered"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7️⃣ البحث والفلترة بالسعر",
+      "item": [
+        {
+          "name": "🔍 بحث",
+          "id": "usr34",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يأخذ**: `query` (مطلوب) · `type` (`all` | `product` | `category`) · `page` · `limit`.\n\n**يرجع**: تصنيفات و/أو مواد حسب `type`، بنفس أشكالها أعلاه، مع `pagination`.\n\n**من**: `products` و`waste_categories` بـ `ILIKE`، والمطابقات التي **تبدأ**\nبالنص أولاً. والتسعير يُطبَّق كما في القائمة العادية.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/search?query=بلاستيك&type=all&page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "بلاستيك"
+                },
+                {
+                  "key": "type",
+                  "value": "all"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "💰 مواد ضمن نطاق سعر",
+          "id": "usr35",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يأخذ**: `min_price` و`max_price` — **كلاهما مطلوب** · `page` · `limit`.\n\n**يرجع**: `{ products[], pagination }` مرتَّبة تصاعدياً بالسعر.\n\n**النطاق يُقارَن بسعر شريحة المُنادي وحدها** داخل `EXISTS` في SQL،\nفلا يُفلتَر بعد جلب الصفحة — وإلا لأعاد العدّ رقماً لا يمكن للقارئ الوصول إليه بالتصفّح.\n\n**من**: `products` + `product_pricing`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/products/by-price?min_price=0&max_price=50&page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "products",
+                "by-price"
+              ],
+              "query": [
+                {
+                  "key": "min_price",
+                  "value": "0"
+                },
+                {
+                  "key": "max_price",
+                  "value": "50"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8️⃣ العروض",
+      "item": [
+        {
+          "name": "🎁 العروض",
+          "id": "usr36",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**الصلاحية**: `waste.offers.view`.\n\n**يأخذ**: `page` · `limit` · `active_only` (افتراضي `true`) · `sort` (`discount` | `created_at`).\n\n**يرجع**: `{ offers[], pagination }` وكل عرض:\n`offer_id` · `product_id` · `product_name` · `product_image` · `offer_price` ·\n`discount_percentage` · `condition` · `description` · `valid_from` · `valid_until`.\n\n**من**: `offers` ⋈ `products`، مع **استهداف الأدوار**: العرض الموجَّه\nلشريحة أخرى لا يظهر للمواطن.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/offers?page=1&limit=10&active_only=true&sort=discount",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "offers"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "active_only",
+                  "value": "true"
+                },
+                {
+                  "key": "sort",
+                  "value": "discount"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔍 بحث في العروض",
+          "id": "usr37",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يأخذ**: `query` (مطلوب) · `category_id` اختياري · `page` · `limit`. نفس شكل الردّ أعلاه.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/offers/search?query=بلاستيك&category_id=&page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "offers",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "بلاستيك"
+                },
+                {
+                  "key": "category_id",
+                  "value": ""
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "9️⃣ السلة",
+      "description": "**السلّة تُعيد تسعير نفسها**: `unit_price` و`subtotal` يُكتبان على الصفّ\nوقت الإضافة، ويُحدَّثان إن غيّر الأدمن السعر — فالرقم الذي يُحاسَب عليه\nالمشتري وقت الدفع هو الرقم النافذ فعلاً لا رقمٌ تجمّد قبل أسبوع.\n\n**حدود المواطن**: الحد الأدنى **١** وحدة، والسقف اليومي **١٠٠** وحدة.\n(المؤسسات ١٠ بلا سقف · المصانع والمنشآت الحرّة ٥٠ بلا سقف.)",
+      "item": [
+        {
+          "name": "🛒 سلّتي",
+          "id": "usr38",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**الصلاحية**: `cart.view`. وتُنشَأ السلّة تلقائياً إن لم تكن موجودة.\n\n**يرجع**: `{ message, result: { cart_id, items[], summary } }`\n\nكل بند: `item_id` · `product_id` · `product_name` · `product_image` ·\n`quantity` · `unit_type` · `condition` · `unit_price` · `subtotal` · `is_offer`.\n\n`summary`: `total_items` · `total_weight` (مجموع البنود ذات الوحدات الوزنية فقط) ·\n`subtotal` · `discount` · `tax` · `total` · `currency` ·\n`meets_minimum` · `minimum_required` · `daily_limit` · `can_checkout`.\n\n**من**: `carts` ⋈ `cart_items` ⋈ `products` (+ `measurement_units` لمعرفة أيّ الوحدات وزنية).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/cart",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "cart"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة مادة",
+          "id": "usr39",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**الصلاحية**: `cart.manage`.\n\n**يأخذ**:\n- `product_id` — UUID.\n- `quantity` — ≥ 0.001.\n- `unit_type` — رمز الوحدة، **يُحوَّل إلى أحرف كبيرة تلقائياً** فـ`kg` و`KG` يصلان لنفس الصفّ.\n- `condition` — **مطلوب لشرائح المصانع والمنشآت الحرّة** على المواد المُدرَّجة، ولا يلزم المواطن.\n- `add_offer` — اختياري: يستخدم سعر العرض إن كان نافذاً.\n\n**يرجع**: السلّة كاملة بعد الإضافة.\n\n**يكتب**: صفّاً في `cart_items` وفيه `unit_price` **محسوباً من `product_pricing`**\nبشريحة المُنادي. والسعر المفقود **يُرفض** لا يُصفَّر: مادة بلا سعر لهذه الشريحة\nمادةٌ لم يكن يُفترض أن يراها أصلاً.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/cart/items",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "cart",
+                "items"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"quantity\": 5,\n  \"unit_type\": \"KG\",\n  \"add_offer\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل كمية بند",
+          "id": "usr40",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `quantity` (≥0.001) · `unit_type` اختياري.\n\n**يتحقّق** أن البند يخصّ سلّة المُنادي — وإلا 403.\n\n**يكتب**: `cart_items` (الكمية و`subtotal` المعاد حسابه).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/cart/items/{{itemId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "cart",
+                "items",
+                "{{itemId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 8,\n  \"unit_type\": \"KG\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف بند",
+          "id": "usr41",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "**يحذف** الصفّ من `cart_items` بعد التحقّق من الملكية.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/cart/items/{{itemId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "cart",
+                "items",
+                "{{itemId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🎁 إضافة عرض",
+          "id": "usr42",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `offer_id` · `quantity` · `unit_type`.\n\n**يكتب** بنداً في `cart_items` بـ `is_offer = true` وسعره من `offers.offer_price`\nبعد التأكّد أن العرض **نافذ الآن** و**موجَّه لدور المُنادي**.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/cart/offers",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "cart",
+                "offers"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"offer_id\": \"{{offerId}}\",\n  \"quantity\": 5,\n  \"unit_type\": \"KG\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🧹 تفريغ السلّة",
+          "id": "usr43",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "**يحذف كل** بنود `cart_items` لهذه السلّة، ويُبقي صفّ `carts` نفسه.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/cart",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "cart"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🔟 الطلبات",
+      "description": "**الطلب قد ينقسم**: إن لم يكفِ مستودع واحد، يُقسَّم إلى **أجزاء**\n(`order_parts`) كل جزء من مستودع. لذلك التفاصيل والتقييم والشكوى **بالجزء**\nلا بالطلب — في طلب مقسوم قد يكون مستودعٌ ممتازاً وآخر سيّئاً، ودرجةٌ واحدة\nللطلب كلّه لا تحمّل أحداً شيئاً.",
+      "item": [
+        {
+          "name": "🧾 إنشاء طلب (Checkout)",
+          "id": "usr44",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ** (كلاهما اختياري):\n- `fulfilment_mode` — `DELIVERY` أو `PICKUP`. **للمصانع وحدها** حقّ التوصيل؛\n  ومن سواها يُحوَّل الطلب إلى `PICKUP` **بلا خطأ** — إفشال طلب بسبب حقل\n  قد لا يكون المستخدم رآه أصلاً عدوانية بلا سبب.\n- `accept_partial_fulfilment` — جواب المشتري **مسبقاً** عن «هل أشحن المتوفّر\n  إن نقص القليل؟». يُسأل مرّة هنا فلا يُحلّ النقص لاحقاً بالتخمين ولا يكون الشحن الناقص مفاجأة.\n\n**يرجع**: `{ message, order_id, order_number, status, goods_total, currency,\nfulfilment_mode, delivery_available, allocation }`.\n\n**الشروط** — يُرفض بـ 400 إذا:\n- لا محافظة على الحساب (المستودعات تُطابَق بها) — أضف عنواناً أولاً.\n- السلّة فارغة.\n- القيمة دون الحد الأدنى لدورك (يذكر الردّ كم ينقص).\n\n**يقرأ**: `carts` · `cart_items` · `order_minimums` · `warehouses` · `warehouse_inventory`.\n**يكتب**: `orders` ثم `order_parts` و`order_part_lines` من التوزيع،\nو**يفرّغ `cart_items`**.\n\nوالسلّة تُفرَّغ **بعد** إنشاء الطلب لا قبله: انهيارٌ بين الخطوتين يجب أن\nيُضيّع الطلب لا سلّة المشتري.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/orders/checkout",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "checkout"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accept_partial_fulfilment\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📋 طلباتي",
+          "id": "usr45",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع**: `{ message, orders[], pagination }` وكل طلب:\n`order_id` · `order_number` · `status` · `fulfilment_mode` ·\n`goods_total` · `delivery_total` · `grand_total` · `currency` ·\n`warehouse_count` · `is_split` · `created_at`.\n\n`is_split` في القائمة نفسها ليعرف المشتري من أول نظرة أن طلبه من أكثر من مكان.\n\n**من**: `orders` (بـ `buyer_account_id`) + عدّ `order_parts` الحيّة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/orders?page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔎 تفاصيل طلب",
+          "id": "usr46",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع**: `{ message, order }` وفيه:\n`order_id` · `order_number` · `status` · `fulfilment_mode` ·\n`goods_total` · `delivery_total` (صفر إن لم يكن توصيلاً) · `grand_total` ·\n`is_split` · `can_cancel` · `can_confirm_receipt` ·\n`placed_at` · `preparing_at` · `delivered_at` · `completed_at` · `parts[]`.\n\nوكل **جزء**: `part_id` · `sequence` · `of` (٢ من ٣) · `status` ·\n`warehouse: { id, name, address, latitude, longitude }` — العنوان لأن\nطلب الاستلام يحتاج أن يعرف المشتري **إلى أين يذهب** — ·\n`distance_km` · `delivery_cost` · `goods_total` · `invoice_number` ·\n`output_zone` · `prepared_at` · `dispatched_at` · `delivered_at` ·\n`can_rate` · `lines[]`.\n\n**404 لطلب غيرك** — لا 403: الردّ المختلف يؤكّد أن معرّف طلب شخص آخر حقيقي.\n\n**من**: `orders` · `order_parts` ⋈ `warehouses` · `order_part_lines` · `order_part_ratings`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/orders/{{orderId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "❌ إلغاء طلب",
+          "id": "usr47",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `reason` اختياري (≤400).\n\n**متى يُسمح**: قبل `PREPARING` فقط — بعدها غادرت البضاعة الرفّ وصارت الفاتورة موجودة.\nالحالات المسموحة: `PENDING_ALLOCATION` · `AWAITING_APPROVAL` ·\n`NEEDS_CUSTOMER_DECISION` · `NEEDS_ADMIN`.\n\n**409** إن كان التحضير قد بدأ — وهو بالضبط ما يحتاج أن يُقال لمن ضغط\nإلغاء في اللحظة التي وافق فيها آخر مدير.\n\n**يكتب** داخل معاملة واحدة مع **قفل** على صفّ الطلب:\n`orders.status` و`order_parts`، ويحرّر الحجز في `warehouse_inventory`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/orders/{{orderId}}/cancel",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}",
+                "cancel"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"غيّرت رأيي\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✅ تأكيد الاستلام",
+          "id": "usr48",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "description": "لا بودي.\n\n**يُسمح** فقط والطلب `DELIVERED` — وإلا 409.\n\n**الكلمة الأخيرة للمشتري عمداً**: كل مدير مستودع يؤكّد أن جزءه خرج،\nووحده المشتري يقول إنه وصل. نظامٌ يُغلق الطلب بشهادة البائع لا يملك أثراً\nللواقعة الوحيدة التي تهمّ من دفع.\n\n**يرجع**: `{ message, order_id, status: COMPLETED, grand_total, currency }`.\n**يكتب**: `orders.status` و`completed_at`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/orders/{{orderId}}/confirm-receipt",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}",
+                "confirm-receipt"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣1️⃣ بعد الاستلام — تقييم وشكوى",
+      "item": [
+        {
+          "name": "⭐ تقييم جزء",
+          "id": "usr49",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `stars` — عدد صحيح **١..٥** · `note` اختياري (≤1000).\n\n**بالجزء لا بالطلب**: في طلب مقسوم قد يكون مستودعٌ ممتازاً وآخر سيّئاً.\n\n**409** إن لم يكن الجزء `DELIVERED` بعد.\n\n**التقييم واحد لكل جزء**: إعادة التقييم **تستبدل** الحكم السابق ولا تضيف ثانياً.\n\n**يكتب**: `order_part_ratings` (صفّ واحد لكل `part_id`).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/orders/parts/{{partId}}/rating",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "parts",
+                "{{partId}}",
+                "rating"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stars\": 5,\n  \"note\": \"خدمة ممتازة\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⚠️ شكوى على جزء",
+          "id": "usr50",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**:\n- `kind` — `SHORTAGE` · `QUALITY` · `DELIVERY` · `BILLING` · `OTHER`.\n- `description` — مطلوب (≤2000).\n- `claimed_shortfall` — كم نقص، اختياري: يجعل النقص قابلاً للمطابقة مع سجلّ أودو.\n\n**النوع يقرّر من يردّ**، وهذا ليس ورقيات:\n- `SHORTAGE` و`QUALITY` → **المستودع**، لأن الدليل هناك: سجلّ حركة المناطق\n  في أودو يقول ما خرج فعلاً ومن أيّ منطقة وبيد من ومتى.\n- `DELIVERY` و`BILLING` و`OTHER` → **الأدمن**، فليستا من فعل المستودع.\n\nأرسِل أيّهما إلى المكتب الخطأ فمن يقرأها لا دليل عنده ليقرّر، فتتحوّل إلى تبادل ادّعاءات.\n\n**409** قبل التسليم.\n\n**يرجع**: `{ message, complaint_id, routed_to }`.\n**يكتب**: `order_complaints` — والوجهة **تُخزَّن** لا تُشتقّ عند القراءة،\nفتغيير قواعد التوجيه لاحقاً لا ينقل شكاوى قيد المعالجة بصمت.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/orders/parts/{{partId}}/complaints",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "parts",
+                "{{partId}}",
+                "complaints"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"SHORTAGE\",\n  \"description\": \"وصل ٤٥ كغ بدل ٥٠\",\n  \"claimed_shortfall\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣2️⃣ الإشعارات",
+      "description": "تعمل **بنسخة وبلا نسخة**: `/api/notifications/...` و`/api/v1/notifications/...`.",
+      "item": [
+        {
+          "name": "🔔 إشعاراتي",
+          "id": "usr51",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يأخذ**: `page` · `limit` (≤100) · `unreadOnly` · \n`type` (`GENERAL` | `ORDER` | `RECYCLING_REQUEST` | `WAREHOUSE` | `DRIVER` | `TRUCK` | `ODOO`) ·\n`status` (`PENDING` | `SENT` | `FAILED`) ·\n`sortBy` (`createdAt` | `sentAt` | `readAt` | `updatedAt`) · `order`.\n\n**يرجع**: `{ items[], total, page, limit }`.\n\n**من**: `notifications` بـ `user_id`، **مستثنياً المحذوفة** (`deleted_at IS NULL`).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/notifications?page=1&limit=20&unreadOnly=false&type=&status=&sortBy=createdAt&order=DESC",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "notifications"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "unreadOnly",
+                  "value": "false"
+                },
+                {
+                  "key": "type",
+                  "value": ""
+                },
+                {
+                  "key": "status",
+                  "value": ""
+                },
+                {
+                  "key": "sortBy",
+                  "value": "createdAt"
+                },
+                {
+                  "key": "order",
+                  "value": "DESC"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔴 عدد غير المقروء",
+          "id": "usr52",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع** رقماً. للنقطة الحمراء على الأيقونة. **من**: `notifications` (`is_read = false`).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/notifications/unread-count",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "unread-count"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔎 إشعار واحد",
+          "id": "usr53",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يتحقّق** أنه يخصّ المُنادي قبل الإرجاع.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/notifications/{{notificationId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "{{notificationId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✅ تعليم كمقروء",
+          "id": "usr54",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "description": "**يكتب** `is_read` و`read_at` في `notifications`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/notifications/{{notificationId}}/read",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "{{notificationId}}",
+                "read"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✅ تعليم الكل كمقروء",
+          "id": "usr55",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "description": "**يكتب** على كل إشعارات المُنادي غير المقروءة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/notifications/read-all",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "read-all"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف إشعار",
+          "id": "usr56",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "**حذف ناعم**: يضبط `deleted_at` ولا يمحو الصفّ.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/notifications/{{notificationId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "{{notificationId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🧹 حذف الكل",
+          "id": "usr57",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "**حذف ناعم** لكل إشعارات المُنادي.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/notifications/clear-all",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "clear-all"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣2️⃣.5 المفضلة",
+      "description": "قائمة المواد المختصرة للمشتري. **راوتات واحدة للأدوار الأربعة** —\nالمواطن والمؤسسة والمصنع والجهة الحرّة — لأنه الفعل نفسه لكلٍّ منهم،\nوالسعر المعروض يُحسب من **شريحة المُنادي**: فالدور يغيّر الأرقام دون أن يغيّر الراوت.\n\nمربوطة بـ **الحساب** لا بالبروفايل: البروفايل أوراق دورٍ واحد والمواطن يكاد لا\nيملك واحداً، أما الحساب فيملكه كل مشترٍ وهو ما يحمله التوكن — ففحص الملكية\nمقارنةٌ بالمعرّف المسجَّل دخوله لا انضمام (join).",
+      "item": [
+        {
+          "name": "⭐ مفضّلتي",
+          "id": "usr58",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع**: `{ favourites[], pagination }` وكل عنصر:\n`favourite_id` · `product_id` · `product_name` · `product_image` ·\n`category_id` · `category_name` · `unit: { id, code }` · `price` ·\n`available` · `note` · `added_at`.\n\n**السعر بشريحتك أنت**. والمادة التي سُحب سعرها لشريحتك **تبقى** في القائمة\nبـ `price: null` و`available: false` — إسقاطها بصمت أسوأ: المشتري وضعها\nعمداً، و«اختفت» ليس شيئاً يستطيع التصرّف بناءً عليه، بخلاف «غير مسعّرة لك حالياً».\n\n**من**: `favourites` ⋈ `products` ⋈ `waste_categories` + `product_pricing`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/favourites?page=1&limit=20",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "favourites"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة إلى المفضلة",
+          "id": "usr59",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `product_id` (UUID) · `note` اختيارية (≤500).\n\n**409** إن كانت المادة في المفضلة بالفعل، ومعه `favourite_id` الموجود —\nالإضافة **مُتكرِّرة الاستدعاء بطبيعتها**: ضغط القلب مرتين على اتصال بطيء\nيجب أن يترك صفّاً واحداً، والعدّاد على الشاشة لا يعتمد على كم مرة ضُغط الزر\nوهو يبدو غير مستجيب. (فهرس فريد على `(account_id, product_id)`.)\n\n**404** لمادة غير موجودة **أو مُعطَّلة**: المفضلة اختصارٌ إلى شيء يمكن شراؤه،\nوالاختصار إلى لا شيء أسوأ من غياب الاختصار.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/favourites",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "favourites"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"note\": \"الدرجة التي يأخذها خط حلب\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل ملاحظة",
+          "id": "usr60",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**يأخذ**: `note` (≤500). والنصّ الفارغ **يمسحها** لا يخزّنها `\"\"`.\n\n**الملاحظة هي ما يعنيه «التعديل» هنا**: المادة نفسها لا تتغيّر — مفضلة تشير\nإلى مادة أخرى هي مفضلة أخرى — فبدون الملاحظة لا يكون للتعديل ما يعدّله.\n\n**404** لعنصر يخصّ مشترياً آخر (لا 403: الردّ المختلف يؤكّد أن المعرّف حقيقي).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/favourites/{{favouriteId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "favourites",
+                "{{favouriteId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"اطلبها مكبوسة\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف من المفضلة",
+          "id": "usr61",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "**404** لعنصر ليس لك. **يحذف** الصفّ من `favourites`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/favourites/{{favouriteId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "favourites",
+                "{{favouriteId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣3️⃣ اقتراح مادة",
+      "item": [
+        {
+          "name": "💡 اقتراح مادة جديدة",
+          "id": "usr62",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**الصلاحية**: `waste.products.suggest`.\n**محدود المعدّل**: ١٠ طلبات في الدقيقة.\n\n**يأخذ**:\n- `product_name` — مطلوب (≤255) · `category_id` — UUID مطلوب.\n- `unit_type` — رمز وحدة **نشِط** (يُتحقَّق منه، ويُحوَّل لأحرف كبيرة).\n- `description` · `estimated_price` · `image` · `additional_info` — اختيارية.\n  (`additional_info` تُضمّ إلى `description` في صفّ واحد.)\n\n**يرجع**: `{ suggestion_id, status: PENDING_REVIEW, created_at, message }`.\n\n**يكتب**: `product_suggestions` + صفّاً في `audit_logs` يحمل **دور المقترِح**،\nويُشعِر الأدمن.\n\nوالقبول **لا يُنشئ مادة**: يسجّل القرار ويُشعر المقترِح — لأن المادة الموجودة\nوالمسعّرة لأحد غير مرئية لأي مشترٍ، فـ«أُنشئت» ليست «صارت تُباع».",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/products/suggest",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "products",
+                "suggest"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_name\": \"أغطية زجاجات\",\n  \"description\": \"بولي بروبيلين ملوّن\",\n  \"category_id\": \"{{categoryId}}\",\n  \"unit_type\": \"KG\",\n  \"estimated_price\": 3.5,\n  \"additional_info\": \"تتوفر بكميات أسبوعية\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣4️⃣ الصور (Media)",
+      "description": "تعمل **بنسخة وبلا نسخة** مثل الإشعارات. الرفع `multipart/form-data` لا JSON.",
+      "item": [
+        {
+          "name": "🖼️ صورة بالمعرّف",
+          "id": "usr63",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع** صفّ `media`: الرابط والحالة والمالك.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/media/{{mediaId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "media",
+                "{{mediaId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🖼️ صور مالك",
+          "id": "usr64",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**من**: `media` بـ `owner_id`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/media/owner/{{accountId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "media",
+                "owner",
+                "{{accountId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "♻️ استبدال صورة",
+          "id": "usr65",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "description": "`multipart/form-data`:\n- `file` — الصورة الجديدة (مطلوب).\n- `oldPublicId` — معرّف Cloudinary للقديمة (مطلوب) لتُحذف بعد نجاح الرفع.\n\n**الترتيب مقصود**: يُرفع الجديد أولاً، ثم يُحدَّث `media`، ثم يُحذف القديم —\nوحذفُ القديم غير حرج، فلو فشل بقيت صورة يتيمة على Cloudinary ولم يخسر المستخدم صورته.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/media/{{mediaId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "media",
+                "{{mediaId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "oldPublicId",
+                  "value": "accounts/uuid/PROFILE/1700000000",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔁 إعادة رفع صورة مرفوضة",
+          "id": "usr66",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "description": "للمالك وحده، و**فقط** إن كانت حالة الصورة `REJECTED`.\n\n**يكتب**: `media.status = PENDING` ويعيد الحساب إلى `PENDING_APPROVAL` في `accounts`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/media/{{mediaId}}/reupload",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "media",
+                "{{mediaId}}",
+                "reupload"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف صورة",
+          "id": "usr67",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "**يحذف** من `media` ومن Cloudinary.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/media/{{mediaId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "media",
+                "{{mediaId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣5️⃣ محتوى ثابت (بلا توكن)",
+      "item": [
+        {
+          "name": "ℹ️ من نحن",
+          "id": "usr68",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**يرجع**: `{ message, result: { title, body, last_updated } }`.\n\n**ليس من قاعدة البيانات**: النصوص في قواميس الترجمة\n`src/i18n/{ar,en}/translation.json` تحت `content.*`، وتُخدَم بلغة الطلب\n(ترويسة `x-lang`) وتُعدَّل بلا تعديل كود.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/content/about",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "content",
+                "about"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📜 شروط الاستخدام",
+          "id": "usr69",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "نفس الشكل. تُعرَض قبل التسجيل، ولذلك بلا توكن.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/content/terms",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "content",
+                "terms"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

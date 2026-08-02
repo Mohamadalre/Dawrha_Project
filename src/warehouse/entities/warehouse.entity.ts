@@ -1,10 +1,17 @@
 import {
   Column,
+  CreateDateColumn,
   Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
   OneToOne,
   PrimaryGeneratedColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 import { OdooSyncStatus } from '@src/waste-management/enums/odoo-sync-status.enum';
+import { Province } from '@src/user/entities/location/province.entity';
+import { WarehouseState } from '../enums/warehouse-state.enum';
 import { WarehouseManager } from './warehouse-manager.entity';
 
 /** A zone the warehouse is divided into (mirrors a recycle.zone in Odoo). */
@@ -43,9 +50,40 @@ export class Warehouse {
   @Column({ nullable: true })
   address?: string;
 
-  /** Governorate the warehouse is in — captured on creation, pushed to Odoo. */
+  /**
+   * Governorate NAME, kept as the human label shown in listings and as what
+   * travels to Odoo on creation. `provinceId` below is the queryable link.
+   */
   @Column({ length: 100, nullable: true })
   governorate?: string;
+
+  /**
+   * The governorate as a real row of `provinces` — the same table Odoo mirrors
+   * as `recycle.province`. Order allocation matches a buyer to warehouses by
+   * this id, never by comparing the free-text name.
+   */
+  @ManyToOne(() => Province, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'province_id' })
+  province?: Province;
+
+  @Index()
+  @Column({ name: 'province_id', type: 'uuid', nullable: true })
+  provinceId?: string;
+
+  /**
+   * Lifecycle mirrored from Odoo (`recycle.warehouse.state`), which owns it:
+   *   active   — normal
+   *   closing  — no new intake; existing stock still ships out
+   *   inactive — fully stopped
+   * Allocation may only choose ACTIVE warehouses: sending a new order to one
+   * that is winding down is precisely what the closing state exists to prevent.
+   */
+  @Column({
+    type: 'enum',
+    enum: WarehouseState,
+    default: WarehouseState.ACTIVE,
+  })
+  state: WarehouseState;
 
   /** Zones the warehouse is split into, pushed to Odoo on creation. */
   @Column({ type: 'jsonb', nullable: true })
@@ -62,6 +100,20 @@ export class Warehouse {
 
   @Column({ type: 'timestamptz', nullable: true })
   lastOdooSync?: Date;
+
+  /**
+   * When this warehouse was added.
+   *
+   * The listing orders by it — newest first, because the warehouse an admin is
+   * looking for is almost always the one just created, and alphabetical order
+   * buries it at whatever letter it happens to start with. The table had no
+   * timestamp at all, so "most recent" was not a question it could answer.
+   */
+  @CreateDateColumn({ type: 'timestamptz' })
+  createdAt: Date;
+
+  @UpdateDateColumn({ type: 'timestamptz' })
+  updatedAt: Date;
 
   @OneToOne(
     () => WarehouseManager,

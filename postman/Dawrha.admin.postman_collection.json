@@ -1,0 +1,4940 @@
+{
+  "info": {
+    "name": "Dawrha — Admin (لوحة الأدمن)",
+    "_postman_id": "dawrha-admin-1785500000000",
+    "description": "راوتات الأدمن مرتّبة **بترتيب التشغيل الفعلي**: جهّز المرجعيات أولاً\n(وحدات → محافظات → تصنيفات → منتجات → حالات المنتج → تسعير → عروض)،\nثم المستودعات والمخزون، ثم المراجعات.\n\n⚠️ **تغيير مهم:** حالات المادة صارت **تابعة للمنتج** لا عامة.\nراوتات `/admin/waste/conditions` القديمة لم تعد موجودة —\nاستُبدلت بـ `/admin/waste/products/{{productId}}/conditions`.\n\n⚠️ **وتغيير ثانٍ:** المنتج لا يُضاف من أودو بعد الآن، بل يُقترَح.\nالاقتراحات (من التطبيق ومن أودو) تُراجَع في قسم «الاقتراحات».\nوقبول الاقتراح **شكليّ**: يسجّل القرار ويُشعر المقترِح ولا يُنشئ مادة.\n\nكل راوتات الأدمن تتطلب {{adminToken}}.\nراوتات أودو تتطلب هيدر x-odoo-webhook-secret لا التوكن.\n\n⚙️ = الراوت يُزامَن مع أودو.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "server",
+      "value": "http://localhost"
+    },
+    {
+      "key": "port",
+      "value": "3000"
+    },
+    {
+      "key": "adminToken",
+      "value": ""
+    },
+    {
+      "key": "odooWebhookSecret",
+      "value": ""
+    },
+    {
+      "key": "categoryId",
+      "value": ""
+    },
+    {
+      "key": "productId",
+      "value": ""
+    },
+    {
+      "key": "conditionId",
+      "value": ""
+    },
+    {
+      "key": "pricingId",
+      "value": ""
+    },
+    {
+      "key": "offerId",
+      "value": ""
+    },
+    {
+      "key": "unitId",
+      "value": ""
+    },
+    {
+      "key": "citizenToken",
+      "value": ""
+    },
+    {
+      "key": "institutionToken",
+      "value": ""
+    },
+    {
+      "key": "factoryToken",
+      "value": ""
+    },
+    {
+      "key": "externalToken",
+      "value": ""
+    },
+    {
+      "key": "favouriteId",
+      "value": ""
+    },
+    {
+      "key": "provinceId",
+      "value": ""
+    },
+    {
+      "key": "warehouseId",
+      "value": ""
+    },
+    {
+      "key": "suggestionId",
+      "value": ""
+    },
+    {
+      "key": "profileId",
+      "value": ""
+    },
+    {
+      "key": "accountId",
+      "value": ""
+    },
+    {
+      "key": "mediaId",
+      "value": ""
+    },
+    {
+      "key": "requestId",
+      "value": ""
+    },
+    {
+      "key": "truckId",
+      "value": ""
+    },
+    {
+      "key": "driverId",
+      "value": ""
+    },
+    {
+      "key": "partId",
+      "value": ""
+    },
+    {
+      "key": "deliveryRateId",
+      "value": ""
+    },
+    {
+      "key": "orderId",
+      "value": ""
+    },
+    {
+      "key": "tripId",
+      "value": ""
+    },
+    {
+      "key": "stopId",
+      "value": ""
+    },
+    {
+      "key": "odooDriverId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0️⃣ الدخول",
+      "item": [
+        {
+          "name": "🔑 تسجيل دخول الأدمن",
+          "id": "adm1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "انسخ التوكن من الرد إلى المتغيّر adminToken — كل ما بعده يعتمد عليه.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/auth/login/admin",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login",
+                "admin"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@dawrha.com\",\n  \"password\": \"Admin@123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣ التقارير",
+      "item": [
+        {
+          "name": "📊 نظرة عامة",
+          "id": "adm2",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/reports/overview",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "reports",
+                "overview"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "👥 الحسابات",
+          "id": "adm3",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/reports/accounts",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "reports",
+                "accounts"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏭 المستودعات",
+          "id": "adm4",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/reports/warehouses",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "reports",
+                "warehouses"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🚚 الشاحنات",
+          "id": "adm5",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/reports/trucks",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "reports",
+                "trucks"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🧑‍✈️ السائقون",
+          "id": "adm6",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/reports/drivers",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "reports",
+                "drivers"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📦 الكتالوج",
+          "id": "adm7",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/reports/catalog",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "reports",
+                "catalog"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2️⃣ المرجعيات — وحدات القياس ⚙️",
+      "item": [
+        {
+          "name": "📄 عرض الوحدات",
+          "id": "adm8",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/units",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "units"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة وحدة ⚙️",
+          "id": "adm9",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "الوحدة تُدفَع إلى أودو: المادة هناك لا تُقاس إلا بوحدة يعرّفها الباك ايند.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/units",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "units"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"KG\",\n  \"name_en\": \"Kilogram\",\n  \"name_ar\": \"كيلوغرام\",\n  \"is_weight\": true,\n  \"allows_tolerance\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل وحدة ⚙️",
+          "id": "adm10",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/units/{{unitId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "units",
+                "{{unitId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name_ar\": \"كغم\",\n  \"is_active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف وحدة ⚙️",
+          "id": "adm11",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/units/{{unitId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "units",
+                "{{unitId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3️⃣ المرجعيات — المحافظات ⚙️",
+      "item": [
+        {
+          "name": "📄 عرض المحافظات (بجينيشن)",
+          "id": "adm12",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "قائمة الأدمن — **مصفَّحة وقابلة للبحث**، وغير قائمة التسجيل العامة `GET /onboarding/provinces` التي تُرجع كل الصفوف بلا تصفيح (قائمة منسدلة تصل نصف ممتلئة لا يمكن استخدامها).\\n\\n`search` يطابق **الاسمين** العربي والإنجليزي: الأدمن يكتب ما يراه على شاشته، وأيّ لغة هي ذلك يعتمد على ضبط التطبيق عنده.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/provinces?page=1&limit=20&search=",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "provinces"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة محافظة ⚙️",
+          "id": "adm13",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/provinces",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "provinces"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name_ar\": \"دمشق\",\n  \"name_en\": \"Damascus\",\n  \"is_active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل محافظة ⚙️",
+          "id": "adm14",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/provinces/{{provinceId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "provinces",
+                "{{provinceId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name_en\": \"Damascus City\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف محافظة ⚙️",
+          "id": "adm15",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "يُرفَض الحذف إن كان مرتبطاً بها **أي شيء** (مستودع، معمل، جهة حرّة، تعرفة توصيل) — والرد يسمّي ما يمنعه.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/provinces/{{provinceId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "provinces",
+                "{{provinceId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4️⃣ الكتالوج — التصنيفات ⚙️",
+      "item": [
+        {
+          "name": "📄 عرض التصنيفات",
+          "id": "adm16",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/categories?status=all&page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "categories"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "all"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة تصنيف ⚙️",
+          "id": "adm17",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/categories",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "categories"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"بلاستيك\",\n  \"description\": \"مواد بلاستيكية\",\n  \"is_active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل تصنيف ⚙️",
+          "id": "adm18",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/categories/{{categoryId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"بلاستيك معاد التدوير\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف تصنيف ⚙️",
+          "id": "adm19",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/categories/{{categoryId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5️⃣ الكتالوج — المنتجات ⚙️",
+      "item": [
+        {
+          "name": "📄 عرض المنتجات",
+          "id": "adm20",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products?status=all&page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "all"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة منتج ⚙️",
+          "id": "adm21",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "المنتج يُنشأ **من هنا فقط**. أودو لم يعد يُنشئ مواد — يقترحها (انظر قسم الاقتراحات).\n\n**وحدة القياس تُرسَل بالـid** `unit_id` تماماً مثل `category_id`، و**هي الطريقة الوحيدة**. الرمز `unit_type` لم يعد يُقبل: الرمز تسميةٌ يمكن إعادة تسميتها وإعادة استخدامها، فمُناديان يرسلان «KG» قد يعنيان صفَّين مختلفين — ووحدةُ المادة تقرّر كيف تُقرأ كل كمية منها.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"زجاجات PET\",\n  \"description\": \"زجاجات بلاستيكية شفافة\",\n  \"category_id\": \"{{categoryId}}\",\n  \"unit_id\": \"{{unitId}}\",\n  \"is_active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل منتج ⚙️",
+          "id": "adm22",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"زجاجات PET شفافة\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف منتج ⚙️",
+          "id": "adm23",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6️⃣ حالات المنتج (تابعة للمنتج) ⚙️",
+      "item": [
+        {
+          "name": "📄 حالات هذا المنتج",
+          "id": "adm24",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "الحالات **ملك المادة**: نفس الكود يعني شيئاً مختلفاً لمادتين مختلفتين. ومادة بلا حالات أمر طبيعي.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/conditions",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "conditions"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة حالة ⚙️",
+          "id": "adm25",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "الترتيب **تلقائي** (آخر ترتيب + 1) ولا يُرسَل في البودي.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/conditions",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "conditions"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"EXCELLENT\",\n  \"name_en\": \"Excellent\",\n  \"name_ar\": \"ممتازة\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل حالة",
+          "id": "adm26",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/conditions/{{conditionId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "conditions",
+                "{{conditionId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name_ar\": \"ممتازة جداً\",\n  \"is_active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "↕️ تغيير ترتيب حالة",
+          "id": "adm27",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "راوت منفصل للترتيب: يضع الحالة في الموضع المطلوب ويزيح البقية، والكل في معاملة واحدة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/conditions/{{conditionId}}/position",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "conditions",
+                "{{conditionId}}",
+                "position"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"position\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف حالة",
+          "id": "adm28",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "الحالة التي **لا تزال تحمل مخزوناً** لا تُحذف. كانت تُفحص أمام قائمة الأسعار فقط، فكان يمكن حذف حالة ومستودعٌ ممتلئ بموادها بمجرد سحب سعرها — فتبقى مادة حقيقية تحمل اسم حالة لم تعد موجودة. طريق التفريغ هو البيع أو **نقل المخزون إلى حالة أخرى**.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/conditions/{{conditionId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "conditions",
+                "{{conditionId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔀 نقل مخزون بين حالتين ⚙️",
+          "id": "adm29",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "إعادة الفحص تغيّر الجواب: مادة وصلت بدرجة GOOD تبيّن أنها EXCELLENT. بدون هذا الراوت كان المخرج الوحيد إتلافها وإعادة استلامها — أي اختراع توريد لم يحدث — أو تركها موسومة بدرجة خاطئة ومسعّرة بها.\n\n**يأخذ معرّفات الحالات (ids) لا الأكواد**: الكود فريد داخل مادته فقط، فـ«GOOD» تعني شيئاً مختلفاً للورق عنها للنحاس. ويتحقق أن الحالتين تابعتان **لنفس المادة** — النقل بين حالتَي مادتين مختلفتين خطأ يُرد بـ 400.\n\n**لا يُنقل إلا غير المحجوز**: الكمية المحجوزة موعودة لطلب لم يُشحن، ونقلها يترك ذلك الطلب مشيراً إلى حالة لم تعد بضاعته فيها، والنقص يظهر وقت الخصم بعد أن قيل للمشتري «نعم». والرد يذكر `reserved_untouched`.\n\n**الحالة المصدر لا تُحذف عند تفريغها**: الحالة الفارغة تبقى حالة تُباع بها المادة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/conditions/transfer-stock",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "conditions",
+                "transfer-stock"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"warehouseId\": \"{{warehouseId}}\",\n  \"fromConditionId\": \"{{conditionId}}\",\n  \"toConditionId\": \"{{conditionId2}}\",\n  \"quantity\": 50,\n  \"reason\": \"إعادة فحص: تبيّن أنها من درجة أعلى\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7️⃣ التسعير ⚙️",
+      "item": [
+        {
+          "name": "📄 التسعيرة الحالية",
+          "id": "adm30",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/pricing",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "pricing"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📄 سعر واحد بالمعرّف + تاريخه",
+          "id": "adm31",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "يرجع الصف كاملاً ومعه آخر ١٠ من تاريخ فئته — «كم كان قبلاً ولماذا تغيّر؟» في نفس النداء.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/pricing/{{pricingId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "pricing",
+                "{{pricingId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📄 تاريخ الأسعار (بجينيشن + بتاريخ)",
+          "id": "adm32",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "يُرجع **الأسعار النافذة والمؤرشفة معاً**، ولكل الفئات الأربع.\\n\\nكان يُرجع الأرشيف وحده، فتظهر المعامل والجهات الحرّة **فارغة**: سعرٌ ما زال نافذاً اليوم كان نافذاً الشهر الماضي أيضاً وهو في الجدول **الحيّ** لا في التاريخ.\\n\\n`as_of=2026-03-03` يجيب «بكم كنّا نبيع ذلك اليوم؟» — السعر كان نافذاً في تاريخ إذا بدأ **قبله أو فيه** ولم يكن قد انتهى.\\n\\nالرد فيه شكلان لنفس الصفوف: `tiers` مجمَّعة لورقة أسعار، و`entries` مسطّحة ومصفَّحة لخطّ زمني — لا راوتان يمكن أن يختلفا.\\n\\n**`currency`**: العملة التي **سُعِّر بها الصفّ**، منسوخة على كل صفّ لا مقروءة من إعداد عام — فيبقى الصفّ يقول العملة التي اتُّفق عليها فعلاً حتى بعد تغيير عملة المنصّة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/pricing/history?page=1&limit=20&as_of=",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "pricing",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "as_of",
+                  "value": ""
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⏳ تحديد تاريخ انتهاء التسعيرة",
+          "id": "adm33",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**ليس حذفاً.** الحذف يوقف المادة فوراً ويسحبها من كل الكتالوجات؛ وهذا يتركها قابلة للبيع حتى يحلّ التاريخ ثم يتوقف — وهو ما تعنيه تسعيرة موسمية أو عقد ينتهي.\\n\\nاحذف `tier` لإنهاء الفئات كلها معاً. والتاريخ **يجب أن يكون مستقبلياً**: تأريخٌ للخلف يُلغي تسعير طلبيات وُضعت وسُعِّرت بالفعل.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/pricing/expiry",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "pricing",
+                "expiry"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"effective_until\": \"2026-12-31T00:00:00.000Z\",\n  \"tier\": \"FACTORY\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تصحيح سعر بمعرّفه (رقم خطأ)",
+          "id": "adm34",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**PATCH لأن الصفّ يُعدَّل في مكانه** — بلا أرشفة، لأن لا تغيير سعرٍ تجاريّ حدث: الرقم كُتب خطأً فحسب.\\n\\nوهذا عكس راوتات الفئات (POST) التي **تستبدل**: هناك تُؤرشَف القديمة وتُفتح جديدة، لأن تغيير السعر واقعةٌ جديدة لها تاريخ بدء خاص بها.\\n\\nولا يمكن تصحيح سعر **مُتجاوَز**: هو ما سُعِّرت به الطلبيات السابقة فعلاً، وإعادة كتابته تجعل كل فاتورة قديمة غير قابلة للتفسير لمن دفعها.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/pricing/{{pricingId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "pricing",
+                "{{pricingId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 9.75\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ ضبط اللائحة كاملة ⚙️",
+          "id": "adm35",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "الشكل تفرضه **المادة**: مُدرَّجة ← سعر لكل حالة تملكها هي (للمعامل والجهات الحرّة فقط)؛ غير مُدرَّجة ← سعر واحد لكل فئة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/pricing",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "pricing"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"individual\": {\n    \"price\": 5\n  },\n  \"company\": {\n    \"price\": 6\n  },\n  \"factory\": [\n    {\n      \"condition\": \"EXCELLENT\",\n      \"price\": 10\n    },\n    {\n      \"condition\": \"GOOD\",\n      \"price\": 8\n    }\n  ],\n  \"free_facility\": [\n    {\n      \"condition\": \"EXCELLENT\",\n      \"price\": 9\n    },\n    {\n      \"condition\": \"GOOD\",\n      \"price\": 7\n    }\n  ],\n  \"currency\": \"SYP\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل الجدول (أكثر من دور بنداء واحد) ⚙️",
+          "id": "adm36",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "الدور هو **المفتاح** لا حقل في البودي. تعديل لا استبدال: فئة لم تُرسَل تحتفظ بأسعارها. والتعديل يمسّ السلة وبداية الطلبية فقط — الطلبية المنفَّذة أسعارها مجمَّدة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/pricing",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "pricing"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"individual\": {\n    \"price\": 5.5\n  },\n  \"factory\": [\n    {\n      \"condition\": \"EXCELLENT\",\n      \"price\": 11\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏭 سعر المعامل ⚙️",
+          "id": "adm37",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "مادة **مُدرَّجة** ← `condition_id` **إلزامي**، ويُتحقَّق أنه من حالات **هذه المادة**: الرمز فريد داخل مادته فقط، فـ«GOOD» للورق غير «GOOD» للنحاس — وتسعير حالة بمعرّف حالة مادة أخرى كان سيُسعّر كل طلبية عليها خطأً بصمت.\\n\\nمادة **بلا حالات** ← يُرسَل `price` وحده، وإرسال حالة **يُرفض**.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/pricing/factory",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "pricing",
+                "factory"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"condition_id\": \"{{conditionId}}\",\n  \"price\": 10.5,\n  \"currency\": \"SYP\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏢 سعر الجهات الحرّة ⚙️",
+          "id": "adm38",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/pricing/free-facility",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "pricing",
+                "free-facility"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"condition_id\": \"{{conditionId}}\",\n  \"price\": 9,\n  \"currency\": \"SYP\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏛️ سعر المؤسسات ⚙️",
+          "id": "adm39",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "سعر واحد للمادة — **لا يُسعَّر بالحالة أبداً**.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/pricing/institution",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "pricing",
+                "institution"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 6.5,\n  \"currency\": \"SYP\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "👤 سعر المستخدم العادي ⚙️",
+          "id": "adm40",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "سعر واحد للمادة — **لا يُسعَّر بالحالة أبداً**.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/pricing/user",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "pricing",
+                "user"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 5,\n  \"currency\": \"SYP\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف اللائحة ⚙️",
+          "id": "adm41",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "حذف اللائحة **يُوقف المادة**: تختفي من كل الأدوار، وأودو يعرض إشعار التوقيف. والتاريخ يحتفظ بما كان.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/products/{{productId}}/pricing",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "products",
+                "{{productId}}",
+                "pricing"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8️⃣ العروض",
+      "item": [
+        {
+          "name": "📄 عرض العروض",
+          "id": "adm42",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers?status=all&page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "offers"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "all"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة عرض",
+          "id": "adm43",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "offers"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"offer_price\": 7.5,\n  \"discount_percentage\": 20,\n  \"valid_from\": \"2026-08-01T00:00:00.000Z\",\n  \"valid_until\": \"2026-09-01T00:00:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل عرض",
+          "id": "adm44",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers/{{offerId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "offers",
+                "{{offerId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"discount_percentage\": 25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف عرض",
+          "id": "adm45",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers/{{offerId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "offers",
+                "{{offerId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "9️⃣ المستودعات ⚙️",
+      "item": [
+        {
+          "name": "📄 عرض المستودعات",
+          "id": "adm46",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**`search`** — جزء من **اسم** المستودع **أو كوده**، غير حسّاس لحالة الأحرف. مطابقة جزئية لا كلمة كاملة: الأدمن يكتب ثلاثة أحرف من اسم يتذكّره نصفياً، واشتراط الكلمة كاملة يعني معرفة جواب السؤال المطروح أصلاً.\n\n**والاثنان معاً** لأن الأدمن يصل إلى المستودع من الاتجاهين: إمّا يتذكّر اسمه نصفياً، وإمّا يمسك ورقةً لا تحمل إلا الكود. صندوق بحث واحد يجيب الاثنين هو قرارٌ أقلّ قبل الكتابة.\n\n**الترتيب: من الأحدث إلى الأقدم.** المستودع المقصود هو غالباً الذي أُنشئ للتوّ، والترتيب الأبجدي يدفنه عند الحرف الذي يبدأ به مصادفةً. (أُضيف عمود `created_at` للجدول في هجرة `1786600000000` — لم يكن موجوداً، فـ«الأحدث» لم يكن سؤالاً يستطيع الجدول إجابته.)\n\n**والمستودعات المغلقة تظهر هنا.** المستودع المتوقّف ما زال يحمل مخزوناً وطلبات خارجة، وما زال جواب «أين مادتي» — إخفاؤه يخفي الصفوف التي يحتاجها الأدمن بالضبط أثناء إغلاق الموقع. و`status` متاحة لمن أراد جانباً واحداً.\n\n**الكميات في `stock_summary` صارت لكل وحدة**: `totals_by_unit[]` وفيه `unit_id` · `unit_code` · `total_quantity` · `total_reserved` · `total_available`. كان هناك `total_quantity` واحد، وكان حساباً على أشياء لا تُجمع: ٤٠٠ كغ ورق + ٣٠ بطارية = «٤٣٠» — رقمٌ يتغيّر بإعادة قياس مادة بالطن دون أن يتحرّك كيلوغرام واحد، ولا وحدة يمكن كتابتها بجانبه.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/warehouses?page=1&limit=10&search=&status=",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "warehouses"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                },
+                {
+                  "key": "status",
+                  "value": ""
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📄 مستودع واحد",
+          "id": "adm47",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "نفس شكل صفّ القائمة تماماً، بما فيه `totals_by_unit`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/warehouses/{{warehouseId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "warehouses",
+                "{{warehouseId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة مستودع ⚙️",
+          "id": "adm48",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**`provinceId` و`address` صارا إجباريَّين**، والمحافظة تؤخذ **بالمعرّف** لا بالاسم.\n\n**والعنوان إجباري** لأن الإحداثيات تضع دبّوساً على خريطة ولا تقول للسائق **أيّ بوّابة**، وطلبُ استلامٍ بعنوان فارغ لا يستطيع المشتري التصرّف به. كان اختيارياً، ومستودعات قائمة بلا عنوان — وهذا ليس صدفة: الحقل الاختياري في استمارة إنشاء هو حقلٌ يُتخطّى.\n\nتوزيع الطلبات يطابق المشتري بالمستودعات **بهذا المعرّف**، فمستودعٌ بلا محافظة يحمل مخزوناً لا يمكن توجيه أي طلب إليه — ويظهر العطل بعيداً عن هنا بصيغة «لا يوجد مستودع يستطيع تلبية هذا». وبالاسم لا بالمعرّف: نصٌّ مكتوب يُطابَق بقائمة لا يمكن التحقق منه أمامها، فتصير «دمشق» و«ريف دمشق» مستودعين في مكانين أحدهما غير موجود.\n\n**واسم المستودع فريد** (غير حسّاس لحالة الأحرف أو المسافات): الاسم هو ما يستعمله البشر — على الأوراق وعلى شاشة الشحن وفي الطلب الذي يُسلَّم للسائق — وتكراره حمولةٌ تصل المبنى الخطأ بيد من قرأ الاسم الصحيح. القاعدة نفسها مطبَّقة في أودو منذ البداية، وكان الباك ايند يفحص الكود وحده، فيقبل اسماً يفشل بعدها إلى الأبد في طابور المزامنة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/warehouses",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "warehouses"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"مستودع الشمال\",\n  \"code\": \"NH1\",\n  \"provinceId\": \"{{provinceId}}\",\n  \"address\": \"دمشق - الطريق الشمالي\",\n  \"latitude\": 33.5,\n  \"longitude\": 36.3,\n  \"zones\": [\n    {\n      \"name\": \"التخزين\",\n      \"type\": \"storage\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل مستودع ⚙️",
+          "id": "adm49",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**الاسم والكود والسعة فقط.** والاسم يُفحص للتفرّد هنا أيضاً.\n\n**المحافظة والعنوان غير قابلين للتعديل** — قصداً لا سهواً، **وفي الطرفين**. توزيع الطلبات يطابق بالمحافظة، وكل مسافة مخزَّنة وكل طلب مفتوح وكل سعر توصيل محسوب يفترض مكان المستودع. نقل مستودع بين محافظتين ليس تعديلاً، بل مستودعٌ جديد وإغلاق قديم.\n\n⚠️ **وهذا لم يكن مطبَّقاً في أودو** حتى الآن: كان الباك ايند يرفض والأدمن في أودو يستطيع نقل المستودع بحرّية، فيعود التغيير عبر المزامنة ويتجاوز القاعدة من الباب الخلفي. صار الرفض في `recycle.warehouse.write` أيضاً.\n\nوالاستثناء الوحيد **ملء ما لم يُسجَّل قطّ**: مستودعات قائمة بلا محافظة، ورفضُ كتابتها يتركها غير قابلة للتوجيه إلى الأبد بلا سبيل لتصحيحها. ملءُ فراغٍ ليس نقلَ مبنى.\n\n⚠️ **الحقول المحذوفة من الـDTO**: `governorate` · `address` · `latitude` · `longitude` · `isActive` كانت **تُقبل هنا وتُهمَل بصمت** — فمن نقل مستودعاً إلى محافظة أخرى كان يحصل على 200، ثم تختفي قيمته عند القراءة التالية بلا ما يدلّه أيّ الطرفين كذب. صارت **400 تُسمّي الحقل** (`forbidNonWhitelisted`). والموقع ودورة الحياة يُعدَّلان في **أودو** ويعودان عبر `SYNC_WAREHOUSE`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/warehouses/{{warehouseId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "warehouses",
+                "{{warehouseId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"مستودع الشمال الرئيسي\",\n  \"code\": \"NH1\",\n  \"capacity\": 5000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔄 مزامنة المستودع من أودو ⚙️",
+          "id": "adm50",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/warehouses/{{warehouseId}}/sync-odoo",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "warehouses",
+                "{{warehouseId}}",
+                "sync-odoo"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force_full_sync\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🔄 مزامنة المدير من أودو ⚙️",
+          "id": "adm51",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/warehouses/{{warehouseId}}/sync-manager",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "warehouses",
+                "{{warehouseId}}",
+                "sync-manager"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⬇️ استيراد المستودعات من أودو ⚙️",
+          "id": "adm52",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/warehouses/import-odoo",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "warehouses",
+                "import-odoo"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🔟 المخزون (مطابق لأودو)",
+      "item": [
+        {
+          "name": "📄 مخزون مستودع (مُصفَّح)",
+          "id": "adm53",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "البجينيشن على **المواد** لا على صفوف المرآة، والملخّص يصف **المستودع** لا الصفحة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/warehouses/{{warehouseId}}/inventory?page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "warehouses",
+                "{{warehouseId}}",
+                "inventory"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📄 مادة في مستودع",
+          "id": "adm54",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "المتاح = الكمية − المحجوز، وسطر لكل حالة. المحجوز موعود لطلبية قائمة فلا يُعدّ قابلاً للبيع.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/inventory/warehouses/{{warehouseId}}/products/{{productId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "inventory",
+                "warehouses",
+                "{{warehouseId}}",
+                "products",
+                "{{productId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📄 مادة في كل المستودعات",
+          "id": "adm55",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "المجموع الكلي + تفصيل الحالات + **أين هي**: قائمة المستودعات مرتّبة بالمتاح.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/inventory/products/{{productId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "inventory",
+                "products",
+                "{{productId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣1️⃣ اقتراحات المواد",
+      "item": [
+        {
+          "name": "📄 كل الاقتراحات",
+          "id": "adm56",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions?page=1&limit=10&status=PENDING_REVIEW",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "suggestions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": "PENDING_REVIEW"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📄 اقتراحات أدمن أودو فقط",
+          "id": "adm57",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "قائمة الاطّلاع على ما اقترحه أدمن أودو بعد أن مُنع من إنشاء المواد.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions?source=ODOO&page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "suggestions"
+              ],
+              "query": [
+                {
+                  "key": "source",
+                  "value": "ODOO"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📄 اقتراح واحد",
+          "id": "adm58",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions/{{suggestionId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "suggestions",
+                "{{suggestionId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✅ قبول (شكليّ)",
+          "id": "adm59",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "القبول **لا يُنشئ مادة** — الرد يقول `product_created: false` صراحةً. والمقترِح يُبلَّغ أن اقتراحه سيُدرَس للإضافة، لا أنه أُضيف.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions/{{suggestionId}}/review",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "suggestions",
+                "{{suggestionId}}",
+                "review"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"APPROVED\",\n  \"admin_notes\": \"فكرة جيدة\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "❌ رفض",
+          "id": "adm60",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "الرفض **بلا سبب مرفوض**: لا يفيد المقترِح ولا يمكن تصحيحه.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions/{{suggestionId}}/review",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "suggestions",
+                "{{suggestionId}}",
+                "review"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"REJECTED\",\n  \"admin_notes\": \"مادة موجودة باسم آخر\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣2️⃣ طلبات تصنيفات جديدة",
+      "item": [
+        {
+          "name": "📄 عرض الطلبات",
+          "id": "adm61",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/category-requests?page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "category-requests"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✅ قبول",
+          "id": "adm62",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/category-requests/{{requestId}}/approve",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "category-requests",
+                "{{requestId}}",
+                "approve"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"admin_notes\": \"مقبول\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "❌ رفض",
+          "id": "adm63",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/category-requests/{{requestId}}/reject",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "category-requests",
+                "{{requestId}}",
+                "reject"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"admin_notes\": \"غير مناسب حالياً\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣3️⃣ الأسطول (يُؤلَّف في أودو)",
+      "item": [
+        {
+          "name": "📄 الشاحنات",
+          "id": "adm64",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/trucks?page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "trucks"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📄 السائقون (مُصفَّح)",
+          "id": "adm65",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "كان يرجع **كل** السائقين بلا تصفيح — عطل بطيء يتفاقم مع نمو الأسطول.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/trucks/drivers?page=1&limit=10&assigned=false",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "trucks",
+                "drivers"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "assigned",
+                  "value": "false"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📄 شاحنة واحدة",
+          "id": "adm66",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/trucks/{{truckId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "trucks",
+                "{{truckId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📍 الشاحنات العاملة الآن",
+          "id": "adm67",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/trucks/active",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "trucks",
+                "active"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📍 موقع شاحنة",
+          "id": "adm68",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/trucks/{{truckId}}/location",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "trucks",
+                "{{truckId}}",
+                "location"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📍 آخر توقّف",
+          "id": "adm69",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/trucks/{{truckId}}/last-stop",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "trucks",
+                "{{truckId}}",
+                "last-stop"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📍 مسار شاحنة",
+          "id": "adm70",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/trucks/{{truckId}}/history",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "trucks",
+                "{{truckId}}",
+                "history"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣4️⃣ تعرفة التوصيل (سعر الكيلومتر)",
+      "item": [
+        {
+          "name": "💰 التعرفة الحالية + السجل",
+          "id": "adm71",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/delivery-rate",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "delivery-rate"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ تحديد تعرفة جديدة",
+          "id": "adm72",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/delivery-rate",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "delivery-rate"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rate_per_km\": 0.5,\n  \"base_fee\": 2,\n  \"min_charge\": 3,\n  \"currency\": \"JOD\",\n  \"note\": \"ارتفاع أسعار الوقود\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تصحيح التعرفة النافذة",
+          "id": "adm73",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/delivery-rate/{{deliveryRateId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "delivery-rate",
+                "{{deliveryRateId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rate_per_km\": 0.55\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🧮 احتساب كلفة مسافة",
+          "id": "adm74",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/delivery-rate/quote?distance_km=12",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "delivery-rate",
+                "quote"
+              ],
+              "query": [
+                {
+                  "key": "distance_km",
+                  "value": "12"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣4️⃣ب توصيل الطلبيات المجزّأة",
+      "item": [
+        {
+          "name": "🗺️ تخطيط الرحلة (الأبعد أولاً)",
+          "id": "adm75",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "يبني المسار ويُسعّره بالتعرفة النافذة اليوم.\n\n**شاحنة واحدة افتراضياً.** لأكثر من شاحنة أرسل `truck_groups`: مصفوفة لكل شاحنة تحمل معرّفات الأجزاء التي تحملها — مثال `[[\"part-a\"],[\"part-b\",\"part-c\"]]`. كل رحلة تُحسب مسافتها وكلفتها **وحدها**.\n\nالنظام **لا يقسّم بنفسه**: القسمة حسب الحمولة تعني مقارنة حمل بحمولة بالكيلوغرام، وهذا الكتالوج يقيس بعض المواد بالكيلو وبعضها بالقطعة — ولا تحويل صادق بينهما، فنظامٌ يخمّن كان سيرسل شاحنة لحمل لا تسعه، ويظهر الفشل عند بوابة المستودع والبضاعة مجهّزة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/orders/{{orderId}}/delivery/plan",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "orders",
+                "{{orderId}}",
+                "delivery",
+                "plan"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🚚 عرض رحلات الطلبية",
+          "id": "adm76",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/orders/{{orderId}}/delivery",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "orders",
+                "{{orderId}}",
+                "delivery"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "👷 إسناد شاحنة وسائق",
+          "id": "adm77",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/orders/delivery/trips/{{tripId}}/assign",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "orders",
+                "delivery",
+                "trips",
+                "{{tripId}}",
+                "assign"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"odoo_truck_id\": 1,\n  \"odoo_driver_id\": 1,\n  \"driver_name\": \"محمد\",\n  \"driver_phone\": \"0999111222\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📋 رحلات سائق التوصيل",
+          "id": "adm78",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "`odooDriverId` هو معرّف السائق **في أودو** (رقم صحيح) لا UUID الباك ايند.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/orders/delivery/drivers/{{odooDriverId}}/trips",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "orders",
+                "delivery",
+                "drivers",
+                "{{odooDriverId}}",
+                "trips"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✅ تأكيد استلام جزء من مستودع",
+          "id": "adm79",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "هنا **تنتقل العهدة فعلاً**، فهو إجراء السائق وحده، وهو ما ينقل الجزء إلى `DISPATCHED`.\n\nلا يمكن تأكيد محطة قبل التي تسبقها: المسار موجود كي لا تعود الشاحنة أدراجها، وسائقٌ يبلّغ عن المحطة 3 قبل 1 يعني إمّا أن المسار هُجر أو أن الزرّ الخطأ ضُغط — وكلاهما يستحق الرفض لا التسجيل.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/orders/delivery/trips/{{tripId}}/stops/{{stopId}}/pickup",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "orders",
+                "delivery",
+                "trips",
+                "{{tripId}}",
+                "stops",
+                "{{stopId}}",
+                "pickup"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"استلمت الحمولة كاملة\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏁 إنهاء الرحلة عند المعمل",
+          "id": "adm80",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "description": "يُرفض ما دامت محطة واحدة غير مستلَمة — الوصول للمعمل بجزأين من ثلاثة وإغلاق الرحلة يترك الثالث في مستودعه والرحلةُ التي كان يفترض أن تجلبه **منتهية**.\n\n**لا يُكمل الطلبية.** المعمل يؤكّد الاستلام بنفسه عبر `POST /orders/:orderId/confirm-receipt` — توقيعان على تسليم واحد هو ما يحمي طرفَيه.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/orders/delivery/trips/{{tripId}}/complete",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "orders",
+                "delivery",
+                "trips",
+                "{{tripId}}",
+                "complete"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣5️⃣ مراجعة طلبات التسجيل",
+      "description": "## ترتيب العمل\n\n`…/pending` هو **طابور المراجعة**: الحسابات بحالة `PENDING_APPROVAL` وحدها،\n**الأقدم أولاً**. الترتيب اقتراح لا قيد — لك أن تعالج أي صفّ — لكن الاقتراح\nيشير إلى أقدم دَين. والحساب الذي ذهب إلى `NEED_CHANGES` ثم عاد **يحتفظ\nبمكانه الأصلي**: لو رُتّب بلحظة عودته لأُرسل إلى آخر الطابور في كل مرة تطلب\nمنه وثيقة — فيُعاقَب بانتظار أطول كلما أجاب سؤالاً أنت طرحته.\n\nأما `…/factory` و`institution` و`external-partner` (بلا `pending`) فهي\nنافذة عامة على الدور: تُصفَّى بـ`status`، وبدونه تُرجع **كل الحالات**.\n\n## رفض الوثيقة ≠ طلبها\n\nكانا فعلاً واحداً، وكان ذلك خطأً في الاتجاهين: المراجع لا يستطيع أن يعلّم\nأول وثيقة من أربع بأنها سيئة دون أن ينتهي بذلك الفحصُ ويُرسَل مقدّم الطلب\nليبدأ التصحيح **قبل أن ينظر أحد في البقية**؛ ومقدّم الطلب قد يُطلب منه\nإصلاح شيء دون أن يُقال له أيّه.\n\n- **`PATCH media/:id/status`** — حكمٌ **صامت**. لا إشعار، ولا تتغيّر حالة الحساب.\n- **`POST media/:id/request-reupload`** — الفعل **الوحيد** الذي يصل مقدّم الطلب.\n  يشترط أن تكون الوثيقة **مرفوضة** أصلاً، فـ«أرسلها ثانية» تتبع دائماً سبباً مسجَّلاً.\n\nويعود مقدّم الطلب إلى الطابور حين لا يبقى شيء **مطلوب** — لا حين لا يبقى شيء\n**مرفوض**. الفرق هو المصيدة: الوثيقة المرفوضة التي لم تُطلَب منه هي وثيقة لم\nيُبلَّغ بها ولا يراها، وعدّها كان سيبقيه في `NEED_CHANGES` إلى الأبد وقد أصلح\nكل ما طُلب منه، ولا شيء على شاشته ليصلحه.",
+      "item": [
+        {
+          "name": "⏳ طابور المعامل (الأقدم أولاً)",
+          "id": "adm81",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "`PENDING_APPROVAL` **حصراً**، مرتّبة بتاريخ التقديم تصاعدياً.\n\nكل صفّ يحمل `documents_requested` — كم وثيقة ما زال هذا المتقدّم مديناً بها — فلا يحتاج المراجع أن يفتح الطلب ليعرف إن كان قابلاً للمعالجة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/factory/pending?page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "factory",
+                "pending"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⏳ طابور المؤسسات (الأقدم أولاً)",
+          "id": "adm82",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/institution/pending?page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "institution",
+                "pending"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⏳ طابور الجهات الحرّة (الأقدم أولاً)",
+          "id": "adm83",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/external-partner/pending?page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "external-partner",
+                "pending"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏭 المعامل (حسب الحالة)",
+          "id": "adm84",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "`status` اختيارية: `PENDING_APPROVAL` · `NEED_CHANGES` · `ACTIVE` · `REJECTED` · `BLOCKED` · `PENDING_PROFILE` · `INACTIVE`.\n\n**بدونها تُرجع كل الحالات.** ومع `BLOCKED` يظهر `admin_note` — سبب الحظر، وهو للأدمن وحده ولا يصل الحساب المحظور أبداً.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/factory?page=1&limit=10&status=",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "factory"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": ""
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏢 المؤسسات (حسب الحالة)",
+          "id": "adm85",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/institution?page=1&limit=10&status=",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "institution"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": ""
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🤝 الجهات الحرّة (حسب الحالة)",
+          "id": "adm86",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/external-partner?page=1&limit=10&status=",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "external-partner"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": ""
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📄 تفاصيل الحساب",
+          "id": "adm87",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "كان اسمه `profile`، وهو يُرجع الحسابَ **والملفَّ والوثائق** — والمسار الذي يسمّي واحداً من الثلاثة يُرسل القارئ يبحث عن الاثنين الآخرين في مكان آخر.\n\n```\n{ role, account:{ id, name, email, account_status },\n  profile:{ id, …معلومات التسجيل…, location,\n            material:{ …معلومات المادة…, waste_types:[{id,name,is_active,\n                        odoo_category_id, odoo_sync_status}] },\n            documents:{ LICENSE:<id>, ID_CARD_FRONT:<id> } } }\n```\n\n`role` **خارج** `profile` لأنه يقرّر كيف يُقرأ كل ما تحته.\n\nوالوثائق **مفهرسة بنوعها** لا مصفوفة معرّفات: من يمسك مصفوفة لا يستطيع أن يطلب «الرخصة» دون جلب كل سجلّ ليعرف أيّها كانت.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/account-details/{{profileId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "account-details",
+                "{{profileId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📍 موقع الحساب",
+          "id": "adm88",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "راوت **واحد** للمعامل والمؤسسات والجهات الحرّة — الثلاثة يرثون `LocationBase` نفسه، فثلاثة راوتات كانت ستكون الاستعلام نفسه مكتوباً ثلاثاً، وكان على المُنادي أن يعرف الدور قبل أن يسأل سؤالاً لا يعتمد عليه.\n\nيُرجع `province` و`address` و`description` و`coordinates` **و** `latitude`/`longitude` مفكوكَين — الترتيب المخزَّن `[lng, lat]` وعكسه يضع دمشق في الصومال.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/location/{{profileId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "location",
+                "{{profileId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🖼️ وثائق الحساب",
+          "id": "adm89",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "«تم جلب الوثائق بنجاح»، و**كل صورة كائن مستقل**:\n`id` · `url` · `public_id` · `file_type` · `owner_id` · `owner_type` · `status` · `reupload_requested_at` · `reupload_reason` · `created_at`.\n\n**تُقرأ في كل الحالات** لا في `PENDING_APPROVAL` وحدها. القاعدة القديمة كانت تحجب الوثائق في الحالتين اللتين تهمّان أكثر من غيرهما: عند التفكير في إعادة فتح رفض، وعند التحقق مما قُبِل بعد نزاع.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/{{profileId}}/media",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "{{profileId}}",
+                "media"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🖼️ وثيقة واحدة",
+          "id": "adm90",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/media/{{mediaId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "media",
+                "{{mediaId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🟡 رفض/قبول وثيقة (صامت)",
+          "id": "adm91",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**لا يصل مقدّم الطلب شيء** ولا تتحرّك حالة الحساب. هذا تسجيلُ حكمٍ في ملفّ المراجع نفسه، لا مخاطبةٌ لمقدّم الطلب — المخاطبة هي الراوت التالي.\n\n`status`: `APPROVED` أو `REJECTED`. و`PENDING` **مرفوضة**: إعادة الوثيقة إلى «قيد الانتظار» ليست نتيجة مراجعة بل تراجعٌ عنها دون قول أيّ اتجاه — ومن يعيد الوثيقة إلى `PENDING` شرعاً هو مقدّم الطلب حين يرفع بديلاً.\n\n**والوثيقة المرفوضة تُقبل ثانية**: من ضغط خطأً أو أعاد قراءة المسح وغيّر رأيه يجب أن يستطيع قول ذلك دون إشراك مقدّم الطلب إطلاقاً.\n\n**409** إذا كان الحساب `ACTIVE` — الوثائق هي الدليل الذي يقوم عليه القبول، وإعادة وسمها بعده تعيد كتابة أساس قرارٍ نُفِّذ فعلاً.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/media/{{mediaId}}/status",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "media",
+                "{{mediaId}}",
+                "status"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"REJECTED\",\n  \"description\": \"الصورة غير واضحة\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📨 طلب إعادة رفع وثيقة ⚠️",
+          "id": "adm92",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**الفعل الوحيد في المراجعة الذي يصل مقدّم الطلب.** ينقل الحساب إلى `NEED_CHANGES` ويرسل له السبب.\n\n`reason` اختيارية لكنها **كامل الرسالة التي تصله** — و«أعد رفع الرخصة» بلا سبب تنتج المسح غير الواضح نفسه مرّتين.\n\n**يشترط**: الوثيقة `REJECTED` (409 خلاف ذلك) · لم يسبق طلبها (409) · الحساب ما زال قيد المراجعة.\n\n**وهو الطريق الوحيد للعودة إلى حساب مرفوض**: قبوله محجوبٌ بالوثيقة المرفوضة، والوثيقة لا يمكن إعادة وسمها تحت حساب مبتوتٍ فيه. طلب البديل يغيّر **الوقائع** لا الأوراق.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/media/{{mediaId}}/request-reupload",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "media",
+                "{{mediaId}}",
+                "request-reupload"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"الصورة غير واضحة — أرسل نسخة أوضح\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⏹️ إيقاف انتظار مقدّم الطلب",
+          "id": "adm93",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**المخرج من الحالة الوحيدة التي لم يكن للمراجعة خروجٌ منها.**\n\nطلبُ وثيقة ينقل الحساب إلى `NEED_CHANGES`، ولا يُتَّخذ قرار في `NEED_CHANGES` لأن ذلك حكمٌ على طلبٍ وصفه المراجع نفسه بأنه ناقص. فمقدّم الطلب الذي **لا يعود أبداً** كان يترك الطلب مفتوحاً إلى الأبد، ولا حركة أمام المراجع إطلاقاً: لا يقبل ولا يرفض ولا يغلق.\n\n**والإلغاء ليس قبولاً.** تبقى الوثائق على الحالة التي أعطاها إياها المراجع، فالمرفوضة تبقى مرفوضة: المسحوب هو **السؤال** لا **الحكم**. وأثر ذلك مقصود:\n\n- يعود الحساب إلى الطابور حيث **يمكن رفضه** (كل وثيقة صار مبتوتاً فيها)\n- ولا **يمكن قبوله** فوق وثيقة وسمها المراجع بأنها غير مقبولة\n\nوهما البابان الصحيحان: يُكسَر الجمود دون أن يتحوّل «كففتُ عن الانتظار» بصمت إلى «أقبل ما أرسلتَه».\n\nعلى مستوى **الحساب** لا الوثيقة: قبولُ وثيقة يُغلق طلبها أصلاً، والناقص كان «أوقف الانتظار كلياً» — وهي واقعة عن الطلب لا عن ملف. وإلغاء واحد من ثلاثة كان سيبقي الحساب محجوزاً على الاثنين الآخرين، أي زرّ يبدو أنه لا يعمل.\n\n**ويُبلَّغ مقدّم الطلب**: شاشته ما زالت تقول «أعد رفع الرخصة» — مطلبٌ لم يعد أحد ينتظره، وسيظل يحاول تلبيته أو يقرؤه على أنه عطل في التطبيق.\n\n**409** إن لم يكن قد طُلب منه شيء.\n\nونفس الفعل موجود في أودو للسائق: زرّ **«أوقف انتظار السائق»** (`action_cancel_reupload_request`) في شاشة طلب السائق.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/{{accountId}}/cancel-reupload-requests",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "{{accountId}}",
+                "cancel-reupload-requests"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"سنراجع طلبك بما قدّمته سابقاً\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✅ قبول / رفض الحساب",
+          "id": "adm94",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "`status`: `ACTIVE` أو `REJECTED` فقط. (`NEED_CHANGES` ليست قراراً يُتَّخذ على حساب بل نتيجةَ طلب وثيقة بعينها؛ و`BLOCKED` لها راوتها لأنها سؤال آخر.)\n\n**البوّابتان مختلفتان عمداً:**\n- **القبول** يُحجب بوثيقة **مرفوضة**. غير المبتوت فيها مقبولة، وتُقبَل مع الحساب —  فالقبول نفسه إقرارٌ بأن الملف مقبول، فيسوّي ما بقي مفتوحاً. ما لا يجوز له  هو أن يتجاوز حكم المراجع المسجَّل بأن وثيقة بعينها غير مقبولة.\n- **الرفض** يُحجب بوثيقة **غير مقروءة**. الرفض يجب أن يكون قابلاً للإجابة عنه  لاحقاً، و«رفضناك بينما ثلاث من وثائقك الأربع لم تُقرأ» ليست إجابة.\n\n**ممنوع**: القرار والحساب `NEED_CHANGES` (409 — طُلب منه شيء ولم يجب بعد) · سحب قبول (409 — الحساب يتاجر فعلاً، والإخراج هو **الحظر**).\n**مسموح**: قبول حساب **مرفوض** سابقاً.\n\n`description` تُحفظ في `admin_note` — عمود **لا يقرأه صاحب الحساب ولا يعدّله**. كانت تُكتب في `description` وهو الحقل الذي يحرّره هو نفسه في `PATCH /user/profile` ويقرأه في ملفّه.\n\nويعمل داخل معاملة **بقفل** على صفّ الحساب: مراجعان يفتحان الطلب نفسه هي الحالة العادية لا النادرة، وبدون القفل يمرّ كلاهما من فحص «هل ما زال غير مبتوت فيه؟» فيطمس القرارُ الثاني الأول — والإشعار قد أُرسل.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/{{accountId}}/status",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "{{accountId}}",
+                "status"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ACTIVE\",\n  \"description\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🚫 حظر / رفع حظر",
+          "id": "adm95",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "`status`: `BLOCKED` أو `ACTIVE`.\n\n**لا يُحظر إلا حساب مقبول** (409 خلاف ذلك). الحظر إخراجُ من يملك وصولاً فعلياً، وتطبيقه على طلب ما زال قيد المراجعة يخلط «لن ندخلك» بـ«كنتَ داخلاً فأخرجناك»، وهما قراران يجيب عنهما أشخاص مختلفون لأسباب مختلفة.\n\n**سبب الحظر للأدمن وحده**: يُحفظ في `admin_note` ويظهر في عرض الحسابات المحظورة، **ولا يصل المحظور**. تسمية الإشارة التي أمسكت به هي المعلومة الوحيدة التي تساعده على تفاديها في المرة القادمة.\n\n**والخروج فوري**: تُمسح توكنات التجديد و`fcm_token` من كل أجهزته، واستراتيجية الـJWT ترفض توكن الوصول الصالح في **الطلب التالي مباشرة** لأن الحساب يقرأ `BLOCKED` — فتنتهي الجلسة الآن لا عند انتهاء صلاحية التوكن. وعند تسجيل الدخول يصله: «تم حظر حسابك. يرجى التواصل مع الدعم الفني.»",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/{{accountId}}/block-status",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "{{accountId}}",
+                "block-status"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"BLOCKED\",\n  \"description\": \"اشتباه احتيال\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣5️⃣ب راوتات أدوار أخرى (ليست للأدمن) 🔸",
+      "description": "⚠️ **هذه الراوتات ليست للأدمن.** موضوعة هنا للاطّلاع فقط — لأن الأدمن\nيحتاج أن يعرف ما يفعله كلّ دور ليفهم البيانات التي يراجعها، لا ليناديها.\n\nكلٌّ منها موسوم بالدور الذي يملكه، و**توكن الأدمن سيُرَدّ عليها بـ403**:\nالصلاحيات مبنيّة على `ROLE_PERMISSIONS_MAP`، والأدمن يملك `admin.*` وحدها\nولا يملك صلاحيات المشتري.\n\nاستعمِل توكن الدور المناسب:\n`{{citizenToken}}` · `{{institutionToken}}` · `{{factoryToken}}` · `{{externalToken}}`",
+      "item": [
+        {
+          "name": "⭐ المفضلة — عرض 🔸 (المواطن/المؤسسة/المصنع/الجهة الحرّة)",
+          "id": "adm96",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "**راوتات واحدة للأدوار الأربعة.** الفعل نفسه لكلٍّ منهم، والسعر يُحسب من **شريحة المُنادي** — فالدور يغيّر الأرقام دون أن يغيّر الراوت.\n\nمربوطة بـ**الحساب** لا بالبروفايل: البروفايل أوراق دورٍ واحد والمواطن يكاد لا يملك واحداً، أما الحساب فيملكه كل مشترٍ وهو ما يحمله التوكن.\n\n**المادة التي سُحب سعرها لشريحتك تبقى** بـ`price: null` و`available: false`.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/favourites?page=1&limit=20",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "favourites"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⭐ المفضلة — إضافة 🔸",
+          "id": "adm97",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**409** إن كانت موجودة بالفعل (فهرس فريد على `(account_id, product_id)`): ضغط القلب مرتين على اتصال بطيء يجب أن يترك صفّاً واحداً.\n\n**404** لمادة غير موجودة أو **مُعطَّلة** — المفضلة اختصارٌ إلى شيء يمكن شراؤه.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/favourites",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "favourites"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"note\": \"الدرجة التي يأخذها خط حلب\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⭐ المفضلة — تعديل الملاحظة 🔸",
+          "id": "adm98",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "الملاحظة هي ما يعنيه «التعديل»: المادة نفسها لا تتغيّر — مفضلة تشير إلى مادة أخرى هي مفضلة أخرى. والنصّ الفارغ يمسح الملاحظة.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/favourites/{{favouriteId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "favourites",
+                "{{favouriteId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"اطلبها مكبوسة\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⭐ المفضلة — حذف 🔸",
+          "id": "adm99",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "**404** لعنصر يخصّ مشترياً آخر — لا 403، فالردّ المختلف يؤكّد أن المعرّف حقيقي.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/favourites/{{favouriteId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "favourites",
+                "{{favouriteId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{citizenToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏷️ موادّي (تصنيفات التسجيل) 🔸 (المؤسسة/المصنع/الجهة الحرّة)",
+          "id": "adm100",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "صلاحية `waste.materials.view` — للمؤسسات والمصانع والجهات الحرّة. **المواطن لا يملكها**، لأنه لا يختار تصنيفات عند التسجيل أصلاً.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/my-materials?page=1&limit=10",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "my-materials"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{institutionToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏷️ تصنيفاتي 🔸",
+          "id": "adm101",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "التصنيفات المختارة في التسجيل. نفس الصلاحية أعلاه.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/my-categories",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "my-categories"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{institutionToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📦 توفّر مادة في المستودعات 🔸 (المصنع/الجهة الحرّة)",
+          "id": "adm102",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "صلاحية `waste.products.availability` — للمصانع والجهات الحرّة وحدها، فهي التي تشتري بالكميات الكبيرة وتحتاج معرفة أين المادة قبل الطلب.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/products/{{productId}}/availability",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "products",
+                "{{productId}}",
+                "availability"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{factoryToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ طلب تصنيف إضافي 🔸 (المؤسسة وحدها)",
+          "id": "adm103",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "صلاحية `waste.categories.request` — **للمؤسسات وحدها**، لأنها الدور الوحيد المقيَّد بتصنيفات اختارها عند التسجيل. القرار عليه في مجلد «طلبات تصنيفات جديدة» أعلاه، وذاك **للأدمن**.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/waste/category-requests",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "waste",
+                "category-requests"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{institutionToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category_id\": \"{{categoryId}}\",\n  \"reason\": \"بدأنا نفرز هذه المادة\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣6️⃣ وِبهوكات أودو (سرّ لا توكن)",
+      "item": [
+        {
+          "name": "📦 تغيّر المخزون",
+          "id": "adm104",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-odoo-webhook-secret",
+                "value": "{{odooWebhookSecret}}"
+              }
+            ],
+            "description": "نبضة بلا حمولة فعلية: الباك ايند يعيد قراءة المستودع كاملاً، فنبضة مكررة غير ضارّة. تُطلَق عند الموافقة على تقرير تلف/تدهور.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/odoo/webhooks/inventory",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "odoo",
+                "webhooks",
+                "inventory"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"odoo_warehouse_id\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🏭 تغيّر مستودع",
+          "id": "adm105",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-odoo-webhook-secret",
+                "value": "{{odooWebhookSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/odoo/webhooks/warehouse",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "odoo",
+                "webhooks",
+                "warehouse"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"odoo_warehouse_id\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🚚 تغيّر الأسطول",
+          "id": "adm106",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-odoo-webhook-secret",
+                "value": "{{odooWebhookSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/odoo/webhooks/fleet",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "odoo",
+                "webhooks",
+                "fleet"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "💰 تغيّرت تعرفة التوصيل",
+          "id": "adm107",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-odoo-webhook-secret",
+                "value": "{{odooWebhookSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/odoo/webhooks/delivery-tariffs",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "odoo",
+                "webhooks",
+                "delivery-tariffs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📋 حدث على طلبية",
+          "id": "adm108",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-odoo-webhook-secret",
+                "value": "{{odooWebhookSecret}}"
+              }
+            ],
+            "description": "طلبية أُنشئت داخل أودو لا تحمل part_id وتُقبَل وتُتجاهَل — لا تخصّ طلبية مشترٍ هنا.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/odoo/webhooks/orders",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "odoo",
+                "webhooks",
+                "orders"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"part_id\": \"{{partId}}\",\n  \"odoo_id\": 12,\n  \"event\": \"completed\",\n  \"invoice_number\": \"INV-001\",\n  \"output_zone\": \"منطقة الإخراج\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "💡 اقتراح مادة من أودو",
+          "id": "adm109",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-odoo-webhook-secret",
+                "value": "{{odooWebhookSecret}}"
+              }
+            ],
+            "description": "idempotent على odoo_suggestion_id: إعادة الدفع بعد timeout تُحدِّث الصف نفسه ولا تودع الاقتراح مرتين.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/odoo/webhooks/product-suggestion",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "odoo",
+                "webhooks",
+                "product-suggestion"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"odoo_suggestion_id\": 7,\n  \"product_name\": \"أسلاك نحاس\",\n  \"unit_type\": \"KG\",\n  \"category_name\": \"معادن\",\n  \"description\": \"تخرج من خط الفرز مفصولة\",\n  \"suggested_by\": \"أدمن أودو\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🧑‍✈️ قرار على سائق",
+          "id": "adm110",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-odoo-webhook-secret",
+                "value": "{{odooWebhookSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/odoo/webhooks/driver-decision",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "odoo",
+                "webhooks",
+                "driver-decision"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"backend_driver_id\": \"{{driverId}}\",\n  \"approved\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🕐 قرار تغيير وردية",
+          "id": "adm111",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-odoo-webhook-secret",
+                "value": "{{odooWebhookSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/odoo/webhooks/shift-change-decision",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "odoo",
+                "webhooks",
+                "shift-change-decision"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"backend_request_id\": \"{{requestId}}\",\n  \"status\": \"ACCEPTED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

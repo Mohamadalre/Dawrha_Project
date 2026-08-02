@@ -59,18 +59,27 @@ export class ExternalPartnerOnboardingService extends OnboardingService {
       throw new ForbiddenException('You cannot add the information again,please move to the next stage');
     }
 
-    const phoneExists = await this.externalPartnerRepo.findOne({ where: { externalPartnerPhone: dto.landlinePhone } });
+    // Checked before the insert, so a collision is a message the applicant can
+    // act on rather than a unique-violation surfacing as a 500.
+    const phoneExists = await this.externalPartnerRepo.findOne({ where: { externalPartnerPhone: dto.phoneNumber } });
     if (phoneExists) {
-      throw new BadRequestException('Institution phone number already exists');
+      throw new BadRequestException('Phone number already exists');
     }
 
     const information = this.externalPartnerRepo.create({
       externalPartnerName: dto.externalPartnerName,
-      externalPartnerPhone: dto.landlinePhone,
+      // The mobile IS the facility's number now — the landline it replaced
+      // reached the premises, not a person.
+      externalPartnerPhone: dto.phoneNumber,
       externalPartnerSlogo: '', // temporary
       account: account
     })
     const profile = await this.externalPartnerRepo.save(information);
+
+    // The same number on the ACCOUNT. It lived only on the profile, under a
+    // different column name per role, so every screen reading the account
+    // showed a facility with no phone while the number sat one join away.
+    await this.mirrorPhoneOntoAccount(account.id, dto.phoneNumber);
 
     // Upload logo if file provided
     if (file) {

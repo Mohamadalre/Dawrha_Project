@@ -6,3 +6,10 @@ export class ShiftNotFoundException extends NotFoundException {
     super({ message: 'Shift not found', errorCode: 'SHIFT_NOT_FOUND' });
   }
 }
+
+/** The authenticated collector has no driver profile yet. */
+export class DriverProfileNotFoundException extends NotFoundException {
+  constructor() {
+    super({ message: 'Driver profile not found', errorCode: 'DRIVER_PROFILE_NOT_FOUND' });
+  }
+}

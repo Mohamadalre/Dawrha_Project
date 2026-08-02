@@ -8,6 +8,7 @@ import { CommonModule } from '@src/common/common.module';
 import { OdooSyncModule } from '@src/odoo-sync/odoo-sync.module';
 import { CoreModule } from '@src/core/core.module';
 import { UserModule } from '@src/user/user.module';
+import { AccountManagementModule } from '@src/account-management/account-management.module';
 
 @Module({
   imports: [
@@ -16,6 +17,9 @@ import { UserModule } from '@src/user/user.module';
     CoreModule,
     UserModule,
     OdooSyncModule,
+    // For the applications cache only: an applicant replacing a requested
+    // document moves their own account back into the reviewer's queue.
+    AccountManagementModule,
   ],
   controllers: [MediaController],
   providers: [MediaService],

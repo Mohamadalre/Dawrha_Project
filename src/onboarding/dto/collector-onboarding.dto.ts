@@ -8,7 +8,7 @@ export class InformationCollectorDto {
     })
     NationalID: string;
 
-    // The chosen work shift (from GET /shifts) — id, not an enum value.
+    // The chosen work shift (from GET /shifts/onboarding) — id, not an enum value.
     @IsNotEmpty()
     @IsString()
     @IsUUID()

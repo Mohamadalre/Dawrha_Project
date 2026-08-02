@@ -14,9 +14,11 @@ import { TruckEntity } from './truck.entity';
 import { ShiftChangeRequestStatus } from '../enums/shift-change-request-status.enum';
 
 /**
- * A driver's request to be (re)assigned to a specific truck on a specific shift.
- * The admin moves it PENDING → PROCESSING, then processes it (which swaps the
- * driver's assignment) → ACCEPTED, or REJECTED with a reason.
+ * A driver's request to CHANGE HIS SHIFT (submitted in the app with a
+ * mandatory reason — no truck is picked by the driver). The WAREHOUSE
+ * MANAGER decides in Odoo: PENDING → PROCESSING → ACCEPTED (he picks a free
+ * truck of the requested shift, which becomes `truckId`) or REJECTED with a
+ * reason. The driver may cancel only while PENDING (deletes both sides).
  */
 @Entity('shift_change_requests')
 @Index(['driverId', 'status'])
@@ -35,19 +37,25 @@ export class ShiftChangeRequest {
   @Column({ name: 'driver_id' })
   driverId: string;
 
-  @ManyToOne(() => TruckEntity, { nullable: false, onDelete: 'CASCADE' })
+  /** Truck the manager reserved on approval — empty until ACCEPTED. */
+  @ManyToOne(() => TruckEntity, { nullable: true, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'truck_id' })
-  truck: TruckEntity;
+  truck?: TruckEntity | null;
 
-  @Column({ name: 'truck_id' })
-  truckId: string;
+  @Column({ name: 'truck_id', type: 'uuid', nullable: true })
+  truckId?: string | null;
 
+  /** The shift the driver wants to MOVE INTO (of his own warehouse). */
   @ManyToOne(() => Shift, { nullable: false })
   @JoinColumn({ name: 'shift_id' })
   shift: Shift;
 
   @Column({ name: 'shift_id' })
   shiftId: string;
+
+  /** Why the driver wants the change (mandatory at submission). */
+  @Column({ type: 'text', nullable: true })
+  reason?: string;
 
   @Column({
     type: 'enum',

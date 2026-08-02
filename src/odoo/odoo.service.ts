@@ -23,6 +23,7 @@ interface OdooSession {
  * re-authenticating on every request; it is cleared whenever Odoo returns an
  * error so the next call transparently re-authenticates (covers session expiry).
  */
+
 @Injectable()
 export class OdooService {
   private readonly logger = new Logger(OdooService.name);
@@ -154,12 +155,23 @@ export class OdooService {
     name: string;
     categoryOdooId: number;
     price?: number;
+    /** Measurement-unit CODE (products.unitType), e.g. 'KG'. */
+    unitCode?: string;
   }): Promise<number> {
+    // NOTE: no `price` here. `recycle.product` has no single price field — it
+    // holds per-tier prices (price_factory / price_free_facility) which are
+    // written by the dedicated pricing sync (`replaceConditionPrices`) per
+    // condition. Sending `price` made Odoo reject the whole create with
+    // "Invalid field 'price' in 'recycle.product'", so every product sync
+    // failed and the compensation deleted the product from the backend.
     const payload: Record<string, any> = {
       name: values.name,
       category_id: values.categoryOdooId,
-      price: values.price ?? 0,
     };
+    // Odoo resolves the code against its mirror of `measurement_units`, so a
+    // material can only ever carry a unit this backend actually defines.
+    // Omitted → Odoo falls back to its default unit rather than failing.
+    if (values.unitCode) payload.unit_code = values.unitCode;
     const id = await this.callKw<number>('recycle.product', 'create', [payload]);
     if (!id) throw new InternalServerErrorException('Odoo did not return product id');
     return id;
@@ -187,27 +199,57 @@ export class OdooService {
     latitude?: number;
     longitude?: number;
     governorate?: string;
+    /** Odoo requires one on creation now — see `_assert_location_given`. */
+    address?: string;
     zones?: { name: string; type: string }[];
   }): Promise<number> {
     const payload: Record<string, any> = {
       name: values.name,
       code: values.code,
     };
+    if (values.address) payload.address = values.address;
     if (values.latitude != null) payload.latitude = values.latitude;
     if (values.longitude != null) payload.longitude = values.longitude;
-    if (values.governorate) payload.governorate = values.governorate;
+    if (values.governorate) {
+      // Governorates are a real table on both sides now (`recycle.province`
+      // mirrors `provinces`), so the plain name travels as-is: Odoo resolves
+      // it against the very list this backend pushed. No key-conversion table
+      // to keep in step, and a rename here keeps resolving there.
+      payload.province_name = values.governorate;
+    }
     if (values.zones?.length) {
       // Odoo One2many "create" commands: (0, 0, {values}) per zone.
+      // zone_type is a Selection too — normalise 'RECEIVING' → 'receiving'.
       payload.zone_ids = values.zones.map((z) => [
         0,
         0,
-        { name: z.name, zone_type: z.type },
+        { name: z.name, zone_type: String(z.type ?? '').toLowerCase() },
       ]);
     }
 
     const id = await this.callKw<number>('recycle.warehouse', 'create', [payload]);
     if (!id) throw new InternalServerErrorException('Odoo did not return warehouse id');
     return id;
+  }
+
+  /**
+   * Mirrors a backend-side warehouse edit into Odoo.
+   *
+   * Only the fields the backend owns travel: name, code and capacity. Location
+   * and governorate are edited in Odoo after creation — it is the operational
+   * system — and flow back here through SYNC_WAREHOUSE, so sending them from
+   * this side would let the two overwrite each other.
+   */
+  async updateRecycleWarehouse(
+    odooWarehouseId: number,
+    values: { name?: string; code?: string; capacity?: number },
+  ): Promise<void> {
+    const payload: Record<string, any> = {};
+    if (values.name !== undefined) payload.name = values.name;
+    if (values.code !== undefined) payload.code = values.code;
+    if (values.capacity !== undefined) payload.capacity = values.capacity;
+    if (!Object.keys(payload).length) return;
+    await this.callKw('recycle.warehouse', 'write', [[odooWarehouseId], payload]);
   }
 
   /** Lists warehouses from the custom recycle_warehouse addon. */
@@ -239,13 +281,27 @@ export class OdooService {
     return users?.[0] ?? null;
   }
 
-  /** Reads per-warehouse stock lines (recycle.stock) for a warehouse. */
+  /**
+   * Reads per-warehouse stock lines (recycle.stock) for a warehouse.
+   *
+   * `reserved_qty` travels with the quantity: the allocator must decide on what
+   * is actually FREE, not on the raw quantity, or two orders get promised the
+   * same stock and the shortage only surfaces at deduction time.
+   */
   async fetchWarehouseInventory(odooWarehouseId: number): Promise<any[]> {
     return this.callKw<any[]>(
       'recycle.stock',
       'search_read',
       [[['warehouse_id', '=', odooWarehouseId]]],
-      { fields: ['product_id', 'quantity', 'condition_code'] },
+      {
+        fields: [
+          'product_id',
+          'quantity',
+          'reserved_qty',
+          'available_qty',
+          'condition',
+        ],
+      },
     );
   }
 
@@ -257,7 +313,29 @@ export class OdooService {
     const rows = await this.callKw<any[]>(
       'recycle.warehouse',
       'read',
-      [[odooWarehouseId], ['name', 'code']],
+      [
+        [odooWarehouseId],
+        [
+          'name',
+          'code',
+          // Lifecycle: allocation must never choose a warehouse that Odoo has
+          // put into closing/inactive.
+          'state',
+          // Governorate as the backend's own uuid, so the mirror links to a
+          // `provinces` row without matching on a display name.
+          'province_backend_id',
+          'governorate',
+          'latitude',
+          'longitude',
+          // Both editable in Odoo, and both were missing here — so an edit
+          // there never reached the mirror. Capacity matters most: the backend
+          // reports load as a percentage of it, so the two systems showed
+          // different fullness for the same building until somebody called a
+          // sync by hand.
+          'capacity',
+          'address',
+        ],
+      ],
     );
     return rows?.[0] ?? null;
   }
@@ -290,18 +368,153 @@ export class OdooService {
   }
 
   // ---------------------------------------------------------------------------
+  // Governorates (recycle.province)
+  // ---------------------------------------------------------------------------
+  // This backend owns the governorate list; Odoo mirrors it so a warehouse can
+  // point at a real row instead of a hard-coded Selection. Every call is keyed
+  // by the backend uuid, which makes each one idempotent — a replayed push
+  // after a connection drop updates in place, it never duplicates.
+
+  async upsertProvince(values: {
+    id: string;
+    name_en: string;
+    name_ar: string;
+  }): Promise<number> {
+    return this.callKw<number>('recycle.province', 'backend_upsert', [
+      values.id,
+      values.name_en,
+      values.name_ar,
+    ]);
+  }
+
+  /**
+   * A province deleted here is ARCHIVED in Odoo, never unlinked: warehouses
+   * created while it existed still point at it and that history must survive.
+   */
+  async archiveProvince(backendProvinceId: string): Promise<void> {
+    await this.callKw('recycle.province', 'backend_archive', [backendProvinceId]);
+  }
+
+  /**
+   * Full replace-in-place of the governorate list. Used by the startup sync and
+   * the reconcile cron so a push lost while Odoo was down still converges —
+   * anything Odoo holds that is no longer in this list gets archived there.
+   */
+  async syncAllProvinces(
+    provinces: { id: string; name_en: string; name_ar: string }[],
+  ): Promise<{ synced: number; archived: number }> {
+    return this.callKw('recycle.province', 'backend_sync_all', [provinces]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Buyer orders — one Odoo order per WAREHOUSE part
+  // ---------------------------------------------------------------------------
+  /**
+   * Pushes one part of a buyer's order into Odoo as a `recycle.order`.
+   *
+   * `recycle.order` is bound to a single warehouse, so a buyer order split
+   * across three warehouses becomes three of them — each with its own manager,
+   * output employee and invoice, reassembled on our side into the one order the
+   * buyer sees.
+   *
+   * Keyed on `part_id` in Odoo, which makes this idempotent: a retry after a
+   * timeout finds the existing order instead of making a warehouse prepare the
+   * same goods twice.
+   */
+  async pushOrderPart(payload: {
+    part_id: string;
+    /**
+     * The buyer ORDER these parts belong to, and this part's place in it.
+     *
+     * A split order is approved by the Odoo administrator as ONE decision —
+     * three warehouse managers each approving their own piece leaves the buyer
+     * with a half-approved order and nobody responsible for the whole. Odoo
+     * cannot group the parts without being told which order they came from.
+     */
+    order_id?: string;
+    part_sequence?: number;
+    part_count?: number;
+    factory_id?: string;
+    customer_name: string;
+    owner_name?: string;
+    customer_email?: string;
+    warehouse_odoo_id: number;
+    order_type: 'factory' | 'free_facility';
+    lines: {
+      product_odoo_id: number;
+      quantity: number;
+      condition?: string | null;
+      price_unit: number;
+    }[];
+  }): Promise<{ odoo_id: number; created: boolean }> {
+    return this.callKw('recycle.order', 'backend_upsert_part', [payload]);
+  }
+
+  /** The buyer cancelled — withdraw the part before anyone acts on it. */
+  async cancelOrderPart(
+    partId: string,
+    reason?: string,
+  ): Promise<{ cancelled: boolean; reason?: string }> {
+    return this.callKw('recycle.order', 'backend_cancel_part', [partId, reason ?? null]);
+  }
+
+  /**
+   * Reserves this part's stock in Odoo, all-or-nothing.
+   *
+   * Called the moment a warehouse is chosen and BEFORE its manager is asked:
+   * the gap between choosing and approving is exactly where two orders would
+   * otherwise be promised the same stock.
+   */
+  async reserveOrderStock(
+    odooOrderId: number,
+  ): Promise<{ reserved: boolean; shortages?: unknown[] }> {
+    return this.callKw('recycle.order', 'action_reserve_stock', [[odooOrderId]]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Delivery tariffs (recycle.delivery.tariff) — ODOO IS THE AUTHOR
+  // ---------------------------------------------------------------------------
+  /**
+   * Reads the whole delivery-pricing table. Odoo's administrator owns it (Odoo
+   * owns the fleet, so it owns what a delivery costs); the backend only keeps a
+   * mirror so a buyer's cart can be quoted from a local read.
+   *
+   * A full read rather than a diff: the table is tiny and re-reading it is
+   * idempotent, so a replayed ping or a missed one both converge.
+   */
+  async fetchDeliveryTariffs(): Promise<any[]> {
+    return this.callKw<any[]>(
+      'recycle.delivery.tariff',
+      'export_for_backend',
+      [],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
   // Material conditions (recycle.material.condition)
   // ---------------------------------------------------------------------------
   // Admin-managed grades (EXCELLENT/GOOD/...) pushed to Odoo so the sorting UI
   // lists them when the sorter grades processed quantities.
 
+  /**
+   * Mirrors ONE grade of ONE material.
+   *
+   *  is required: a grade belongs to a material, and Odoo's
+   * sorting screen must offer only the grades of the material in hand.
+   */
   async createMaterialCondition(values: {
     name: string;
     code: string;
     sortOrder: number;
+    productOdooId: number;
   }): Promise<number> {
     const id = await this.callKw<number>('recycle.material.condition', 'create', [
-      { name: values.name, code: values.code, sort_order: values.sortOrder },
+      {
+        name: values.name,
+        code: values.code,
+        sort_order: values.sortOrder,
+        product_id: values.productOdooId,
+      },
     ]);
     if (!id) throw new InternalServerErrorException('Odoo did not return condition id');
     return id;
@@ -320,14 +533,28 @@ export class OdooService {
   // the backend keeps a read mirror so the driver app endpoints keep working)
   // ---------------------------------------------------------------------------
   async fetchShifts(): Promise<any[]> {
-    return this.callKw<any[]>('recycle.shift', 'search_read', [[]], {
-      fields: ['name', 'start_time', 'end_time', 'shift_type'],
+    // Only DRIVER shifts are mirrored: warehouse-staff shifts belong to Odoo
+    // employees and never reach the driver app, so keeping them out of the
+    // backend keeps the mirror lean and the driver pickers clean.
+    return this.callKw<any[]>('recycle.shift', 'search_read', [[['shift_type', '=', 'driver']]], {
+      fields: ['name', 'start_time', 'end_time', 'shift_type', 'is_global', 'warehouse_ids', 'tolerance'],
     });
   }
 
   async fetchTrucks(): Promise<any[]> {
     return this.callKw<any[]>('recycle.truck', 'search_read', [[]], {
-      fields: ['model', 'year', 'plate_number', 'max_payload_kg', 'warehouse_id', 'is_active'],
+      // `truck_type` travels too: without it the mirror cannot tell a
+      // collection truck from a delivery one, and the admin fleet screen lists
+      // both with nothing to distinguish them.
+      fields: [
+        'model',
+        'year',
+        'plate_number',
+        'max_payload_kg',
+        'warehouse_id',
+        'is_active',
+        'truck_type',
+      ],
     });
   }
 
@@ -335,6 +562,19 @@ export class OdooService {
     return this.callKw<any[]>('recycle.driver.assignment', 'search_read', [[]], {
       fields: ['backend_driver_id', 'truck_id', 'shift_id'],
     });
+  }
+
+  /**
+   * The backend_driver_id (= collector profile id) of EVERY driver request that
+   * currently exists in Odoo. Used by the reconciliation cron to detect which
+   * pending drivers never reached Odoo (a push lost to a connection drop) and
+   * re-push only those.
+   */
+  async fetchDriverRequestKeys(): Promise<string[]> {
+    const rows = await this.callKw<any[]>('recycle.driver.request', 'search_read', [[]], {
+      fields: ['backend_driver_id'],
+    });
+    return rows.map((r) => r.backend_driver_id).filter(Boolean);
   }
 
   /**
@@ -348,7 +588,35 @@ export class OdooService {
     name: string;
     email: string;
     phone?: string | null;
-    images?: { mediaId: string; fileType: string; url: string }[];
+    /** National ID — the Odoo admin verifies it against the uploaded documents. */
+    nationalId?: string | null;
+    /** Odoo id of the driver shift the collector picked during onboarding —
+     * Odoo stores it on the request (shift_id) and the assign-driver-to-truck
+     * screen filters drivers by it. */
+    shiftOdooId?: number | null;
+    /** Location the driver registered. The province NAME is resolved here (the
+     * backend owns the provinces table) so Odoo never shows a raw uuid. */
+    provinceName?: string | null;
+    address?: string | null;
+    locationNote?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    /**
+     * The documents — WITH the reviewer's judgement on each.
+     *
+     * The status travels because the push is an UPSERT: Odoo replaces the whole
+     * image list every time the driver re-uploads anything. Sending only the
+     * files meant every re-upload silently reset the reviewer's verdict on the
+     * documents the driver had not touched, so a request with two bad documents
+     * became a request with none the moment he fixed the first.
+     */
+    images?: {
+      mediaId: string;
+      fileType: string;
+      url: string;
+      status: string;
+      reuploadRequested: boolean;
+    }[];
   }): Promise<number> {
     const id = await this.callKw<number>('recycle.driver.request', 'create', [
       {
@@ -356,10 +624,30 @@ export class OdooService {
         name: values.name,
         email: values.email,
         phone: values.phone ?? false,
+        national_id: values.nationalId ?? false,
+        shift_odoo_id: values.shiftOdooId ?? false,
+        province_name: values.provinceName ?? false,
+        address: values.address ?? false,
+        location_note: values.locationNote ?? false,
+        latitude: values.latitude ?? false,
+        longitude: values.longitude ?? false,
         image_ids: (values.images ?? []).map((img) => [
           0,
           0,
-          { backend_media_id: img.mediaId, file_type: img.fileType, url: img.url },
+          {
+            backend_media_id: img.mediaId,
+            file_type: img.fileType,
+            url: img.url,
+            // Odoo's own vocabulary is lower-case, and its "accepted" is this
+            // side's "approved".
+            status:
+              img.status === 'APPROVED'
+                ? 'accepted'
+                : img.status === 'REJECTED'
+                  ? 'rejected'
+                  : 'pending',
+            reupload_requested: img.reuploadRequested,
+          },
         ]),
       },
     ]);
@@ -367,21 +655,32 @@ export class OdooService {
     return id;
   }
 
-  /** Pushes a driver's shift-change request so the Odoo admin decides there. */
+  /**
+   * Pushes a driver's shift-change request so his WAREHOUSE MANAGER decides
+   * there (pending → processing → accepted-with-a-truck / rejected). The
+   * driver names no truck — only the shift he wants plus a mandatory reason.
+   */
   async createShiftChangeRequest(values: {
     backendRequestId: string;
     backendDriverId: string;
     driverName: string;
-    truckOdooId?: number | null;
-    shiftOdooId?: number | null;
+    /** Shift the driver wants to move INTO (Odoo id). */
+    requestedShiftOdooId: number;
+    /** Shift he is on today (Odoo id) — shown to the manager for context. */
+    currentShiftOdooId?: number | null;
+    reason: string;
+    /** Scopes the request to the driver's warehouse manager (Odoo id). */
+    warehouseOdooId?: number | null;
   }): Promise<number> {
     const id = await this.callKw<number>('recycle.shift.change.request', 'create', [
       {
         backend_request_id: values.backendRequestId,
         backend_driver_id: values.backendDriverId,
         driver_name: values.driverName,
-        truck_id: values.truckOdooId ?? false,
-        shift_id: values.shiftOdooId ?? false,
+        shift_id: values.requestedShiftOdooId,
+        current_shift_id: values.currentShiftOdooId ?? false,
+        reason: values.reason,
+        warehouse_odoo_id: values.warehouseOdooId ?? false,
       },
     ]);
     if (!id) throw new InternalServerErrorException('Odoo did not return shift-change id');
@@ -389,14 +688,122 @@ export class OdooService {
   }
 
   /**
+   * Driver cancelled his still-PENDING request: remove the Odoo mirror too.
+   * Server-guarded there (action_backend_cancel unlinks only pending rows) and
+   * idempotent — an already-decided or already-deleted request is a no-op.
+   */
+  async cancelShiftChangeRequest(backendRequestId: string): Promise<void> {
+    await this.callKw('recycle.shift.change.request', 'action_backend_cancel', [
+      backendRequestId,
+    ]);
+  }
+
+  /**
+   * Creates the Odoo mirror of a truck-handover session on PICKUP. The
+   * warehouse manager reads it in his read-only "Driver Attendance" screen.
+   */
+  async createTruckHandover(values: {
+    backendHandoverId: string;
+    backendDriverId: string;
+    driverName: string;
+    truckOdooId?: number | null;
+    shiftOdooId?: number | null;
+    warehouseOdooId?: number | null;
+    workDate: string;
+    pickedUpAt: string;
+  }): Promise<number> {
+    const id = await this.callKw<number>('recycle.truck.handover', 'create', [
+      {
+        backend_handover_id: values.backendHandoverId,
+        backend_driver_id: values.backendDriverId,
+        driver_name: values.driverName,
+        truck_odoo_id: values.truckOdooId ?? false,
+        shift_odoo_id: values.shiftOdooId ?? false,
+        warehouse_odoo_id: values.warehouseOdooId ?? false,
+        work_date: values.workDate,
+        picked_up_at: values.pickedUpAt,
+      },
+    ]);
+    if (!id) throw new InternalServerErrorException('Odoo did not return handover id');
+    return id;
+  }
+
+  /** Updates the Odoo handover mirror on DROPOFF (idempotent by backend id). */
+  async closeTruckHandover(values: {
+    backendHandoverId: string;
+    droppedOffAt: string;
+    dropoffReason?: string | null;
+    lateMinutes?: number | null;
+  }): Promise<void> {
+    await this.callKw('recycle.truck.handover', 'backend_close', [
+      values.backendHandoverId,
+      values.droppedOffAt,
+      values.dropoffReason ?? false,
+      values.lateMinutes ?? 0,
+    ]);
+  }
+
+  /**
+   * Fire-and-forget: asks Odoo to notify the driver's warehouse MANAGER about
+   * a missed pickup / late dropoff. (The driver himself is notified by the
+   * backend over FCM — this covers the Odoo-side manager only.)
+   */
+  async notifyHandoverAlertManager(values: {
+    backendDriverId: string;
+    kind: 'MISSED_PICKUP' | 'LATE_DROPOFF';
+    shiftName: string;
+    lateMinutes?: number | null;
+  }): Promise<void> {
+    await this.callKw('recycle.truck.handover', 'backend_alert_manager', [
+      values.backendDriverId,
+      values.kind,
+      values.shiftName,
+      values.lateMinutes ?? 0,
+    ]);
+  }
+
+  /**
+   * Mirrors a driver's truck-problem report (reason + photo URLs) so the
+   * warehouse manager reads it in his dashboard. Read-only there.
+   */
+  async createTruckProblem(values: {
+    backendProblemId: string;
+    backendDriverId: string;
+    driverName: string;
+    reason: string;
+    imageUrls: string[];
+    truckOdooId?: number | null;
+    warehouseOdooId?: number | null;
+  }): Promise<number> {
+    const id = await this.callKw<number>('recycle.truck.problem', 'create', [
+      {
+        backend_problem_id: values.backendProblemId,
+        backend_driver_id: values.backendDriverId,
+        driver_name: values.driverName,
+        reason: values.reason,
+        truck_odoo_id: values.truckOdooId ?? false,
+        warehouse_odoo_id: values.warehouseOdooId ?? false,
+        image_ids: values.imageUrls.map((url) => [0, 0, { url }]),
+      },
+    ]);
+    if (!id) throw new InternalServerErrorException('Odoo did not return truck-problem id');
+    return id;
+  }
+
+  /**
    * Replaces the per-condition price lines of one product+tier in Odoo
    * (model recycle.product.condition.price). Odoo invoices factories and free
    * facilities with these — each condition of a product has its own price.
+   *
+   * A material with NO conditions is priced once per tier; that row travels
+   * with an EMPTY `conditionCode` and Odoo shows it as the material's plain
+   * price. Dropping it (as an earlier version did) left such materials with no
+   * price at all on the Odoo side.
    */
   async replaceConditionPrices(
     odooProductId: number,
     tier: 'factory' | 'free_facility',
-    lines: { conditionCode: string; price: number }[],
+    lines: { conditionCode: string | null; price: number }[],
   ): Promise<void> {
     const existing = await this.callKw<number[]>(
       'recycle.product.condition.price',
@@ -411,7 +818,7 @@ export class OdooService {
         lines.map((l) => ({
           product_id: odooProductId,
           tier,
-          condition_code: l.conditionCode,
+          condition_code: l.conditionCode ?? '',
           price: l.price,
         })),
       ]);

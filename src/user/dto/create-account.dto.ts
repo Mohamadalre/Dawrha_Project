@@ -6,7 +6,10 @@ import { IsEmail, IsNotEmpty, IsString, Matches, MaxLength, MinLength } from 'cl
 export class CreateAccountDto {
  
 
-  @IsNotEmpty({message:'The email is required '})
+  // Trailing space removed: the message doubles as the i18n KEY, so a stray
+  // space is a translation that silently stops matching the moment anyone
+  // retypes the sentence without it.
+  @IsNotEmpty({ message: 'The email is required' })
   @IsEmail({})
   email:string;
 

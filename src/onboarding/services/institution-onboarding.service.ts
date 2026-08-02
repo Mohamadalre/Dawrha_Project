@@ -64,10 +64,14 @@ export class InstitutionOnboardingService extends OnboardingService {
       throw new ForbiddenException('You cannot add the information again,please move to the next stage');
     }
 
-    // Check for unique fields
-    const phoneExists = await this.institutionRepo.findOne({ where: { institutionPhone: dto.landlinePhone } });
+    // One number now, so one check. It runs here rather than being left to the
+    // unique index because a collision reaching the database surfaces as a 500
+    // instead of a message the applicant can act on.
+    const phoneExists = await this.institutionRepo.findOne({
+      where: { institutionPhone: dto.phoneNumber },
+    });
     if (phoneExists) {
-      throw new BadRequestException('Institution phone number already exists');
+      throw new BadRequestException('Phone number already exists');
     }
 
     const licenseExists = await this.institutionRepo.findOne({ where: { licenseNumber: dto.licenseNumber } });
@@ -90,7 +94,7 @@ export class InstitutionOnboardingService extends OnboardingService {
 
     let information = this.institutionRepo.create({
       institutionName: dto.institutionName,
-      institutionPhone: dto.landlinePhone,
+      institutionPhone: dto.phoneNumber,
       institutionSlogo: '',
       taxNumber: dto.taxNumber,
       licenseNumber: dto.licenseNumber,
@@ -107,6 +111,11 @@ export class InstitutionOnboardingService extends OnboardingService {
       information.otherInstitutionType = dto.otherInstitutionType;
     }
     const profile = await this.institutionRepo.save(information);
+
+    // The same number on the ACCOUNT. It lived only on the profile, under a
+    // different column name per role, so every screen reading the account
+    // showed a facility with no phone while the number sat one join away.
+    await this.mirrorPhoneOntoAccount(account.id, dto.phoneNumber);
 
     // Upload logo if file provided
     if (file) {

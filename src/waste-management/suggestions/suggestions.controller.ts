@@ -21,7 +21,6 @@ export class SuggestionsController {
   @Post('suggest')
   @Permissions('waste.products.suggest')
   async suggest(@CurrentUser() user, @Body() dto: CreateSuggestionDto) {
-    const result = await this.suggestionsService.create(user, dto);
-    return { message: result.message, result };
+    return this.suggestionsService.create(user, dto);
   }
 }

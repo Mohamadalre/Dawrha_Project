@@ -11,6 +11,7 @@ import {
   Param,
   BadRequestException,
   Logger,
+  VERSION_NEUTRAL,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MediaService } from './media.service';
@@ -36,7 +37,15 @@ import { MediaNotFoundException } from './exceptions/media.exceptions';
  * - GET    /media/owner/:ownerId - Get owner's images
  * - GET    /media/:id            - Get single image details
  */
-@Controller('media')
+/**
+ * Mounted on BOTH `/api/media/...` and `/api/v1/media/...`.
+ *
+ * Every other controller in the app is versioned, but this one shipped without
+ * a version, so clients call the unversioned path. VERSION_NEUTRAL keeps those
+ * callers working while `'1'` brings the routes in line with the rest of the
+ * API — a consistency fix with no breaking change.
+ */
+@Controller({ path: 'media', version: [VERSION_NEUTRAL, '1'] })
 @UseGuards(JwtAuthGuard) // All endpoints require authentication
 export class MediaController {
   private readonly logger = new Logger(MediaController.name);

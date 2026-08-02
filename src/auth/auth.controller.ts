@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, HttpCode, Put, Req, Patch } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, HttpCode, HttpStatus, Put, Req, Patch } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { DeviceDto, RefreshTokenDto, RefreshTokenTemporaryDto } from './dto/auth.dto';
@@ -37,8 +37,7 @@ export class AuthController {
    */
   @Post('register/citizen')
   async registerCitizen(@Body() registerDto: RegisterDto) {
-    const result = await this.authService.register(registerDto, Role.CITIZEN);
-    return result;
+    return this.authService.register(registerDto, Role.CITIZEN);
   }
 
 
@@ -207,8 +206,7 @@ export class AuthController {
     @CurrentUser() user: any,
     @Body() dto: UpdateDeviceLanguageDto,
   ) {
-    const result = await this.authService.updateDeviceLanguage(user.id, dto.deviceId, dto.language);
-    return { message: result.message, result };
+    return this.authService.updateDeviceLanguage(user.id, dto.deviceId, dto.language);
   }
 
 
@@ -294,6 +292,9 @@ export class AuthController {
    * @param refreshTokenDto body payload containing deviceId
    * @returns new access and refresh tokens
    */
+  // 200, not the POST default 201: refreshing mints tokens for an existing
+  // session, it creates no resource — and every login route already returns 200.
+  @HttpCode(HttpStatus.OK)
   @UseGuards(RefreshTokenGuard)
   @Post('refresh-token')
   async refreshTokens(@Req() req: any, @Body() refreshTokenDto: RefreshTokenDto) {

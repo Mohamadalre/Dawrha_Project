@@ -96,6 +96,11 @@ export class FactoryOnboardingService extends OnboardingService {
     })
     const profile = await this.factoryRepo.save(information);
 
+    // The same number on the ACCOUNT. It lived only on the profile, under a
+    // different column name per role, so every screen reading the account
+    // showed a facility with no phone while the number sat one join away.
+    await this.mirrorPhoneOntoAccount(account.id, dto.phoneNumber);
+
 
     // Upload logo if file provided
     if (file) {
