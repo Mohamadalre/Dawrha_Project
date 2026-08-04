@@ -103,6 +103,28 @@ export class OdooSyncService {
   }
 
   /**
+   * Re-read EVERY warehouse Odoo has (startup + reconcile cron).
+   *
+   * The layer that survives a broken connection. The per-warehouse ping is
+   * fire-and-forget: if this backend is down, or the HTTP call fails past its
+   * retries, that announcement is gone and nothing would ever send it again —
+   * so a warehouse created or renamed while we were offline would stay wrong
+   * until somebody pressed a button. This sweep converges regardless of what
+   * was missed, with no outbox table and no change tracking.
+   *
+   * Bucketed like the provinces one: the sweep is idempotent, so overlapping
+   * triggers collapsing into a single job is pure gain.
+   */
+  enqueueSyncAllWarehouses() {
+    const bucket = Math.floor(Date.now() / 60_000);
+    return this.queue.add(
+      ODOO_JOBS.SYNC_ALL_WAREHOUSES,
+      {},
+      { ...this.opts(ODOO_JOBS.SYNC_ALL_WAREHOUSES), jobId: `warehouses-reconcile-${bucket}` },
+    );
+  }
+
+  /**
    * Re-read the delivery tariffs Odoo owns. Payload-less and bucketed: a burst
    * of admin edits collapses into ONE re-read, which is safe because the job
    * replaces the whole mirror rather than applying a diff.

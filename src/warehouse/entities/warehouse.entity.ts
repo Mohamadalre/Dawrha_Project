@@ -95,6 +95,19 @@ export class Warehouse {
   @Column({ type: 'decimal', precision: 14, scale: 3, default: 0 })
   currentLoad: string;
 
+  /**
+   * How many incoming shipments this site has handled, mirrored from Odoo.
+   *
+   * Held here rather than counted, because shipments do not exist on this side
+   * at all: a shipment is a collector's delivery being received, weighed and
+   * sorted, and every one of those steps happens in Odoo. Asking Odoo for the
+   * number on every read would put a JSON-RPC round trip inside a listing that
+   * already answers from one query — so it travels with the rest of the mirror
+   * and is refreshed by the same sync.
+   */
+  @Column({ type: 'int', default: 0 })
+  shipmentCount: number;
+
   @Column({ default: true })
   isActive: boolean;
 

@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WasteCategory } from '../entities/waste-category.entity';
@@ -9,6 +13,7 @@ import { MeasurementUnit } from '../entities/measurement-unit.entity';
 import { MaterialCondition } from '../entities/material-condition.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
 import { Offer } from '../entities/offer.entity';
+import { Role } from '@src/user/enums/role.enum';
 import { OdooSyncStatus } from '../enums/odoo-sync-status.enum';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
 import { AuditService } from '@src/waste-management/common/providers/audit.service';
@@ -491,9 +496,12 @@ export class AdminCatalogService {
     const product = await this.productRepo.findOne({ where: { id: dto.product_id } });
     if (!product) throw new ProductNotFoundException();
 
-    const conditionCode = dto.condition
-      ? await this.conditionsService.validateActiveCode(dto.product_id, dto.condition)
-      : null;
+    const conditionCode = await this.resolveOfferCondition(
+      dto.product_id,
+      dto.condition,
+      dto.target_roles,
+    );
+    await this.assertNoDuplicateOffer(dto.product_id, conditionCode, dto.target_roles);
 
     const offer = await this.offerRepo.save(
       this.offerRepo.create({
@@ -526,10 +534,31 @@ export class AdminCatalogService {
 
     if (dto.offer_price !== undefined) offer.offerPrice = String(dto.offer_price);
     if (dto.discount_percentage !== undefined) offer.discountPercentage = String(dto.discount_percentage);
-    if (dto.condition !== undefined) {
-      offer.conditionCode = dto.condition
-        ? await this.conditionsService.validateActiveCode(offer.productId, dto.condition)
-        : null;
+
+    // The condition/audience rules are re-checked on EDIT, against the values
+    // the offer will END UP with. Validating only on create leaves the rule
+    // trivially bypassable: create a legal factory offer naming a grade, then
+    // retarget it at citizens — who have no grades — and the offer now says
+    // something their price list cannot express.
+    const nextCondition =
+      dto.condition !== undefined ? dto.condition : (offer.conditionCode ?? undefined);
+    const nextRoles =
+      dto.target_roles !== undefined
+        ? dto.target_roles
+        : ((offer.targetRoles as Role[] | null) ?? undefined);
+
+    if (dto.condition !== undefined || dto.target_roles !== undefined) {
+      offer.conditionCode = await this.resolveOfferCondition(
+        offer.productId,
+        nextCondition || undefined,
+        nextRoles?.length ? nextRoles : undefined,
+      );
+      await this.assertNoDuplicateOffer(
+        offer.productId,
+        offer.conditionCode,
+        nextRoles?.length ? nextRoles : undefined,
+        offer.id,
+      );
     }
     if (dto.target_roles !== undefined) {
       offer.targetRoles = dto.target_roles.length ? dto.target_roles : null;
@@ -567,6 +596,95 @@ export class AdminCatalogService {
     });
 
     return { message: 'Offer deleted successfully' };
+  }
+
+  /**
+   * Which material CONDITION an offer applies to — required for some buyers,
+   * refused for others.
+   *
+   * The rule follows how the two kinds of buyer are actually priced. A factory
+   * or a free facility buys a GRADE: the same material at "excellent" and at
+   * "poor" are different goods at different prices, so an offer that named no
+   * grade would silently discount all of them at once. An institution or a
+   * citizen buys the material flat — there is one price and nothing for a grade
+   * to distinguish — so a condition on their offer describes a distinction
+   * their price list does not have, and would be quietly ignored.
+   *
+   * Ungraded materials are the exception on the first half: a material with no
+   * conditions defined has nothing to name, so a factory offer on it is flat
+   * too.
+   */
+  private async resolveOfferCondition(
+    productId: string,
+    condition: string | undefined,
+    targetRoles: Role[] | undefined,
+  ): Promise<string | null> {
+    const roles = targetRoles?.length ? targetRoles : null;
+    const gradedRoles = [Role.FACTORY, Role.EXTERNAL_PARTNER];
+    const flatRoles = [Role.CITIZEN, Role.INSTITUTIONS];
+
+    // An untargeted offer reaches everyone, so it cannot carry a grade: it
+    // would have to mean one thing to a factory and nothing to a citizen.
+    const targetsGraded = roles ? roles.some((r) => gradedRoles.includes(r)) : false;
+    const targetsFlat = roles ? roles.some((r) => flatRoles.includes(r)) : true;
+
+    if (condition && targetsFlat) {
+      throw new BadRequestException(
+        roles
+          ? 'A condition cannot be set on an offer for institutions or citizens — they are priced per material, not per grade'
+          : 'A condition cannot be set on an untargeted offer — it would reach buyers who are not priced per grade',
+      );
+    }
+
+    if (!condition && targetsGraded && (await this.conditionsService.hasConditions(productId))) {
+      throw new BadRequestException(
+        'This material is graded — an offer for factories or free facilities must name the condition it applies to',
+      );
+    }
+
+    if (!condition) return null;
+    return this.conditionsService.validateActiveCode(productId, condition);
+  }
+
+  /**
+   * One live offer per (material, condition, audience).
+   *
+   * A factory may hold offers on SEVERAL conditions of the same material — that
+   * is the point of naming the condition — but two live offers on the SAME
+   * condition for the same audience have no defined winner: the reader picks
+   * whichever the sort happens to surface, so the price a buyer is quoted
+   * depends on nothing they can see.
+   */
+  private async assertNoDuplicateOffer(
+    productId: string,
+    conditionCode: string | null,
+    targetRoles: Role[] | undefined,
+    excludeOfferId?: string,
+  ): Promise<void> {
+    const rows = await this.offerRepo.find({
+      where: { productId, isActive: true },
+    });
+    const now = Date.now();
+    const roles = targetRoles?.length ? targetRoles : null;
+
+    for (const existing of rows) {
+      if (excludeOfferId && existing.id === excludeOfferId) continue;
+      if ((existing.conditionCode ?? null) !== conditionCode) continue;
+      // An expired offer is not competing with anything.
+      if (existing.validUntil && new Date(existing.validUntil).getTime() <= now) continue;
+
+      const existingRoles = existing.targetRoles?.length ? existing.targetRoles : null;
+      // Untargeted reaches everyone, so it overlaps with any audience.
+      const overlaps =
+        !roles || !existingRoles || roles.some((r) => existingRoles.includes(r));
+      if (overlaps) {
+        throw new ConflictException(
+          conditionCode
+            ? `A live offer already exists for this material at condition "${conditionCode}" for that audience`
+            : 'A live offer already exists for this material for that audience',
+        );
+      }
+    }
   }
 
   private mapAdminOffer(o: Offer) {

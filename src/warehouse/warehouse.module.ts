@@ -46,6 +46,8 @@ from './providers/inventory-query.service';
 
 import { WasteCommonModule } from '@src/waste-management/common/waste-common.module';
 import { TruckEntity } from '@src/truck/entities/truck.entity';
+import { OrderPart } from '@src/order/entities/order-part.entity';
+import { Province } from '@src/user/entities/location/province.entity';
 import { OdooModule }
 from '../odoo/odoo.module';
 
@@ -80,6 +82,15 @@ from '../permission/permissions.module';
       // response that wants to name one by id has to read them.
       MaterialCondition,
       TruckEntity,
+      // A warehouse reports how many order shares it has been given, and orders
+      // are placed on THIS side — Odoo only ever sees the parts pushed to it.
+      OrderPart,
+      // The governorate is REQUIRED on a warehouse and resolved to a real row
+      // before anything is saved — a typed name cannot be checked against
+      // anything. The service has taken this repository since that rule landed;
+      // it was never registered here, so the container could not build the
+      // service and the whole app refused to boot.
+      Province,
     ]),
 
     OdooModule,

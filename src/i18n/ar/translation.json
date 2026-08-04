@@ -228,7 +228,7 @@
   "Factory materials added successfully": "تمت إضافة مواد المعمل بنجاح",
   "External partner information added successfully": "تمت إضافة معلومات الجهة الحرة بنجاح",
   "External partner materials added successfully": "تمت إضافة مواد الجهة الحرة بنجاح",
-  "Upload image successfully": "تم رفع الصورة بنجاح",
+  "Document uploaded successfully": "تم رفع الوثيقة بنجاح",
   "Your request has been sent,wait for it to be approved": "تم إرسال طلبك، بانتظار الموافقة عليه",
   "Please enter the information in the following stage": "يرجى إدخال المعلومات في المرحلة التالية",
   "Account is not pending profile completion": "الحساب ليس بانتظار استكمال الملف",
@@ -414,7 +414,6 @@
   "Information updated successfully": "تم تحديث المعلومات بنجاح",
   "Location updated successfully": "تم تحديث الموقع بنجاح",
   "Materials updated successfully": "تم تحديث المواد بنجاح",
-  "add Location successfully": "تمت إضافة الموقع بنجاح",
   "Document replaced successfully": "تم استبدال المستند بنجاح",
   "Device language updated successfully": "تم تحديث لغة الجهاز بنجاح",
   "Current password is required": "كلمة المرور الحالية مطلوبة",
@@ -495,5 +494,6 @@
   "Favourite updated": "تم تعديل المفضلة",
   "Removed from favourites": "تمت الإزالة من المفضلة",
   "Favourite not found": "العنصر غير موجود في المفضلة",
-  "This material is already in your favourites": "هذه المادة موجودة في مفضلتك بالفعل"
+  "This material is already in your favourites": "هذه المادة موجودة في مفضلتك بالفعل",
+  "Warehouse sync queued": "تمت جدولة مزامنة المستودع"
 }

@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Role } from '@src/user/enums/role.enum';
+import { Account } from '@src/user/entities/account.entity';
 import { Favourite } from '../entities/favourite.entity';
 import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
@@ -35,6 +36,9 @@ export class FavouritesService {
     @InjectRepository(ProductPricing)
     private readonly pricingRepo: Repository<ProductPricing>,
     private readonly units: UnitsService,
+    // Only ever read, and only to recover the target's ROLE for tier pricing.
+    @InjectRepository(Account)
+    private readonly accountRepo: Repository<Account>,
   ) {}
 
   /**
@@ -91,6 +95,30 @@ export class FavouritesService {
       }),
       pagination: buildPagination(total, page, limit),
     };
+  }
+
+  /**
+   * ONE account's list, read by an administrator.
+   *
+   * The account is loaded to recover its ROLE, and the ordinary `list` is then
+   * run as that buyer. Pricing is tier-dependent, so an admin reading with
+   * their own identity would be shown numbers this buyer never sees — and the
+   * usual reason to open somebody's favourites is a question about exactly
+   * those numbers.
+   *
+   * Deliberately a separate method rather than an optional argument on `list`:
+   * an account id that CAN be passed to the buyer-facing method is one a buyer
+   * can pass. Keeping them apart leaves the caller-scoped path with no
+   * parameter to abuse — which is the only thing making the note above `list`
+   * true.
+   */
+  async listForAccount(accountId: string, page = 1, limit = 20) {
+    const account = await this.accountRepo.findOne({
+      where: { id: accountId },
+      select: ['id', 'role'],
+    });
+    if (!account) throw new NotFoundException('Account not found');
+    return this.list({ id: account.id, role: account.role }, page, limit);
   }
 
   /**

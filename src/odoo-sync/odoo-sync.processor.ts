@@ -183,6 +183,7 @@ export class OdooSyncProcessor extends WorkerHost {
     [ODOO_JOBS.SYNC_PROVINCE]: (job) => this.syncProvince(job.data as SyncProvincePayload),
     [ODOO_JOBS.DELETE_PROVINCE]: (job) => this.deleteProvince(job.data as DeleteProvincePayload),
     [ODOO_JOBS.SYNC_ALL_PROVINCES]: () => this.syncAllProvinces(),
+    [ODOO_JOBS.SYNC_ALL_WAREHOUSES]: () => this.syncAllWarehouses(),
     [ODOO_JOBS.PUSH_ORDER_PART]: (job) => this.pushOrderPart(job.data as PushOrderPartPayload),
     [ODOO_JOBS.CANCEL_ORDER_PART]: (job) => this.cancelOrderPart(job.data as CancelOrderPartPayload),
     [ODOO_JOBS.APPLY_ORDER_EVENT]: (job) => this.applyOrderEvent(job.data as OrderEventPayload),
@@ -428,7 +429,12 @@ export class OdooSyncProcessor extends WorkerHost {
         name: condition.nameEn,
         code: condition.code,
         sort_order: condition.sortOrder,
-        product_odoo_id: productOdooId,
+        // `product_id`, not `product_odoo_id` — the create branch four lines
+        // below always got this right, so conditions could be created and never
+        // updated: Odoo rejected the whole write with "Invalid field
+        // 'product_odoo_id'". Nothing surfaced it, because a failed sync only
+        // stamped the row FAILED and no code path ever read that column back.
+        product_id: productOdooId,
       });
     } else {
       condition.odooConditionId = await this.odoo.createMaterialCondition({
@@ -462,6 +468,10 @@ export class OdooSyncProcessor extends WorkerHost {
       code: warehouse.code,
       capacity: warehouse.capacity,
     });
+    // Clears the drift signal the edit raised. Until this existed the column
+    // only ever described the CREATE, so a lost edit was invisible.
+    warehouse.odooSyncStatus = OdooSyncStatus.SYNCED;
+    await this.warehouseRepo.save(warehouse);
   }
 
   // --- Buyer orders -----------------------------------------------------------
@@ -820,8 +830,114 @@ export class OdooSyncProcessor extends WorkerHost {
     }
   }
 
+  /**
+   * Re-read every warehouse Odoo has, adopting the ones it created itself.
+   *
+   * The reconciliation layer. A per-warehouse announcement is fire-and-forget:
+   * if this backend was down when it was sent, or the call failed past its
+   * retries, nothing would ever send it again. This sweep converges on whatever
+   * was missed — a create, a rename, a closure — without an outbox table or any
+   * change tracking, because it simply asks Odoo what is true now.
+   *
+   * Each warehouse goes through the SAME per-warehouse sync a ping triggers, so
+   * there is one description of "copy a warehouse out of Odoo" rather than a
+   * second one here that drifts from it.
+   *
+   * One failure does not abort the sweep: a single warehouse Odoo cannot read
+   * must not stop the other twenty from being corrected.
+   */
+  private async syncAllWarehouses() {
+    const odooWarehouses = await this.odoo.fetchWarehouses();
+    let refreshed = 0;
+    let adopted = 0;
+
+    for (const ow of odooWarehouses) {
+      try {
+        const existing = await this.warehouseRepo.findOne({
+          where: { odooWarehouseId: ow.id },
+        });
+        if (!existing) adopted++;
+        else refreshed++;
+        await this.syncWarehouse({
+          warehouseId: existing?.id,
+          odooWarehouseId: ow.id,
+          jobId: `reconcile-${ow.id}`,
+        });
+      } catch (err) {
+        winstonLogger.warn(
+          `Warehouse reconcile: ${ow.name ?? ow.id} could not be synced — ${(err as Error).message}`,
+          LOG_META,
+        );
+      }
+    }
+
+    winstonLogger.info(
+      `Warehouse reconcile: ${refreshed} refreshed, ${adopted} adopted from Odoo`,
+      LOG_META,
+    );
+    return { refreshed, adopted };
+  }
+
+  /**
+   * A warehouse that was created in ODOO and has no mirror here yet.
+   *
+   * The backend used to assume it was the only place warehouses are created, so
+   * an announcement carrying an id it did not recognise was answered with a 404
+   * and thrown away. That stopped being true the moment the Odoo dashboard grew
+   * a "create warehouse" button: the site existed there, held stock and took
+   * shipments, and was simply absent from every backend listing — and no amount
+   * of re-announcing would ever have added it.
+   *
+   * Only the SKELETON is created here. Everything else — name, code,
+   * governorate, coordinates, capacity, address, lifecycle, manager, stock — is
+   * filled in by the very sync that called this, so there is ONE piece of code
+   * that knows how to copy a warehouse out of Odoo rather than a second one
+   * that drifts from it.
+   *
+   * Returns null rather than throwing when the id is not in Odoo either: that
+   * is a stale announcement, not a fault, and failing the job would retry it
+   * forever.
+   */
+  private async adoptOdooWarehouse(odooWarehouseId?: number) {
+    if (odooWarehouseId == null) return null;
+
+    const existing = await this.warehouseRepo.findOne({
+      where: { odooWarehouseId },
+    });
+    if (existing) return existing;
+
+    const info = await this.odoo.fetchWarehouseInfo(odooWarehouseId);
+    if (!info) {
+      winstonLogger.warn(
+        `Odoo announced warehouse ${odooWarehouseId}, which Odoo itself does not have — ignored`,
+        LOG_META,
+      );
+      return null;
+    }
+
+    const adopted = await this.warehouseRepo.save(
+      this.warehouseRepo.create({
+        odooWarehouseId,
+        name: info.name,
+        // A placeholder only if Odoo somehow has none: the column is unique and
+        // NOT NULL here, and refusing the whole adoption over a missing code
+        // would keep a real warehouse invisible over a cosmetic field.
+        code: info.code || `ODOO-${odooWarehouseId}`,
+        isActive: true,
+        odooSyncStatus: OdooSyncStatus.SYNCED,
+      }),
+    );
+    winstonLogger.info(
+      `Adopted warehouse "${adopted.name}" created in Odoo (${odooWarehouseId})`,
+      LOG_META,
+    );
+    return adopted;
+  }
+
   private async syncWarehouse(payload: SyncWarehousePayload) {
-    const warehouse = await this.warehouseRepo.findOne({ where: { id: payload.warehouseId } });
+    const warehouse = payload.warehouseId
+      ? await this.warehouseRepo.findOne({ where: { id: payload.warehouseId } })
+      : await this.adoptOdooWarehouse(payload.odooWarehouseId);
     if (!warehouse) return;
 
     // 1) Warehouse master data (Odoo is the editing surface after creation).
@@ -856,6 +972,9 @@ export class OdooSyncProcessor extends WorkerHost {
         warehouse.capacity = Number(info.capacity) || undefined;
       }
       if (info.address) warehouse.address = info.address;
+      if (info.shipment_count != null && info.shipment_count !== false) {
+        warehouse.shipmentCount = Number(info.shipment_count) || 0;
+      }
       warehouse.state = warehouseStateFromOdoo(info.state);
       // The province link travels as the backend's OWN uuid (a related field on
       // recycle.warehouse), so this is a direct assignment — no name matching.

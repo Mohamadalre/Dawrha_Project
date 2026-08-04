@@ -53,8 +53,17 @@ export class DriverRequestReconcileService implements OnModuleInit {
   private async reconcile(trigger: 'startup' | 'cron'): Promise<void> {
     try {
       // Collectors awaiting a decision — their request MUST exist in Odoo.
+      //
+      // NEED_CHANGES counts too. It used to look only at PENDING_APPROVAL,
+      // which missed a driver who was asked for a document and answered only
+      // part of it: he stays NEED_CHANGES here, so a request lost on the way to
+      // Odoo left him invisible to the reviewer in the one state where he is
+      // actively waiting to be looked at again.
       const pending = await this.accountRepo.find({
-        where: { role: Role.COLLECTOR, accountStatus: AccountStatus.PENDING_APPROVAL },
+        where: [
+          { role: Role.COLLECTOR, accountStatus: AccountStatus.PENDING_APPROVAL },
+          { role: Role.COLLECTOR, accountStatus: AccountStatus.NEED_CHANGES },
+        ],
       });
       if (!pending.length) return;
 

@@ -14,6 +14,56 @@ interface OdooSession {
   sessionId: string;
 }
 
+/** One document as Odoo currently judges it. */
+export interface OdooDriverRequestImage {
+  backendMediaId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  /** True once the driver was actually TOLD to replace it. */
+  reuploadRequested: boolean;
+  /**
+   * The file Odoo currently holds.
+   *
+   * The only thing that tells a REPLACED document apart from one whose
+   * rejection this backend never heard about: a re-upload resets the media row
+   * to PENDING and clears the request, which is byte-for-byte what a row that
+   * was never told anything looks like. The URL is what actually changed.
+   */
+  url: string | null;
+}
+
+/** The manager's move on one shift-change request, as Odoo holds it. */
+export interface OdooShiftChangeState {
+  backendRequestId: string;
+  state: 'pending' | 'processing' | 'accepted' | 'rejected';
+  rejectionReason: string | null;
+  truckOdooId: number | null;
+}
+
+/** Where a warehouse has actually got to on one piece of a buyer's order. */
+export interface OdooOrderState {
+  odooOrderId: number;
+  backendPartId: string;
+  state: 'pending' | 'processing' | 'ready' | 'completed' | 'cancelled';
+  managerApproval: 'pending' | 'approved' | 'rejected';
+  approvalRejectReason: string | null;
+  handoverState: 'pending' | 'handed_over';
+  handoverType: 'carrier' | 'buyer' | null;
+  stockDeducted: boolean;
+  invoiceNumber: string | null;
+  outputZone: string | null;
+}
+
+/** The authoritative decision Odoo holds for one driver request. */
+export interface OdooDriverRequestState {
+  backendDriverId: string;
+  state: 'pending' | 'accepted' | 'rejected' | 'need_changes';
+  isBlocked: boolean;
+  rejectionReason: string | null;
+  warehouseOdooId: number | null;
+  shiftOdooId: number | null;
+  images: OdooDriverRequestImage[];
+}
+
 /**
  * Thin JSON-RPC client for the custom `recycle_warehouse` Odoo addon. All
  * catalogue/warehouse calls target its `recycle.*` models. Every write from the
@@ -253,12 +303,29 @@ export class OdooService {
   }
 
   /** Lists warehouses from the custom recycle_warehouse addon. */
+  /**
+   * Every warehouse Odoo has — INCLUDING the closed ones.
+   *
+   * Closing a warehouse ARCHIVES it there (`active = False`), and an Odoo
+   * search silently drops archived rows unless told otherwise. So this listed
+   * only the open sites: a warehouse closed in Odoo was never imported, never
+   * refreshed, and the backend went on showing it exactly as it was the day
+   * before it shut — which is the one moment its state matters most, because
+   * allocation must stop choosing it.
+   *
+   * `active_test: false` is the whole fix, and it belongs here rather than at
+   * the call sites: every caller wants the same answer, and one that forgot
+   * would fail in a way nobody could see.
+   */
   async fetchWarehouses(): Promise<any[]> {
     return this.callKw<any[]>(
       'recycle.warehouse',
       'search_read',
       [[]],
-      { fields: ['id', 'name', 'code', 'manager_user_id'] },
+      {
+        fields: ['id', 'name', 'code', 'manager_user_id'],
+        context: { active_test: false },
+      },
     );
   }
 
@@ -334,6 +401,10 @@ export class OdooService {
           // sync by hand.
           'capacity',
           'address',
+          // Shipments live ONLY in Odoo — receiving, weighing and sorting all
+          // happen there — so the count travels with the mirror rather than
+          // being asked for on every read of a listing.
+          'shipment_count',
         ],
       ],
     );
@@ -575,6 +646,181 @@ export class OdooService {
       fields: ['backend_driver_id'],
     });
     return rows.map((r) => r.backend_driver_id).filter(Boolean);
+  }
+
+  /**
+   * Every catalogue id Odoo currently holds, per model.
+   *
+   * Used to find ORPHANS — rows that exist in Odoo and correspond to nothing
+   * here. The backend is the master for all four of these models, so an Odoo
+   * row with no counterpart can only be a deletion that never landed: the
+   * delete is enqueued and the local row is removed immediately after, so a job
+   * that exhausts its retries leaves the record in Odoo with nothing left on
+   * this side to notice it by. Every other drift signal in the system keys off
+   * a surviving local row; this one has none, which is why it needs a whole-set
+   * comparison instead.
+   *
+   * Warehouses are deliberately absent: Odoo may legitimately create those
+   * itself (the warehouse reconcile adopts them), so an unmatched warehouse is
+   * not an orphan.
+   */
+  async fetchCatalogueIds(): Promise<{
+    categories: number[];
+    products: number[];
+    units: number[];
+    conditions: number[];
+  }> {
+    const ids = async (model: string): Promise<number[]> => {
+      const rows = await this.callKw<any[]>(model, 'search_read', [[]], { fields: ['id'] });
+      return rows.map((r) => r.id as number);
+    };
+    return {
+      categories: await ids('recycle.product.category'),
+      products: await ids('recycle.product'),
+      units: await ids('recycle.measurement.unit'),
+      conditions: await ids('recycle.material.condition'),
+    };
+  }
+
+  /**
+   * The manager's decision on every shift-change request Odoo knows about.
+   *
+   * Odoo's `notify_shift_change_status` is STRICT like the driver decisions —
+   * it refuses to save a decision the backend did not acknowledge — so the
+   * ordinary failure is covered. What is not covered is the same timeout
+   * ambiguity: a backend that answers just after Odoo's 8-second window has
+   * applied the decision while Odoo rolled it back, and a webhook lost after
+   * Odoo committed leaves the driver waiting on an answer that was given.
+   */
+  async fetchShiftChangeStates(backendRequestIds: string[]): Promise<OdooShiftChangeState[]> {
+    if (!backendRequestIds.length) return [];
+    const rows = await this.callKw<any[]>(
+      'recycle.shift.change.request',
+      'search_read',
+      [[['backend_request_id', 'in', backendRequestIds]]],
+      { fields: ['backend_request_id', 'state', 'rejection_reason', 'truck_id'] },
+    );
+    return rows
+      .filter((r) => r.backend_request_id)
+      .map((r) => ({
+        backendRequestId: r.backend_request_id as string,
+        state: r.state,
+        rejectionReason: (r.rejection_reason || null) as string | null,
+        truckOdooId: Array.isArray(r.truck_id) ? (r.truck_id[0] as number) : null,
+      }));
+  }
+
+  /**
+   * Where every open order part actually stands in Odoo.
+   *
+   * Odoo reports each step a warehouse takes (`_notify_backend`) and swallows
+   * the failure deliberately, so a warehouse employee is never blocked by an
+   * unreachable backend. That is the right call — but it means a lost event is
+   * lost for good: the buyer's order sits at "accepted" while the goods are
+   * boxed and gone. Unlike the fleet and warehouse mirrors, nothing re-read the
+   * orders, so there was no second chance.
+   *
+   * Only parts that are still moving are fetched — a delivered or cancelled
+   * order is finished business and re-reading it every ten minutes for the life
+   * of the database buys nothing.
+   */
+  async fetchOpenOrderStates(partIds: string[]): Promise<OdooOrderState[]> {
+    if (!partIds.length) return [];
+    const rows = await this.callKw<any[]>(
+      'recycle.order',
+      'search_read',
+      [[['backend_part_id', 'in', partIds]]],
+      {
+        fields: [
+          'backend_part_id',
+          'state',
+          'manager_approval',
+          'approval_reject_reason',
+          'handover_state',
+          'handover_type',
+          'stock_deducted_at',
+          'invoice_number',
+          'output_zone_id',
+        ],
+      },
+    );
+    return rows
+      .filter((r) => r.backend_part_id)
+      .map((r) => ({
+        odooOrderId: r.id as number,
+        backendPartId: r.backend_part_id as string,
+        state: r.state,
+        managerApproval: r.manager_approval,
+        approvalRejectReason: (r.approval_reject_reason || null) as string | null,
+        handoverState: r.handover_state,
+        handoverType: (r.handover_type || null) as OdooOrderState['handoverType'],
+        stockDeducted: !!r.stock_deducted_at,
+        invoiceNumber: (r.invoice_number || null) as string | null,
+        // many2one → [id, display_name]
+        outputZone: Array.isArray(r.output_zone_id) ? (r.output_zone_id[1] as string) : null,
+      }));
+  }
+
+  /**
+   * The DECISION Odoo currently holds for every driver request, documents
+   * included.
+   *
+   * `fetchDriverRequestKeys` above answers only "does Odoo know about this
+   * driver", which catches a push that never landed. It cannot catch the
+   * opposite and worse drift: the request exists in Odoo, the admin decided it,
+   * and the decision webhook never reached the backend — so Odoo shows
+   * "accepted" while the driver is still waiting in the app. Nothing self-heals
+   * that, because the reviewer sees a finished request and never touches it
+   * again.
+   *
+   * Read as two flat search_reads rather than a nested one: Odoo returns
+   * one2many fields as bare ids, so the images have to be fetched by their own
+   * model anyway, and one extra call is cheaper than N per request.
+   */
+  async fetchDriverRequestStates(): Promise<OdooDriverRequestState[]> {
+    const rows = await this.callKw<any[]>('recycle.driver.request', 'search_read', [[]], {
+      fields: [
+        'backend_driver_id',
+        'state',
+        'is_blocked',
+        'rejection_reason',
+        'warehouse_id',
+        'shift_id',
+      ],
+    });
+    if (!rows.length) return [];
+
+    const images = await this.callKw<any[]>(
+      'recycle.driver.request.image',
+      'search_read',
+      [[['request_id', 'in', rows.map((r) => r.id)]]],
+      { fields: ['request_id', 'backend_media_id', 'status', 'reupload_requested', 'url'] },
+    );
+
+    const byRequest = new Map<number, OdooDriverRequestImage[]>();
+    for (const img of images) {
+      // Odoo serialises a many2one as [id, display_name].
+      const reqId = Array.isArray(img.request_id) ? img.request_id[0] : img.request_id;
+      if (!byRequest.has(reqId)) byRequest.set(reqId, []);
+      byRequest.get(reqId)!.push({
+        backendMediaId: img.backend_media_id,
+        status: img.status,
+        reuploadRequested: !!img.reupload_requested,
+        url: (img.url || null) as string | null,
+      });
+    }
+
+    return rows
+      .filter((r) => r.backend_driver_id)
+      .map((r) => ({
+        backendDriverId: r.backend_driver_id as string,
+        state: r.state as OdooDriverRequestState['state'],
+        isBlocked: !!r.is_blocked,
+        rejectionReason: (r.rejection_reason || null) as string | null,
+        warehouseOdooId: Array.isArray(r.warehouse_id) ? (r.warehouse_id[0] as number) : null,
+        shiftOdooId: Array.isArray(r.shift_id) ? (r.shift_id[0] as number) : null,
+        images: byRequest.get(r.id) ?? [],
+      }));
   }
 
   /**

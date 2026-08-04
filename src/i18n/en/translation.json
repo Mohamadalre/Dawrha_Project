@@ -240,7 +240,7 @@
   "Factory materials added successfully": "Factory materials added successfully",
   "External partner information added successfully": "External partner information added successfully",
   "External partner materials added successfully": "External partner materials added successfully",
-  "Upload image successfully": "Upload image successfully",
+  "Document uploaded successfully": "Document uploaded successfully",
   "Your request has been sent,wait for it to be approved": "Your request has been sent,wait for it to be approved",
   "Please enter the information in the following stage": "Please enter the information in the following stage",
   "Account is not pending profile completion": "Account is not pending profile completion",
@@ -414,7 +414,6 @@
   "Information updated successfully": "Information updated successfully",
   "Location updated successfully": "Location updated successfully",
   "Materials updated successfully": "Materials updated successfully",
-  "add Location successfully": "add Location successfully",
   "Document replaced successfully": "Document replaced successfully",
   "Device language updated successfully": "Device language updated successfully",
   "Current password is required": "Current password is required",
@@ -495,5 +494,6 @@
   "Favourite updated": "Favourite updated",
   "Removed from favourites": "Removed from favourites",
   "Favourite not found": "Favourite not found",
-  "This material is already in your favourites": "This material is already in your favourites"
+  "This material is already in your favourites": "This material is already in your favourites",
+  "Warehouse sync queued": "Warehouse sync queued"
 }

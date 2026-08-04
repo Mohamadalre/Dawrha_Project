@@ -14,6 +14,8 @@ export const ODOO_JOBS = {
   SYNC_PROVINCE: 'sync-province-to-odoo',
   DELETE_PROVINCE: 'delete-province-from-odoo',
   SYNC_ALL_PROVINCES: 'sync-all-provinces-to-odoo',
+  /** Re-read EVERY warehouse Odoo has, adopting any it created itself. */
+  SYNC_ALL_WAREHOUSES: 'sync-all-warehouses-from-odoo',
   SYNC_DELIVERY_TARIFFS: 'sync-delivery-tariffs-from-odoo',
   PUSH_ORDER_PART: 'push-order-part-to-odoo',
   CANCEL_ORDER_PART: 'cancel-order-part-in-odoo',
@@ -48,6 +50,7 @@ export const ODOO_JOB_OPTIONS: Record<string, { attempts: number; backoff: numbe
   [ODOO_JOBS.SYNC_PROVINCE]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.DELETE_PROVINCE]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.SYNC_ALL_PROVINCES]: { attempts: 2, backoff: 10000 },
+  [ODOO_JOBS.SYNC_ALL_WAREHOUSES]: { attempts: 2, backoff: 10000 },
   [ODOO_JOBS.SYNC_DELIVERY_TARIFFS]: { attempts: 2, backoff: 10000 },
   [ODOO_JOBS.PUSH_ORDER_PART]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.CANCEL_ORDER_PART]: { attempts: 3, backoff: 5000 },
@@ -87,7 +90,19 @@ export interface UpdateWarehousePayload {
   warehouseId: string;
 }
 export interface SyncWarehousePayload {
-  warehouseId: string;
+  /**
+   * The LOCAL row to refresh. Absent when the warehouse was created in Odoo and
+   * has no mirror here yet — `odooWarehouseId` identifies it instead, and the
+   * job adopts it.
+   */
+  warehouseId?: string;
+  /**
+   * The Odoo record. Carried so a warehouse BORN IN ODOO can be adopted: until
+   * now an unknown id was answered with a 404, so a site created on that screen
+   * could never appear here at all — no matter how many times it announced
+   * itself.
+   */
+  odooWarehouseId?: number;
   jobId: string;
   forceFullSync?: boolean;
 }

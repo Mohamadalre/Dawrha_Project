@@ -1,10 +1,12 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThan, Repository } from 'typeorm';
+import { In, IsNull, LessThan, Repository } from 'typeorm';
 import { ShiftChangeRequest } from '@src/truck/entities/shift-change-request.entity';
 import { TruckProblem } from '@src/truck/entities/truck-problem.entity';
 import { TruckHandover } from '@src/truck/entities/truck-handover.entity';
+import { OrderPart } from '@src/order/entities/order-part.entity';
+import { OrderPartStatus } from '@src/order/enums/order-part-status.enum';
 import { OdooSyncService } from './odoo-sync.service';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 
@@ -19,6 +21,21 @@ const GRACE_MS = 5 * 60 * 1000;
 
 /** Don't hammer Odoo if a long outage left a big backlog. */
 const BATCH = 50;
+
+/**
+ * Order parts still worth creating in Odoo. A settled part must NOT be pushed:
+ * putting a rejected or already-delivered job on a warehouse's screen is worse
+ * than the gap it would be closing.
+ */
+const LIVE_PART_STATUSES: readonly OrderPartStatus[] = [
+  OrderPartStatus.OFFERED,
+  OrderPartStatus.ACCEPTED,
+  OrderPartStatus.PROCESSING,
+  OrderPartStatus.STOCK_DEDUCTED,
+  OrderPartStatus.IN_OUTPUT_ZONE,
+  OrderPartStatus.READY_FOR_PICKUP,
+  OrderPartStatus.DISPATCHED,
+];
 
 /**
  * Safety net for every backend → Odoo push that MIRRORS a backend row.
@@ -47,6 +64,8 @@ export class PushReconcileService implements OnModuleInit {
     private readonly truckProblemRepo: Repository<TruckProblem>,
     @InjectRepository(TruckHandover)
     private readonly handoverRepo: Repository<TruckHandover>,
+    @InjectRepository(OrderPart)
+    private readonly orderPartRepo: Repository<OrderPart>,
     private readonly odooSync: OdooSyncService,
   ) {}
 
@@ -66,13 +85,16 @@ export class PushReconcileService implements OnModuleInit {
         shiftChanges: await this.repushShiftChanges(cutoff),
         truckProblems: await this.repushTruckProblems(cutoff),
         handovers: await this.repushHandovers(cutoff),
+        orderParts: await this.repushOrderParts(cutoff),
       };
-      const total = counts.shiftChanges + counts.truckProblems + counts.handovers;
+      const total = Object.values(counts).reduce((a, b) => a + b, 0);
       if (total) {
-        winstonLogger.info(
+        winstonLogger.warn(
           `Re-pushed ${total} record(s) missing in Odoo (${trigger}) — ` +
-            `shift-changes: ${counts.shiftChanges}, truck-problems: ${counts.truckProblems}, ` +
-            `handovers: ${counts.handovers}`,
+            Object.entries(counts)
+              .filter(([, n]) => n)
+              .map(([k, n]) => `${k}: ${n}`)
+              .join(', '),
           LOG_META,
         );
       }
@@ -103,6 +125,39 @@ export class PushReconcileService implements OnModuleInit {
     });
     for (const r of rows) {
       await this.odooSync.enqueuePushTruckProblem({ problemId: r.id });
+    }
+    return rows.length;
+  }
+
+  /**
+   * The order part a warehouse is supposed to be working on.
+   *
+   * The allocator offers a part and enqueues ONE push. If that push is lost the
+   * part sits here at OFFERED for ever and the warehouse is never told an order
+   * exists — so nobody accepts it, nobody rejects it, and the allocator does not
+   * look elsewhere either, because as far as this side is concerned the offer is
+   * outstanding. The buyer waits on a warehouse that has never heard of them.
+   *
+   * This was the last push in the system with no safety net, and it was missed
+   * because `OrderStateReconcileService` was written believing this method
+   * already existed — it skips a part Odoo does not have, deferring to "the push
+   * reconciler's job". That job is this one; until now it was not here.
+   *
+   * Only parts that are still worth pushing: a REJECTED, EXPIRED, CANCELLED or
+   * DELIVERED part is settled, and creating it in Odoo now would put dead work
+   * on a warehouse's screen.
+   */
+  private async repushOrderParts(cutoff: Date): Promise<number> {
+    const rows = await this.orderPartRepo.find({
+      where: {
+        odooOrderId: IsNull(),
+        status: In(LIVE_PART_STATUSES as OrderPartStatus[]),
+        createdAt: LessThan(cutoff),
+      },
+      take: BATCH,
+    });
+    for (const r of rows) {
+      await this.odooSync.enqueuePushOrderPart({ partId: r.id });
     }
     return rows.length;
   }

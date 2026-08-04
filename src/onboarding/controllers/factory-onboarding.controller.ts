@@ -124,7 +124,12 @@ export class FactoryOnboardingController {
     @Req() req,
   ) {
     const data = await this.factoryOnboardingService.addFactoryInformation(dto, req.user.id, file);
-    return { message: 'Factory information added successfully', status: data };
+    return {
+      message: 'Factory information added successfully',
+      // Named for what it is. It used to be `status: data`, which the envelope
+      // surfaced as `data.status` — a key every client reads as an HTTP status.
+      result: { accountDetails: data },
+    };
   }
 
   /**
@@ -142,7 +147,10 @@ export class FactoryOnboardingController {
     const profile = req.profile;
     const account = req.user;
     const data = await this.factoryOnboardingService.addFactoryMaterials(dto, profile, account.id);
-    return { message: 'Factory materials added successfully', status: data };
+    return {
+      message: 'Factory materials added successfully',
+      result: { materialDetails: data },
+    };
   }
 
   /**
@@ -174,6 +182,13 @@ export class FactoryOnboardingController {
     }
     // fileType is restricted to LICENSE + INDUSTRIAL_REG by FactoryMediaDto.
     const data = await this.mediaService.uploadImage(file, { ownerId: req.profile.id, ownerType: role, fileType: dto.fileType }, req.user.id);
-    return { message: 'Upload image successfully', data };
+    return {
+      message: 'Document uploaded successfully',
+      // Was `{ message, data }`, which the envelope turned into `data.data` —
+      // the caller had to unwrap the word "data" twice to reach a URL. The
+      // service's own `status` string is dropped: the envelope already carries
+      // a translated `message`, so a second one said nothing.
+      result: { mediaDetails: { id: data.mediaId, image: data.image } },
+    };
   }
 }

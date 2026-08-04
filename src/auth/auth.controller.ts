@@ -6,6 +6,10 @@ import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/forgot-password.dto'
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import {
+  AccountsStatus,
+  TOKEN_HOLDING_STATUSES,
+} from './decorators/account-status.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 // import { RolesGuard } from './guards/roles.guard';
 // import { Roles } from './decorators/roles.decorator';
@@ -200,6 +204,10 @@ export class AuthController {
    * notifications to this device are localized accordingly.
    */
   @UseGuards(JwtAuthGuard)
+  // A device setting, not a privilege: it decides what language the
+  // notifications about an application arrive in, so the statuses waiting on
+  // one need it most.
+  @AccountsStatus(...TOKEN_HOLDING_STATUSES)
   @Patch('device/language')
   @HttpCode(200)
   async updateDeviceLanguage(
@@ -322,6 +330,11 @@ export class AuthController {
    * @returns success flag after clearing refresh token and fcmToken
    */
   @UseGuards(JwtAuthGuard)
+  // Whoever can sign in must be able to sign out. Leaving this ACTIVE-only made
+  // the fail-closed rule a trap: an applicant could start a session and had no
+  // way to end it — and ending it is the one thing you want available to an
+  // account whose device was lost or shared.
+  @AccountsStatus(...TOKEN_HOLDING_STATUSES)
   @HttpCode(200)
   @Post('logout')
   async logout(@CurrentUser() user: any, @Body() { deviceId }: DeviceDto) {

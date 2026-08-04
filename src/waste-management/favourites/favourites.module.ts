@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PermissionsModule } from '@src/permission/permissions.module';
+import { Account } from '@src/user/entities/account.entity';
 import { Favourite } from '../entities/favourite.entity';
 import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
@@ -17,7 +18,7 @@ import { FavouritesService } from './favourites.service';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Favourite, Product, ProductPricing]),
+    TypeOrmModule.forFeature([Favourite, Product, ProductPricing, Account]),
     PermissionsModule,
     WasteCommonModule,
   ],

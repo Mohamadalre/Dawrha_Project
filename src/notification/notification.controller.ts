@@ -10,6 +10,10 @@ import {
   VERSION_NEUTRAL,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
+import {
+  AccountsStatus,
+  TOKEN_HOLDING_STATUSES,
+} from '@src/auth/decorators/account-status.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { Account } from '@src/user/entities/account.entity';
 import { NotificationService } from './notification.service';
@@ -21,6 +25,15 @@ import { NotificationQueryDto } from './dto/notification-query.dto';
  * lines these routes up with the rest of the API. No breaking change.
  */
 @UseGuards(JwtAuthGuard)
+/**
+ * Declared at the CLASS level, so every route here inherits it.
+ *
+ * These belong to the session, not to the business. An account waiting on a
+ * decision — or refused one, or asked to replace a document — is exactly who
+ * the notifications are addressed to, so restricting them to ACTIVE would
+ * deliver every one of those messages to a status forbidden from reading it.
+ */
+@AccountsStatus(...TOKEN_HOLDING_STATUSES)
 @Controller({ path: 'notifications', version: [VERSION_NEUTRAL, '1'] })
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}

@@ -9,6 +9,7 @@ import { WarehouseZoneType } from './enums/warehouse-zone-type.enum';
 
 let conditionsService: any;
 let truckRepo: any;
+let orderPartRepo: any;
 let provinceRepo: any;
 describe('WarehouseAdminService', () => {
   let service: WarehouseAdminService;
@@ -41,7 +42,10 @@ describe('WarehouseAdminService', () => {
     const productRepo: any = { find: jest.fn().mockResolvedValue([]) };
     truckRepo = { createQueryBuilder: jest.fn(() => ({ select: jest.fn().mockReturnThis(), addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), groupBy: jest.fn().mockReturnThis(), getRawMany: jest.fn().mockResolvedValue([]) })) } as any;
     provinceRepo = { findOne: jest.fn().mockResolvedValue({ id: 'prov-1', name_ar: 'دمشق', name_en: 'Damascus' }) } as any;
-    service = new WarehouseAdminService(warehouseRepo, managerRepo, inventoryRepo, truckRepo, odoo, odooSync, productRepo, conditionsService, provinceRepo);
+    // Orders are counted from the PARTS: a split order is one order to the
+    // buyer and one job to each warehouse in it.
+    orderPartRepo = { createQueryBuilder: jest.fn(() => ({ select: jest.fn().mockReturnThis(), addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), groupBy: jest.fn().mockReturnThis(), getRawMany: jest.fn().mockResolvedValue([]) })) } as any;
+    service = new WarehouseAdminService(warehouseRepo, managerRepo, inventoryRepo, truckRepo, orderPartRepo, odoo, odooSync, productRepo, conditionsService, provinceRepo);
   });
 
   describe('create', () => {

@@ -54,7 +54,10 @@ export class OnboardingController {
       throw new ForbiddenException('You cannot add location')
     }
     const data = await this.onboardingService.addLocation(dto, role, profile, account.id)
-    return { message: "add Location successfully", status: data }
+    return {
+      message: 'Location added successfully',
+      result: { locationDetails: data },
+    }
   }
 
 

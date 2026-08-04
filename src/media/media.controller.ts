@@ -17,6 +17,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { MediaService } from './media.service';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
+import { AccountsStatus } from '@src/auth/decorators/account-status.decorator';
+import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { imageMemoryStorage } from '@src/common/config/multer/image-memory.config';
 import { Account } from '@src/user/entities/account.entity';
 import { MediaNotFoundException } from './exceptions/media.exceptions';
@@ -137,6 +139,17 @@ export class MediaController {
    * PENDING_APPROVAL. Only works for images whose status is REJECTED.
    */
   @Patch(':id/reupload')
+  // The whole point of issuing a token to a non-active account. NEED_CHANGES is
+  // the status this route exists for — being told to replace a document and
+  // having no way to reach the route that replaces it is a dead end. The other
+  // two are here because a rejected document can be replaced while the
+  // application is still pending, and a REJECTED application is re-openable in
+  // Odoo, at which point the reviewer's next act is asking for the file again.
+  @AccountsStatus(
+    AccountStatus.NEED_CHANGES,
+    AccountStatus.PENDING_APPROVAL,
+    AccountStatus.REJECTED,
+  )
   @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
   async reuploadImage(
     @Param('id') mediaId: string,

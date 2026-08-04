@@ -103,7 +103,12 @@ export class ExternalPartnerOnboardingController {
     @Req() req,
   ) {
     const data = await this.externalPartnerOnboardingService.addExternalPartnerInformation(dto, req.user.id, file);
-    return { message: 'External partner information added successfully', status: data };
+    return {
+      message: 'External partner information added successfully',
+      // Named for what it is. It used to be `status: data`, which the envelope
+      // surfaced as `data.status` — a key every client reads as an HTTP status.
+      result: { accountDetails: data },
+    };
   }
 
   /**
@@ -121,6 +126,9 @@ export class ExternalPartnerOnboardingController {
     const profile = req.profile;
     const account = req.user;
     const data = await this.externalPartnerOnboardingService.addExternalPartnerMaterials(dto, profile, account.id);
-    return { message: 'External partner materials added successfully', status: data };
+    return {
+      message: 'External partner materials added successfully',
+      result: { materialDetails: data },
+    };
   }
 }

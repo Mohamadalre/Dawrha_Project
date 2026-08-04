@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { AccountStatusGuard } from '@src/auth/guards/account-status.guard';
 import * as path from 'path';
 import {
   I18nModule,
@@ -8,6 +9,7 @@ import {
   AcceptLanguageResolver,
 } from 'nestjs-i18n';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import Redis from 'ioredis';
 import { AppController } from './app.controller';
@@ -70,6 +72,10 @@ import { ContentModule } from './content/content.module';
         storage: new ThrottlerStorageRedisService(redis),
       }),
     }),
+    // JwtService for the global AccountStatusGuard, which reads the status
+    // claim out of the token itself (see the APP_GUARD note below). The secret
+    // is supplied per-verify, so there is nothing to configure here.
+    JwtModule.register({ global: true }),
     LoggerModule,
     CoreModule,
     UserModule,
@@ -103,6 +109,21 @@ import { ContentModule } from './content/content.module';
     AppService,
     // Apply the throttler globally to every HTTP route.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    /**
+     * Account status is enforced on EVERY route, not the 30 that remembered to
+     * ask for it.
+     *
+     * Registered globally on purpose: of 240 routes only 30 carried
+     * `@AccountsStatus`, and the guard used to admit any status on the other
+     * 210. That was survivable only while PENDING_APPROVAL / NEED_CHANGES /
+     * REJECTED held no token — and they now do, so an applicant could otherwise
+     * reach the cart, the catalogue and the order routes with it.
+     *
+     * The guard verifies the token itself rather than trusting `request.user`,
+     * because Nest runs global guards BEFORE controller-bound ones and
+     * `JwtAuthGuard` is applied per-controller in 39 places.
+     */
+    { provide: APP_GUARD, useClass: AccountStatusGuard },
   ],
 })
 export class AppModule { }

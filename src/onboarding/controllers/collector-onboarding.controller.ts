@@ -116,7 +116,12 @@ export class CollectorOnboardingController {
     @Req() req,
   ) {
     const data = await this.collectoronboardingService.addCollectorInformation(dto, req.user.id);
-    return { message: 'Collector information added successfully', status: data };
+    return {
+      message: 'Collector information added successfully',
+      // Named for what it is. It used to be `status: data`, which the envelope
+      // surfaced as `data.status` — a key every client reads as an HTTP status.
+      result: { accountDetails: data },
+    };
   }
 
   /**
@@ -150,7 +155,14 @@ export class CollectorOnboardingController {
 
     // fileType is restricted to the collector's document types by CollectorMediaDto.
     const data = await this.mediaService.uploadImage(file, { ownerId: req.profile.id, ownerType: role, fileType: dto.fileType }, req.user.id);
-    return { message: 'Upload image successfully', data };
+    return {
+      message: 'Document uploaded successfully',
+      // Was `{ message, data }`, which the envelope turned into `data.data` —
+      // the caller had to unwrap the word "data" twice to reach a URL. The
+      // service's own `status` string is dropped: the envelope already carries
+      // a translated `message`, so a second one said nothing.
+      result: { mediaDetails: { id: data.mediaId, image: data.image } },
+    };
   }
 
   /**
@@ -170,6 +182,9 @@ export class CollectorOnboardingController {
     const role = req.user.role;
 
     const data = await this.collectoronboardingService.addLocation(dto, role, profile, account.id);
-    return { message: 'Location added successfully', status: data };
+    return {
+      message: 'Location added successfully',
+      result: { locationDetails: data },
+    };
   }
 }

@@ -20,6 +20,7 @@ import { WarehouseManager } from './entities/warehouse-manager.entity';
 import { WarehouseInventory } from './entities/warehouse-inventory.entity';
 import { Product } from '@src/waste-management/entities/product.entity';
 import { TruckEntity } from '@src/truck/entities/truck.entity';
+import { OrderPart } from '@src/order/entities/order-part.entity';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { OdooService } from '@src/odoo/odoo.service';
@@ -62,6 +63,10 @@ export class WarehouseAdminService {
     private readonly inventoryRepo: Repository<WarehouseInventory>,
     @InjectRepository(TruckEntity)
     private readonly truckRepo: Repository<TruckEntity>,
+    // Orders are counted from the PARTS: a split order is one order to the
+    // buyer and one job to each warehouse in it.
+    @InjectRepository(OrderPart)
+    private readonly orderPartRepo: Repository<OrderPart>,
     private readonly odoo: OdooService,
     private readonly odooSync: OdooSyncService,
     @InjectRepository(Product)
@@ -303,6 +308,7 @@ export class WarehouseAdminService {
     // Single aggregate query for all warehouses on the page (no N+1).
     const summaries = await this.stockSummaries(rows.map((w) => w.id));
     const truckCounts = await this.truckCounts(rows.map((w) => w.id));
+    const orderCounts = await this.orderCounts(rows.map((w) => w.id));
 
     const warehouses = rows.map((w) => {
         const summary =
@@ -321,6 +327,10 @@ export class WarehouseAdminService {
           capacity: w.capacity ?? null,
           current_load: Number(w.currentLoad),
           truck_count: truckCounts.get(w.id) ?? 0,
+          // Mirrored from Odoo — shipments only exist there.
+          shipment_count: w.shipmentCount ?? 0,
+          // Counted here — orders are placed on this side.
+          order_count: orderCounts.get(w.id) ?? 0,
           load_percentage: w.capacity ? +((Number(w.currentLoad) / w.capacity) * 100).toFixed(2) : null,
           manager: w.manager
             ? {
@@ -353,6 +363,7 @@ export class WarehouseAdminService {
 
     const summaries = await this.stockSummaries([w.id]);
     const truckCounts = await this.truckCounts([w.id]);
+    const orderCounts = await this.orderCounts([w.id]);
     const summary = summaries.get(w.id) ?? {
       total_items: 0, totals_by_unit: [], last_sync: null,
     };
@@ -371,6 +382,8 @@ export class WarehouseAdminService {
       capacity: w.capacity ?? null,
       current_load: Number(w.currentLoad),
       truck_count: truckCounts.get(w.id) ?? 0,
+      shipment_count: w.shipmentCount ?? 0,
+      order_count: orderCounts.get(w.id) ?? 0,
       load_percentage: w.capacity
         ? +((Number(w.currentLoad) / w.capacity) * 100).toFixed(2)
         : null,
@@ -426,6 +439,14 @@ export class WarehouseAdminService {
     }
     if (dto.capacity !== undefined) w.capacity = dto.capacity;
 
+    // Mark it unsynced BEFORE saving, in the same write.
+    //
+    // Without this an edit whose push was lost left no trace at all: the row
+    // still said SYNCED from its creation, so the reconcile pass — which looks
+    // for exactly that column — saw nothing to do, and Odoo kept the old name
+    // for ever. The push handler stamps it back to SYNCED when it lands.
+    w.odooSyncStatus = OdooSyncStatus.PENDING;
+
     try {
       await this.warehouseRepo.save(w);
     } catch (err: any) {
@@ -471,6 +492,38 @@ export class WarehouseAdminService {
       .addSelect('COUNT(*)', 'count')
       .where('t.warehouseId IN (:...ids)', { ids: warehouseIds })
       .groupBy('t.warehouseId')
+      .getRawMany();
+    for (const r of rows) map.set(r.warehouseId, Number(r.count));
+    return map;
+  }
+
+  /**
+   * How many buyer orders each warehouse has been given a share of.
+   *
+   * Counted HERE rather than mirrored from Odoo, which is the opposite choice
+   * to the shipment count beside it, and deliberately so. Orders are placed on
+   * this side: a buyer checks out here, allocation splits the basket into parts
+   * and each part names a warehouse. Odoo only ever sees the parts that were
+   * successfully pushed to it — so its number is this number minus whatever is
+   * still queued or failed, which would read as a warehouse quietly having
+   * fewer orders than it does.
+   *
+   * `order_parts`, not `orders`: a split order is one order to the buyer and one
+   * job to EACH warehouse in it, and this figure answers "how much work has this
+   * site been given".
+   *
+   * One grouped query for the whole page, like the others here — a count per row
+   * would be an N+1 on the busiest admin screen.
+   */
+  private async orderCounts(warehouseIds: string[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (warehouseIds.length === 0) return map;
+    const rows = await this.orderPartRepo
+      .createQueryBuilder('p')
+      .select('p.warehouseId', 'warehouseId')
+      .addSelect('COUNT(*)', 'count')
+      .where('p.warehouseId IN (:...ids)', { ids: warehouseIds })
+      .groupBy('p.warehouseId')
       .getRawMany();
     for (const r of rows) map.set(r.warehouseId, Number(r.count));
     return map;

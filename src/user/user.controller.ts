@@ -10,6 +10,8 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
+import { AccountsStatus } from '@src/auth/decorators/account-status.decorator';
+import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { LocationDto } from '@src/onboarding/dto/location.dto';
 import { UserService } from './user.service';
@@ -26,6 +28,17 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
+  // Readable in every status that holds a token: an applicant waiting on a
+  // decision, or refused one, must still be able to see the account the
+  // decision is about. Editing it (PATCH below) stays ACTIVE-only — the
+  // submitted application is corrected through the onboarding routes, which
+  // re-push the change to the reviewer, and not behind their back here.
+  @AccountsStatus(
+    AccountStatus.ACTIVE,
+    AccountStatus.PENDING_APPROVAL,
+    AccountStatus.NEED_CHANGES,
+    AccountStatus.REJECTED,
+  )
   @Get('profile')
   async getProfile(@CurrentUser() user) {
     const result = await this.userService.getProfile(user.id, user.role);

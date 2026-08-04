@@ -212,8 +212,23 @@ export class OdooWebhookController {
           : { odooWarehouseId: Not(IsNull()) },
     });
 
+    // An id we do not recognise is a warehouse CREATED IN ODOO, not an error.
+    //
+    // This used to answer 404 and drop the announcement, which made a whole
+    // class of warehouse permanently invisible: created on the Odoo dashboard,
+    // holding stock and taking shipments, absent from every backend listing,
+    // and unable to be added no matter how many times it announced itself. The
+    // sync job adopts it — see `adoptOdooWarehouse`.
     if (dto.odoo_warehouse_id != null && warehouses.length === 0) {
-      throw new NotFoundException('Unknown Odoo warehouse id');
+      await this.odooSync.enqueueSyncWarehouse({
+        odooWarehouseId: dto.odoo_warehouse_id,
+        jobId: uuidv4(),
+      });
+      winstonLogger.info(
+        `Odoo announced unknown warehouse ${dto.odoo_warehouse_id} — queued for adoption`,
+        { context: 'OdooWebhook', channel: 'jobs' },
+      );
+      return { message: 'Warehouse sync queued', result: { queued: 1 } };
     }
 
     for (const warehouse of warehouses) {

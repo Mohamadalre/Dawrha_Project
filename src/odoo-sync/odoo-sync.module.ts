@@ -32,8 +32,14 @@ import { OdooSyncService } from './odoo-sync.service';
 import { OdooSyncProcessor } from './odoo-sync.processor';
 import { FleetReconcileService } from './fleet-reconcile.service';
 import { DriverRequestReconcileService } from './driver-request-reconcile.service';
+import { DriverStateReconcileService } from './driver-state-reconcile.service';
+import { OrderStateReconcileService } from './order-state-reconcile.service';
+import { CatalogPushReconcileService } from './catalog-push-reconcile.service';
+import { ShiftChangeStateReconcileService } from './shift-change-state-reconcile.service';
+import { OrphanReconcileService } from './orphan-reconcile.service';
 import { PushReconcileService } from './push-reconcile.service';
 import { ProvinceReconcileService } from './province-reconcile.service';
+import { WarehouseReconcileService } from './warehouse-reconcile.service';
 import { DeliveryTariffReconcileService } from './delivery-tariff-reconcile.service';
 import { OdooWebhookController } from './odoo-webhook.controller';
 
@@ -77,8 +83,14 @@ import { OdooWebhookController } from './odoo-webhook.controller';
     OdooSyncProcessor,
     FleetReconcileService,
     DriverRequestReconcileService,
+    DriverStateReconcileService,
+    OrderStateReconcileService,
+    CatalogPushReconcileService,
+    ShiftChangeStateReconcileService,
+    OrphanReconcileService,
     PushReconcileService,
     ProvinceReconcileService,
+    WarehouseReconcileService,
     DeliveryTariffReconcileService,
   ],
   exports: [OdooSyncService],

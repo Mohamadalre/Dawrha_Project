@@ -20,6 +20,7 @@ describe('FavouritesService', () => {
   let productRepo: any;
   let pricingRepo: any;
   let units: any;
+  let accountRepo: any;
 
   const ME = { id: 'acc-me', role: Role.CITIZEN };
   const PRODUCT = {
@@ -54,7 +55,11 @@ describe('FavouritesService', () => {
       byCode: jest.fn(async () => new Map([['KG', { id: 'u-kg', code: 'KG' }]])),
     };
 
-    service = new FavouritesService(favouriteRepo, productRepo, pricingRepo, units);
+    accountRepo = { findOne: jest.fn() };
+
+    service = new FavouritesService(
+      favouriteRepo, productRepo, pricingRepo, units, accountRepo,
+    );
   });
 
   // ------------------------------------------------------------------
@@ -228,6 +233,33 @@ describe('FavouritesService', () => {
       const res: any = await listOne();
 
       expect(res.favourites[0].unit).toEqual({ id: 'u-kg', code: 'KG' });
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  describe('an administrator reading another account list', () => {
+    it('prices it at the TARGET tier, not the admin one', async () => {
+      // The usual reason to open a buyer's favourites is a question about the
+      // numbers on them; reading with the admin's own identity would answer a
+      // different question.
+      accountRepo.findOne.mockResolvedValue({ id: 'buyer-9', role: Role.FACTORY });
+      favouriteRepo.findAndCount.mockResolvedValue([[], 0]);
+
+      await service.listForAccount('buyer-9');
+
+      expect(accountRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'buyer-9' } }),
+      );
+      // Scoped to the TARGET account, never the caller.
+      expect(favouriteRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { accountId: 'buyer-9' } }),
+      );
+    });
+
+    it('404s on an account that does not exist', async () => {
+      accountRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.listForAccount('nope')).rejects.toThrow(NotFoundException);
     });
   });
 });
