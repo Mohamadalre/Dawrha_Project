@@ -26,6 +26,7 @@ import {
   CorrectPricingDto,
   PriceHistoryQueryDto,
   SetPricingExpiryDto,
+  UpdateCurrentCurrencyDto,
 } from './dto/pricing-admin.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -66,6 +67,25 @@ export class PricingController {
   ) {
     return this.pricingService.updatePricingTable(user.id, productId, dto);
   }
+  /**
+   * Re-denominate the CURRENT price list — live rows only, history untouched.
+   *
+   * Declared BEFORE `:productId/pricing/:tier`, or `/currency` would be captured
+   * as a tier value and rejected by the enum pipe. Omit `tier` in the body to
+   * move every live tier together.
+   */
+  @Patch(':productId/pricing/currency')
+  @Permissions('admin.pricing.manage')
+  async updateCurrency(
+    @CurrentUser() user,
+    @Param('productId', ParseUUIDPipe) productId: string,
+    @Body() dto: UpdateCurrentCurrencyDto,
+  ) {
+    return this.pricingService.updateCurrentCurrency(
+      user.id, productId, dto.currency, dto.tier,
+    );
+  }
+
   /** Edit a single tier's price (e.g. only FACTORY). */
   @Patch(':productId/pricing/:tier')
   @Permissions('admin.pricing.manage')
@@ -215,7 +235,10 @@ export class PricingController {
     @Param('pricingId', ParseUUIDPipe) pricingId: string,
     @Body() dto: CorrectPricingDto,
   ) {
-    return this.pricingService.correctPricingRow(user.id, pricingId, dto.price);
+    return this.pricingService.correctPricingRow(user.id, pricingId, {
+      price: dto.price,
+      currency: dto.currency,
+    });
   }
 
   /**

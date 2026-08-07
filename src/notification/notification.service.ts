@@ -159,7 +159,7 @@ export class NotificationService {
   async markAsRead(userId: string, id: string) {
     const notification = await this.getNotificationById(userId, id);
     if (notification.isRead) {
-      return { message: 'Notification already marked as read' };
+      return { message: 'This notification is already marked as read' };
     }
 
     notification.isRead = true;
@@ -192,14 +192,14 @@ export class NotificationService {
     }
 
     this.logger.log(`Notification ${id} deleted for user ${userId}`);
-    return { message: 'Notification deleted' };
+    return { message: 'Notification deleted successfully' };
   }
 
   async clearAllNotifications(userId: string) {
     await this.notificationRepository.softDelete({ userId });
     this.logger.log(`All notifications soft deleted for user ${userId}`);
 
-    return { message: 'All notifications cleared' };
+    return { message: 'All notifications cleared successfully' };
   }
 
   async getDeviceTokens(userId: string): Promise<string[]> {
@@ -221,6 +221,24 @@ export class NotificationService {
     return devices
       .filter((device) => !!device.fcmToken)
       .map((device) => ({ fcmToken: device.fcmToken, language: device.language ?? Language.EN }));
+  }
+
+  /**
+   * Clears FCM tokens that Firebase reported as permanently dead (app
+   * uninstalled or token rotated). The device row stays — so the session and
+   * refresh token survive — but it stops receiving pushes until the app
+   * registers a fresh token. This is what prevents us from re-sending to a
+   * token that can never deliver again.
+   */
+  async invalidateDeviceTokens(tokens: string[]): Promise<void> {
+    if (!tokens.length) {
+      return;
+    }
+    await this.userDeviceRepository.update(
+      { fcmToken: In(tokens) },
+      { fcmToken: null as unknown as string },
+    );
+    this.logger.log(`Cleared ${tokens.length} dead FCM token(s)`);
   }
 
   async markAsSent(notificationId: string): Promise<void> {

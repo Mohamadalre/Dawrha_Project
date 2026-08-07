@@ -12,6 +12,7 @@ import { Language } from '@src/common/enums/language.enum';
 import {
   NOTIFICATION_QUEUE_NAME,
   PERMANENT_FAILURE_NO_DEVICE,
+  PERMANENT_FAILURE_INVALID_TOKENS,
 } from '../queues/notification.queue';
 import {
   NotificationJobPayload,
@@ -43,7 +44,10 @@ export class NotificationProcessor extends WorkerHost {
         `Notification job failed because notification does not exist: ${job.data.notificationId}`,
         { channel: 'jobs' }
       );
-      throw new Error('Notification not found');
+      // The row was deleted (user cleared their notifications) between enqueue
+      // and processing. It will never come back, so retrying 3× — as a plain
+      // Error did — is pure noise. Fail once, permanently.
+      throw new UnrecoverableError('Notification not found');
     }
 
     const devices = await this.notificationService.getUserDevices(notification.userId);
@@ -73,26 +77,67 @@ export class NotificationProcessor extends WorkerHost {
     const metadata = { ...(notification.metadata ?? {}) };
     delete metadata.i18n;
 
+    // Send to every language group and TALLY the outcome per token instead of
+    // aborting on the first failure. Aborting was the duplicate-delivery bug: a
+    // single stale token on a second device failed the whole job, so BullMQ and
+    // the retry cron re-sent the push to the device that already received it.
+    let anyDelivered = false;
+    let anyTransientFailure = false;
+    const deadTokens: string[] = [];
+
     try {
       for (const [lang, tokens] of tokensByLang) {
         const { title, body } = this.localize(notification, lang);
-        await this.firebaseService.sendToTokens(tokens, {
+        const result = await this.firebaseService.sendToTokens(tokens, {
           userId: notification.userId,
           title,
           body,
           metadata,
           type: notification.type,
         });
+        if (result.successCount > 0) anyDelivered = true;
+        if (result.retriable) anyTransientFailure = true;
+        deadTokens.push(...result.invalidTokens);
       }
-
-      await this.notificationService.markAsSent(notification.id);
-      winstonLogger.log('info', `Notification ${notification.id} sent via Firebase`, { channel: 'jobs' });
     } catch (error: unknown) {
+      // Unexpected throw (should not happen — sendToTokens reports instead of
+      // throwing), treat as transient so the batch can retry.
       const message = error instanceof Error ? error.message : 'Firebase send failed';
       await this.notificationService.markAsFailed(notification.id, message);
       winstonLogger.error(`Firebase send failed for ${notification.id}: ${message}`, { channel: 'jobs' });
       throw new Error(message);
     }
+
+    // Prune tokens FCM declared permanently dead so we never push to them again.
+    if (deadTokens.length) {
+      await this.notificationService.invalidateDeviceTokens(deadTokens);
+    }
+
+    if (anyDelivered) {
+      // At least one live device received it. Mark SENT so neither BullMQ nor
+      // the retry cron ever sends it again — no more duplicates on the devices
+      // that already got it.
+      await this.notificationService.markAsSent(notification.id);
+      winstonLogger.log('info', `Notification ${notification.id} sent via Firebase`, { channel: 'jobs' });
+      return;
+    }
+
+    if (anyTransientFailure) {
+      // Nobody received it, but the failure was transient (FCM unavailable) —
+      // let BullMQ retry the whole notification.
+      await this.notificationService.markAsFailed(notification.id, 'Firebase send failed (transient)');
+      winstonLogger.error(`Firebase transient failure for ${notification.id}, will retry`, { channel: 'jobs' });
+      throw new Error('Firebase send failed (transient)');
+    }
+
+    // Every token was permanently invalid and has now been pruned. Retrying
+    // cannot help — the user has no live token left.
+    await this.notificationService.markAsFailed(notification.id, PERMANENT_FAILURE_INVALID_TOKENS);
+    winstonLogger.info(
+      `Notification ${notification.id}: all device tokens invalid, pruned — permanent, not retried`,
+      { channel: 'jobs' },
+    );
+    throw new UnrecoverableError(PERMANENT_FAILURE_INVALID_TOKENS);
   }
 
   /**

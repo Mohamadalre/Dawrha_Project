@@ -1,18 +1,18 @@
-import { Transform, Type } from 'class-transformer';
-import {
-  IsBoolean,
-  IsNumber,
-  IsOptional,
-  IsString,
-  IsUUID,
-  MaxLength,
-  Min,
-} from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsNumber, IsOptional, IsUUID, Min } from 'class-validator';
 
-/** Uppercases unit codes so 'kg' and 'KG' hit the same measurement_units row. */
-const normalizeUnitCode = ({ value }: { value: unknown }) =>
-  typeof value === 'string' ? value.trim().toUpperCase() : value;
-
+/**
+ * Add a material to the basket.
+ *
+ * Only the material and how much — the buyer names nothing else:
+ *  - the UNIT is the material's own (never entered; a material has exactly one),
+ *  - the PRICE is resolved from the material id: its live offer for the caller's
+ *    role if one is running, otherwise the list price — the caller does not opt
+ *    into an offer,
+ *  - the GRADE is `condition_id`, and it matters ONLY for factory / free-facility
+ *    buyers and ONLY when the material is graded; for everyone else it is neither
+ *    required nor used.
+ */
 export class AddToCartDto {
   @IsUUID()
   product_id: string;
@@ -22,47 +22,16 @@ export class AddToCartDto {
   @Min(0.001)
   quantity: number;
 
-  @Transform(normalizeUnitCode)
-  @IsString()
-  @MaxLength(20)
-  unit_type: string;
-
-  /** Material grade being ordered — REQUIRED for factory / free-facility buyers. */
+  /** Grade BY ID — required for factory / free-facility on a graded material. */
   @IsOptional()
-  @Transform(normalizeUnitCode)
-  @IsString()
-  @MaxLength(30)
-  condition?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  add_offer?: boolean;
+  @IsUUID()
+  condition_id?: string;
 }
 
+/** Editing a basket line changes only how much — never the price or the unit. */
 export class UpdateCartItemDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.001)
   quantity: number;
-
-  @IsOptional()
-  @Transform(normalizeUnitCode)
-  @IsString()
-  @MaxLength(20)
-  unit_type?: string;
-}
-
-export class AddOfferToCartDto {
-  @IsUUID()
-  offer_id: string;
-
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0.001)
-  quantity: number;
-
-  @Transform(normalizeUnitCode)
-  @IsString()
-  @MaxLength(20)
-  unit_type: string;
 }

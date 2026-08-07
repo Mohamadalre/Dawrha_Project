@@ -7,6 +7,7 @@ import { SuggestionsModule } from '@src/waste-management/suggestions/suggestions
 import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
 import { Product } from '@src/waste-management/entities/product.entity';
 import { ProductPricing } from '@src/waste-management/entities/product-pricing.entity';
+import { Offer } from '@src/waste-management/entities/offer.entity';
 import { Account } from '@src/user/entities/account.entity';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
@@ -40,6 +41,7 @@ import { OrphanReconcileService } from './orphan-reconcile.service';
 import { PushReconcileService } from './push-reconcile.service';
 import { ProvinceReconcileService } from './province-reconcile.service';
 import { WarehouseReconcileService } from './warehouse-reconcile.service';
+import { OfferMirrorReconcileService } from './offer-mirror-reconcile.service';
 import { DeliveryTariffReconcileService } from './delivery-tariff-reconcile.service';
 import { OdooWebhookController } from './odoo-webhook.controller';
 
@@ -55,6 +57,9 @@ import { OdooWebhookController } from './odoo-webhook.controller';
       WasteCategory,
       Product,
       ProductPricing,
+      // Read-only here: the live-offer mirror pushed onto Odoo's price sheet,
+      // so an administrator sees the discount beside the list price.
+      Offer,
       Account,
       Warehouse,
       WarehouseInventory,
@@ -91,6 +96,7 @@ import { OdooWebhookController } from './odoo-webhook.controller';
     PushReconcileService,
     ProvinceReconcileService,
     WarehouseReconcileService,
+    OfferMirrorReconcileService,
     DeliveryTariffReconcileService,
   ],
   exports: [OdooSyncService],

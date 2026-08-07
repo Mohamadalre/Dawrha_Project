@@ -9,7 +9,6 @@ import {
 } from 'typeorm';
 import { Account } from '@src/user/entities/account.entity';
 import { WasteCategory } from './waste-category.entity';
-import { SuggestionStatus } from '../enums/suggestion-status.enum';
 import { SuggestionSource } from '../enums/suggestion-source.enum';
 
 @Entity('product_suggestions')
@@ -70,28 +69,25 @@ export class ProductSuggestion {
   @Column({ name: 'suggested_category_name', length: 150, nullable: true })
   suggestedCategoryName?: string;
 
-  /** Suggested measurement-unit code (see `measurement_units`). */
-  @Column({ length: 20 })
-  unitType: string;
+  /**
+   * One or more image URLs for the proposed material (uploaded to Cloudinary).
+   * A suggestion is a name + a category + at least one picture — no unit, no
+   * price, no grades: it is a hint for the admin, not a catalogue row.
+   */
+  @Column({ name: 'image_urls', type: 'jsonb', nullable: true })
+  imageUrls?: string[];
 
-  @Column({ type: 'decimal', precision: 12, scale: 3, nullable: true })
-  estimatedPrice?: string;
+  /** The admin's free-text reply to the proposer (delivered as a notification). */
+  @Column({ name: 'admin_notes', type: 'text', nullable: true })
+  adminReply?: string;
 
-  @Column({ nullable: true })
-  imageURL?: string;
+  /** When the admin replied. */
+  @Column({ name: 'reviewed_at', type: 'timestamptz', nullable: true })
+  repliedAt?: Date;
 
-  @Index()
-  @Column({ type: 'enum', enum: SuggestionStatus, default: SuggestionStatus.PENDING_REVIEW })
-  status: SuggestionStatus;
-
-  @Column({ type: 'text', nullable: true })
-  adminNotes?: string;
-
-  @Column({ type: 'timestamptz', nullable: true })
-  reviewedAt?: Date;
-
+  /** Which admin replied. */
   @Column({ name: 'reviewed_by', type: 'uuid', nullable: true })
-  reviewedBy?: string;
+  repliedBy?: string;
 
   @CreateDateColumn()
   createdAt: Date;

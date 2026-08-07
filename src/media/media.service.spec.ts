@@ -28,7 +28,16 @@ describe('MediaService', () => {
       // this was the last one, so the account may go back under review.
       count: jest.fn().mockResolvedValue(0),
     };
-    accountRepo = { update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    accountRepo = {
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      // The APPLICATION has to be the one waiting on the applicant. A rejected
+      // document on an already-decided account is not something they may
+      // replace — that would reopen a decision from their side.
+      findOne: jest.fn().mockResolvedValue({
+        id: 'u1',
+        accountStatus: AccountStatus.NEED_CHANGES,
+      }),
+    };
     cloudinary = {
       uploadFile: jest.fn().mockResolvedValue({ imageUrl: 'new-url', publicId: 'new-pub' }),
       deleteFile: jest.fn().mockResolvedValue(undefined),
@@ -61,6 +70,10 @@ describe('MediaService', () => {
     ownerType: OwnerType.FACTORY,
     fileType: MediaType.LICENSE,
     publicId: 'old-pub',
+    // ASKED FOR. Rejection is silent by design, so a document can be rejected
+    // without the applicant ever being told; only a request makes it theirs to
+    // answer.
+    reuploadRequestedAt: new Date('2026-08-01T00:00:00Z'),
   };
 
   describe('reuploadRejectedImage', () => {
@@ -76,6 +89,53 @@ describe('MediaService', () => {
       await expect(
         service.reuploadRejectedImage(file, 'm1', 'u1', Role.FACTORY),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('refuses a rejected document that was never ASKED for', async () => {
+      // Rejection is silent by design: a reviewer marks a document
+      // unacceptable while still working through the rest, and the applicant is
+      // told nothing. So an account can carry a rejected document its owner has
+      // never seen — and replacing it unasked would bounce the account back
+      // into review mid-pass, over a change the reviewer never requested.
+      mediaRepo.findOne.mockResolvedValue({ ...rejected, reuploadRequestedAt: null });
+      profileRepo.findOne.mockResolvedValue({ id: 'p1' });
+
+      await expect(
+        service.reuploadRejectedImage(file, 'm1', 'u1', Role.FACTORY),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(cloudinary.uploadFile).not.toHaveBeenCalled();
+    });
+
+    it('refuses when the APPLICATION is not awaiting changes', async () => {
+      // The document and the application can disagree: an application already
+      // decided may still carry an open request. Replacing a file then reopens
+      // a decision from the applicant's side, without the reviewer acting.
+      mediaRepo.findOne.mockResolvedValue(rejected);
+      profileRepo.findOne.mockResolvedValue({ id: 'p1' });
+      accountRepo.findOne.mockResolvedValue({
+        id: 'u1',
+        accountStatus: AccountStatus.REJECTED,
+      });
+
+      await expect(
+        service.reuploadRejectedImage(file, 'm1', 'u1', Role.FACTORY),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(cloudinary.uploadFile).not.toHaveBeenCalled();
+    });
+
+    it('refuses to replace an APPROVED document', async () => {
+      // Settled. Swapping the very file a reviewer accepted, after the fact,
+      // would leave nothing on the account to show the accepted one existed.
+      mediaRepo.findOne.mockResolvedValue({
+        ...rejected,
+        status: statusMedia.APPROVED,
+      });
+      profileRepo.findOne.mockResolvedValue({ id: 'p1' });
+
+      await expect(
+        service.reuploadRejectedImage(file, 'm1', 'u1', Role.FACTORY),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(cloudinary.uploadFile).not.toHaveBeenCalled();
     });
 
     it('forbids when the image does not belong to the caller', async () => {

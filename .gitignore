@@ -1,6 +1,7 @@
 node_modules/
 dist/
 docs/
+postman/
 .env
 .npm
 npm-debug.log*

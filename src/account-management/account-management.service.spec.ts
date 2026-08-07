@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AccountManagementService } from './account-management.service';
 import { Role } from '@src/user/enums/role.enum';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
@@ -142,6 +142,7 @@ describe('AccountManagementService — reviewing an application', () => {
     statusNotifier = {
       notifyStatusDecision: jest.fn().mockResolvedValue(undefined),
       notifyReviewResumed: jest.fn().mockResolvedValue(undefined),
+      notifyReopened: jest.fn().mockResolvedValue(undefined),
       notifyBlocked: jest.fn().mockResolvedValue(undefined),
       notifyUnblocked: jest.fn().mockResolvedValue(undefined),
     };
@@ -333,13 +334,27 @@ describe('AccountManagementService — reviewing an application', () => {
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
-    it('still allows judging documents of a REJECTED account', async () => {
-      // A rejection is reconsiderable, so the evidence behind it stays
-      // reachable — otherwise reconsidering it is impossible.
+    it('FREEZES the documents of a rejected application', async () => {
+      // The decision has been taken and sent. Quietly re-marking the evidence
+      // underneath it changes what the applicant was refused for, after they
+      // have already been told — and nothing on either side would show that
+      // the grounds had moved.
       account.accountStatus = AccountStatus.REJECTED;
 
       await expect(
-        service.updateMediaStatus(UUID, { status: statusMedia.REJECTED } as any),
+        service.updateMediaStatus(UUID, { status: statusMedia.APPROVED } as any),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('thaws them once the application is re-opened', async () => {
+      // Reconsidering is allowed — in the open. Re-opening says so, tells the
+      // applicant, and puts the application back where documents are editable.
+      account.accountStatus = AccountStatus.REJECTED;
+      await service.reopenApplication(UUID, {});
+      account.accountStatus = AccountStatus.PENDING_APPROVAL;
+
+      await expect(
+        service.updateMediaStatus(UUID, { status: statusMedia.APPROVED } as any),
       ).resolves.toBeDefined();
     });
 
@@ -396,15 +411,29 @@ describe('AccountManagementService — reviewing an application', () => {
       await expect(service.requestReupload(UUID, {})).rejects.toBeInstanceOf(ConflictException);
     });
 
-    it('re-opens a REJECTED account', async () => {
-      // The one way back into a rejected application: approving it is blocked
-      // by the rejected document, and the document cannot be relabelled under
-      // a decided account. Asking for a replacement changes the facts.
+    it('refuses on a REJECTED application until it is re-opened', async () => {
+      // ONE door back, not two. Asking for a document on a rejected
+      // application would be an implicit re-opening by the back door — the
+      // applicant would be pulled into NEED_CHANGES without ever being told
+      // the refusal was being reconsidered. `reopenApplication` is the door,
+      // and it says so out loud.
       account.accountStatus = AccountStatus.REJECTED;
       documents = [media({ status: statusMedia.REJECTED })];
 
-      const res: any = await service.requestReupload(UUID, { reason: 'أرسل نسخة أوضح' });
+      await expect(
+        service.requestReupload(UUID, { reason: 'أرسل نسخة أوضح' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
 
+    it('works once the application has been re-opened', async () => {
+      account.accountStatus = AccountStatus.REJECTED;
+      documents = [media({ status: statusMedia.REJECTED })];
+
+      const reopened: any = await service.reopenApplication(UUID, {});
+      expect(reopened.account_status).toBe(AccountStatus.PENDING_APPROVAL);
+      account.accountStatus = AccountStatus.PENDING_APPROVAL;
+
+      const res: any = await service.requestReupload(UUID, { reason: 'أرسل نسخة أوضح' });
       expect(res.account_status).toBe(AccountStatus.NEED_CHANGES);
     });
 
@@ -899,12 +928,35 @@ describe('AccountManagementService — reviewing an application', () => {
     });
   });
 
+  describe('self-service (a buyer reading its OWN account)', () => {
+    it('refuses a role that is not a factory or free facility', async () => {
+      // Citizens and institutions have no reviewed application to show here.
+      await expect(
+        service.getOwnAccountDetails('acc1', Role.CITIZEN),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.getOwnLocation('acc1', Role.COLLECTOR),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets a FACTORY past the gate to its own profile lookup', async () => {
+      // No profile row for this account → resolves past the role gate and
+      // surfaces a not-found, proving the gate admitted the factory.
+      profileRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.getOwnAccountDetails('acc1', Role.FACTORY),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
   describe('location', () => {
     it('answers for any reviewed role from the profile id alone', async () => {
       profileRepo.findOne.mockResolvedValue({
         id: UUID,
         account,
-        province: { id: 'pr1', name: 'دمشق' },
+        // Province stores its names as name_en / name_ar (there is no `name`
+        // column) — the mock now matches the real entity.
+        province: { id: 'pr1', name_en: 'Damascus', name_ar: 'دمشق' },
         address: 'المزة',
         DesscriptLocation: 'خلف الحديقة',
         coordinates: { type: 'Point', coordinates: [36.27, 33.51] },
@@ -912,7 +964,7 @@ describe('AccountManagementService — reviewing an application', () => {
 
       const res: any = await service.getProfileLocation(UUID);
 
-      expect(res.province).toEqual({ id: 'pr1', name: 'دمشق' });
+      expect(res.province).toEqual({ id: 'pr1', name_en: 'Damascus', name_ar: 'دمشق' });
       // Stored GeoJSON order is [lng, lat]; both are spelled out so no caller
       // has to remember which way round it is.
       expect(res.coordinates).toEqual([36.27, 33.51]);

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
+import { WarehouseState } from '@src/warehouse/enums/warehouse-state.enum';
 import { Account } from '@src/user/entities/account.entity';
 import { Role } from '@src/user/enums/role.enum';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
@@ -11,7 +12,6 @@ import { WasteCategory } from '@src/waste-management/entities/waste-category.ent
 import { Product } from '@src/waste-management/entities/product.entity';
 import { Offer } from '@src/waste-management/entities/offer.entity';
 import { ProductSuggestion } from '@src/waste-management/entities/product-suggestion.entity';
-import { SuggestionStatus } from '@src/waste-management/enums/suggestion-status.enum';
 
 /**
  * Admin-only reporting/statistics. Pure aggregation over existing tables — owns
@@ -150,7 +150,9 @@ export class StatisticsService {
   // ---------------------------------------------------------------------------
   async getWarehouseStats() {
     const total = await this.warehouseRepo.count();
-    const active = await this.warehouseRepo.count({ where: { isActive: true } });
+    const active = await this.warehouseRepo.count({
+      where: { state: Not(WarehouseState.INACTIVE) },
+    });
     return { total, active, inactive: total - active };
   }
 
@@ -163,7 +165,9 @@ export class StatisticsService {
       this.productRepo.count(),
       this.productRepo.count({ where: { isActive: true } }),
       this.offerRepo.count(),
-      this.suggestionRepo.count({ where: { status: SuggestionStatus.PENDING_REVIEW } }),
+      // Suggestions the admin has not answered yet (no status any more — a
+      // suggestion is "pending" until it has been replied to).
+      this.suggestionRepo.count({ where: { adminReply: IsNull() } }),
     ]);
     return {
       categories,

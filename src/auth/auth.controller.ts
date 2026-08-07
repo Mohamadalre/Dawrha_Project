@@ -67,6 +67,24 @@ export class AuthController {
     return result
   }
 
+  /**
+   * Register a factory account (email) — its own route, like the institution's.
+   * @returns temporary token object for OTP verification
+   */
+  @Post('register/factory')
+  async registerFactory(@Body() registerDto: RegisterDto) {
+    return this.authService.register(registerDto, Role.FACTORY);
+  }
+
+  /**
+   * Register a free-facility (external partner) account (email) — its own route.
+   * @returns temporary token object for OTP verification
+   */
+  @Post('register/external-partner')
+  async registerExternalPartner(@Body() registerDto: RegisterDto) {
+    return this.authService.register(registerDto, Role.EXTERNAL_PARTNER);
+  }
+
 
   @Post('register/citizen/google')
   @HttpCode(201)
@@ -253,24 +271,72 @@ export class AuthController {
    * @param forgotPasswordDto body payload containing email
    * @returns success message when reset URL is generated
    */
-  @Post('password/forgot')
+  // Forgot-password is PER APP, exactly like login: the route fixes which app
+  // the request came from, and the service only sends a code if the email's
+  // account belongs to that app. So a factory's email cannot begin a reset from
+  // the user app (nor a citizen's from the factory app) — while the RESPONSE
+  // stays identical everywhere, so the scoping never reveals which app an email
+  // lives in. The code-entry (`/password/verify`) and the reset itself
+  // (`/password/reset`) stay UNIFIED below — once a code is in hand, the app it
+  // came from no longer matters.
+
+  @Post('password/forgot/user-app')
   @HttpCode(200)
-  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
-    const res = await this.authService.forgotPassword(forgotPasswordDto);
+  async forgotPasswordUser(@Body() dto: ForgotPasswordDto) {
+    const res = await this.authService.forgotPassword(dto, 'user_app');
     return { message: res.message };
   }
 
-
-  /**
-   * Resend the password-reset OTP for the given email (cooldown + daily cap).
-   * @param forgotPasswordDto body payload containing email
-   * @returns cooldownSeconds until the next resend is allowed
-   */
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  @Post('password/forgot/resend')
+  @Post('password/forgot/collector-app')
   @HttpCode(200)
-  async resendForgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
-    const result = await this.authService.resendForgotPasswordOtp(forgotPasswordDto);
+  async forgotPasswordCollector(@Body() dto: ForgotPasswordDto) {
+    const res = await this.authService.forgotPassword(dto, 'collector_app');
+    return { message: res.message };
+  }
+
+  @Post('password/forgot/factory-app')
+  @HttpCode(200)
+  async forgotPasswordFactory(@Body() dto: ForgotPasswordDto) {
+    const res = await this.authService.forgotPassword(dto, 'factory_app');
+    return { message: res.message };
+  }
+
+  @Post('password/forgot/admin')
+  @HttpCode(200)
+  async forgotPasswordAdmin(@Body() dto: ForgotPasswordDto) {
+    const res = await this.authService.forgotPassword(dto, 'admin');
+    return { message: res.message };
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('password/forgot/user-app/resend')
+  @HttpCode(200)
+  async resendForgotUser(@Body() dto: ForgotPasswordDto) {
+    const result = await this.authService.resendForgotPasswordOtp(dto, 'user_app');
+    return { message: 'The OTP code has been sent successfully', result };
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('password/forgot/collector-app/resend')
+  @HttpCode(200)
+  async resendForgotCollector(@Body() dto: ForgotPasswordDto) {
+    const result = await this.authService.resendForgotPasswordOtp(dto, 'collector_app');
+    return { message: 'The OTP code has been sent successfully', result };
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('password/forgot/factory-app/resend')
+  @HttpCode(200)
+  async resendForgotFactory(@Body() dto: ForgotPasswordDto) {
+    const result = await this.authService.resendForgotPasswordOtp(dto, 'factory_app');
+    return { message: 'The OTP code has been sent successfully', result };
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('password/forgot/admin/resend')
+  @HttpCode(200)
+  async resendForgotAdmin(@Body() dto: ForgotPasswordDto) {
+    const result = await this.authService.resendForgotPasswordOtp(dto, 'admin');
     return { message: 'The OTP code has been sent successfully', result };
   }
 

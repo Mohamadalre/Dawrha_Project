@@ -19,6 +19,9 @@ import { BuyerProfileService } from './providers/buyer-profile.service';
 import { FactoryProfile } from '@src/user/entities/profile/factory-profile.entity';
 import { ExternalPartnerProfile } from '@src/user/entities/profile/external-partner-profile.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
+import { Offer } from '../entities/offer.entity';
+import { OfferSettlementService } from './providers/offer-settlement.service';
+import { EffectivePriceService } from './providers/effective-price.service';
 
 /**
  * Domain kernel for the waste-management marketplace. Holds the cross-cutting
@@ -33,6 +36,9 @@ import { ProductPricing } from '../entities/product-pricing.entity';
       MeasurementUnit,
       MaterialCondition,
       ProductPricing,
+      // An offer only means something against the price it is applied to, so
+      // a price change has to be able to re-settle them.
+      Offer,
       InstitutionWasteCategory,
       FactoryWasteCategory,
       ExternalPartnerWasteCategory,
@@ -55,6 +61,8 @@ import { ProductPricing } from '../entities/product-pricing.entity';
     ConditionsService,
     SellabilityService,
     BuyerProfileService,
+    OfferSettlementService,
+    EffectivePriceService,
   ],
   exports: [
     AuditService,
@@ -64,6 +72,8 @@ import { ProductPricing } from '../entities/product-pricing.entity';
     ConditionsService,
     SellabilityService,
     BuyerProfileService,
+    OfferSettlementService,
+    EffectivePriceService,
   ],
 })
 export class WasteCommonModule {}

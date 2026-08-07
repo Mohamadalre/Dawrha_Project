@@ -29,7 +29,7 @@ describe('PricingService', () => {
   } as any;
 
   beforeEach(() => {
-    productRepo = { findOne: jest.fn().mockResolvedValue({ id: 'p1' }) };
+    productRepo = { findOne: jest.fn().mockResolvedValue({ id: 'p1', isActive: true }) };
     pricingRepo = {
       create: jest.fn((x) => x),
       save: jest.fn((x) => Promise.resolve({ id: 'pp', ...x })),
@@ -78,6 +78,10 @@ describe('PricingService', () => {
       cache,
       conditions,
       productConditions,
+      // A price change re-settles the offers on that material: the stored
+      // percentage goes stale, and an amount that no longer fits would make
+      // the price negative.
+      { resettle: jest.fn().mockResolvedValue({ repriced: 0, suspended: 0 }) } as any,
     );
   });
 
@@ -97,9 +101,52 @@ describe('PricingService', () => {
       expect(result.pricing).toEqual({
         individual: 0.3,
         company: 0.27,
+        // The grade's ID travels back with the line. A price is FILED against
+        // the grade, not merely labelled with its code — and this table is the
+        // one the invoice is read from, so a line linked to the wrong grade is
+        // money charged for something the buyer did not order.
+        factory: [{ condition: 'EXCELLENT', conditionId: 'cond-excellent', price: 0.25 }],
+        free_facility: [{ condition: 'EXCELLENT', conditionId: 'cond-excellent', price: 0.26 }],
+      });
+    });
+
+    it('accepts the grade BY ID on the bulk price list', async () => {
+      // The whole point of the id: a code is unique only inside its own
+      // material, so "GOOD" is a different grade for paper than for copper.
+      const res: any = await service.setPricing('admin-1', 'p1', {
+        individual: 0.3,
+        company: 0.27,
+        factory: [{ condition_id: 'cond-excellent', price: 0.25 }],
+        free_facility: [{ condition_id: 'cond-excellent', price: 0.26 }],
+      } as any);
+
+      expect(res.pricing.factory[0].conditionId).toBe('cond-excellent');
+      expect(res.pricing.factory[0].condition).toBe('EXCELLENT');
+    });
+
+    it('refuses an id and a code that disagree', async () => {
+      // Either could have been the intent. Quietly preferring one is how a
+      // grade gets priced as another — and this table feeds the invoice.
+      await expect(
+        service.setPricing('admin-1', 'p1', {
+          individual: 0.3,
+          company: 0.27,
+          factory: [{ condition_id: 'cond-excellent', condition: 'GOOD', price: 0.25 }],
+          free_facility: [{ condition: 'EXCELLENT', price: 0.26 }],
+        } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('links a code-only line to its grade rather than leaving it bare', async () => {
+      // A price with no link is one the grade can be deleted out from under.
+      const res: any = await service.setPricing('admin-1', 'p1', {
+        individual: 0.3,
+        company: 0.27,
         factory: [{ condition: 'EXCELLENT', price: 0.25 }],
         free_facility: [{ condition: 'EXCELLENT', price: 0.26 }],
-      });
+      } as any);
+
+      expect(res.pricing.factory[0].conditionId).toBe('cond-excellent');
     });
 
     it('archives the previous live rows before replacing them', async () => {
@@ -134,7 +181,7 @@ describe('PricingService', () => {
       await service.setPricing('admin1', 'p1', dto);
       expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: 'p1' });
       expect(audit.record).toHaveBeenCalledTimes(1);
-      expect(cache.invalidate).toHaveBeenCalledWith('products');
+      expect(cache.invalidate).toHaveBeenCalledWith('products', 'offers');
     });
 
     it('re-prices active (non-offer) cart lines using each owner tier', async () => {

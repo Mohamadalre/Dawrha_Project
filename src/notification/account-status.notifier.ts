@@ -84,6 +84,25 @@ export class AccountStatusNotifier {
     );
   }
 
+  /**
+   * Fired when a reviewer RE-OPENS a rejected application.
+   *
+   * The applicant was told they were refused. Reconsidering that without
+   * telling them leaves the last thing they heard being a rejection, while the
+   * system quietly treats them as an open application again — so they neither
+   * know to expect an answer nor that their documents may be looked at afresh.
+   */
+  async notifyReopened(accountId: string, reason?: string): Promise<void> {
+    await this.send(
+      accountId,
+      'طلبك قيد المراجعة من جديد',
+      reason
+        ? `تمت إعادة فتح طلبك وسيُراجَع مرة أخرى. ${reason}`
+        : 'تمت إعادة فتح طلبك وسيُراجَع مرة أخرى.',
+      { event: AccountStatus.PENDING_APPROVAL, reason: reason ?? null },
+    );
+  }
+
   /** Fired when an admin blocks an account. */
   async notifyBlocked(accountId: string, reason?: string): Promise<void> {
     await this.send(

@@ -41,6 +41,22 @@ class WarehouseListQuery extends PaginationQueryDto {
   search?: string;
 }
 
+/** Paging over one warehouse's stock, optionally narrowed by material name. */
+class WarehouseInventoryQuery extends PaginationQueryDto {
+  /**
+   * Part of a MATERIAL name, matched as a case-insensitive substring.
+   *
+   * Responsive from the first keystroke — a single letter returns every
+   * material whose name contains it — so an admin scanning a large warehouse
+   * finds a material by typing, not by paging. Names that START with the text
+   * are ranked first, the way an autocomplete behaves.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  search?: string;
+}
+
 class SyncWarehouseBody {
   @IsOptional()
   force_full_sync?: boolean;
@@ -117,12 +133,13 @@ export class WarehouseAdminController {
   @Permissions('admin.warehouse.view')
   async inventory(
     @Param('warehouseId', ParseUUIDPipe) warehouseId: string,
-    @Query() query: PaginationQueryDto,
+    @Query() query: WarehouseInventoryQuery,
   ) {
     return this.inventoryQuery.listForWarehouse(
       warehouseId,
       query.page,
       query.limit,
+      query.search,
     );
   }
 

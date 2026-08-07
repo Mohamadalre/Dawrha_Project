@@ -1046,10 +1046,30 @@ export class OdooService {
    * price. Dropping it (as an earlier version did) left such materials with no
    * price at all on the Odoo side.
    */
+  /**
+   * Replace a material's price sheet for one tier — LIST price plus any live
+   * offer on each line.
+   *
+   * The offer travels alongside the list price rather than replacing it. Odoo
+   * shows both, because an offer is a *change* and an administrator opening the
+   * price sheet is asking what it was as much as what it is. Overwriting
+   * `price` with the discount would also make it the new list price the moment
+   * the offer lapsed and this mirror stopped being refreshed.
+   *
+   * `offerPrice: 0` is the explicit "no live offer" — the field is cleared on
+   * every push, so an expired or withdrawn offer disappears here rather than
+   * lingering as a discount nobody is honouring.
+   */
   async replaceConditionPrices(
     odooProductId: number,
     tier: 'factory' | 'free_facility',
-    lines: { conditionCode: string | null; price: number }[],
+    lines: {
+      conditionCode: string | null;
+      price: number;
+      offerPrice?: number | null;
+      offerPercentage?: number | null;
+      offerValidUntil?: Date | null;
+    }[],
   ): Promise<void> {
     const existing = await this.callKw<number[]>(
       'recycle.product.condition.price',
@@ -1066,6 +1086,14 @@ export class OdooService {
           tier,
           condition_code: l.conditionCode ?? '',
           price: l.price,
+          // Always written, including the zero — the rows are recreated on
+          // every push, so an offer that has ended must leave no trace.
+          offer_price: l.offerPrice ?? 0,
+          // Stated rather than left to be derived from two numbers.
+          offer_percentage: l.offerPercentage ?? 0,
+          offer_valid_until: l.offerValidUntil
+            ? l.offerValidUntil.toISOString().slice(0, 19).replace('T', ' ')
+            : false,
         })),
       ]);
     }

@@ -92,6 +92,9 @@ describe('AdminCatalogService', () => {
       cache,
       units,
       conditionsService,
+      // Offer creation writes several rows in one transaction; nothing in this
+      // suite creates one, so a stub that simply runs the callback is enough.
+      { transaction: jest.fn(async (cb: any) => cb({ getRepository: () => offerRepo })) } as any,
     );
   });
 
@@ -127,7 +130,7 @@ describe('AdminCatalogService', () => {
       await service.deleteCategory('a1', 'c1');
       expect(odooSync.enqueueDeleteCategory).toHaveBeenCalledWith({ odooCategoryId: 7 });
       expect(categoryRepo.delete).toHaveBeenCalledWith('c1');
-      expect(cache.invalidate).toHaveBeenCalledWith('categories', 'products');
+      expect(cache.invalidate).toHaveBeenCalledWith('categories', 'products', 'offers');
     });
   });
 
@@ -147,7 +150,7 @@ describe('AdminCatalogService', () => {
         unit_id: 'u-kg',
       } as any);
       expect(odooSync.enqueueSyncProduct).toHaveBeenCalledWith({ productId: 'p1' });
-      expect(cache.invalidate).toHaveBeenCalledWith('products', 'categories');
+      expect(cache.invalidate).toHaveBeenCalledWith('products', 'categories', 'offers');
       expect(res.product_id).toBe('p1');
     });
 

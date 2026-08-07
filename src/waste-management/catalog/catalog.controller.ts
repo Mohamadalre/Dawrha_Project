@@ -12,6 +12,8 @@ import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
+import { AccountsStatus } from '@src/auth/decorators/account-status.decorator';
+import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 import { CatalogService } from './catalog.service';
 import { PopularityService } from './popularity.service';
@@ -73,10 +75,19 @@ export class CatalogController {
    * offer grades this material does not have, and would make an ungraded
    * material look as if it had some.
    */
+  /**
+   * The grades of ONE material with per-grade stock (in the buyer's governorate)
+   * and the caller's own price (offer applied). ACTIVE accounts only — an
+   * un-approved buyer has no governorate to quote stock against.
+   */
   @Get('products/:productId/conditions')
   @Permissions('waste.products.view')
-  async getConditions(@Param('productId', ParseUUIDPipe) productId: string) {
-    const result = await this.catalog.getConditions(productId);
+  @AccountsStatus(AccountStatus.ACTIVE)
+  async getConditions(
+    @CurrentUser() user,
+    @Param('productId', ParseUUIDPipe) productId: string,
+  ) {
+    const result = await this.catalog.getConditions(user, productId);
     return { message: 'Conditions fetched successfully', result };
   }
 
@@ -110,6 +121,19 @@ export class CatalogController {
   @Permissions('waste.products.view')
   async byPrice(@CurrentUser() user, @Query() query: ByPriceQueryDto) {
     const result = await this.catalog.getProductsByPrice(user, query);
+    return { message: 'Products fetched successfully', result };
+  }
+
+  /**
+   * Every material the caller can buy, across all categories — with an optional
+   * name `search` and a `price_min`/`price_max` band. Priced (and graded, for
+   * factories / free facilities) by the caller's own role; only priced, active
+   * materials appear.
+   */
+  @Get('products')
+  @Permissions('waste.products.view')
+  async getAllProducts(@CurrentUser() user, @Query() query: ProductQueryDto) {
+    const result = await this.catalog.getAllMaterials(user, query);
     return { message: 'Products fetched successfully', result };
   }
 

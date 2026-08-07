@@ -25,6 +25,15 @@ export class CategoryQueryDto extends PaginationQueryDto {
 }
 
 export class ProductQueryDto extends PaginationQueryDto {
+  /**
+   * Optional name filter — a substring match, so a single letter returns every
+   * material whose name contains it. Used by the all-materials listing; the
+   * per-category listing simply leaves it unset.
+   */
+  @IsOptional()
+  @IsString()
+  search?: string;
+
   @IsOptional()
   @IsIn(['name', 'price', 'popularity'])
   sort: 'name' | 'price' | 'popularity' = 'name';

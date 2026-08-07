@@ -239,7 +239,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "**يرجع**: `{ offers[], pagination }` وكل عرض:\n`offer_id` · `product_id` · `product_name` · `product_image` ·\n`offer_price` · `discount_percentage` · `condition` · `valid_from` · `valid_until`.\n\n**من**: `offers` ⋈ `products`، بشرط `is_active` و`valid_from <= NOW()`\nو`valid_until` فارغة أو مستقبلية، و**استهداف الشريحة**: عرضٌ موجَّه للمصانع\nلا يظهر في تطبيق المستخدم — الإعلان عن خصم لا يمكن للقارئ أخذه أسوأ من عدم الإعلان.",
+            "description": "**يرجع**: `{ offers[], pagination }`. الضيف لا يرى الأرقام: كل عرض\n`offer_id` · `product_id` · `product_name` · `requires_login: true` فقط —\nوجودُ عرضٍ إغراءٌ للتسجيل، وأرقامه تُكشَف بعد الدخول بشريحة معروفة.",
             "url": {
               "raw": "{{server}}:{{port}}/api/v1/user-app/guest/offers?page=1&limit=10",
               "host": [
@@ -1595,7 +1595,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "**الصلاحية**: `waste.offers.view`.\n\n**يأخذ**: `page` · `limit` · `active_only` (افتراضي `true`) · `sort` (`discount` | `created_at`).\n\n**يرجع**: `{ offers[], pagination }` وكل عرض:\n`offer_id` · `product_id` · `product_name` · `product_image` · `offer_price` ·\n`discount_percentage` · `condition` · `description` · `valid_from` · `valid_until`.\n\n**من**: `offers` ⋈ `products`، مع **استهداف الأدوار**: العرض الموجَّه\nلشريحة أخرى لا يظهر للمواطن.",
+            "description": "**الصلاحية**: `waste.offers.view`.\n\n**يأخذ**: `page` · `limit` · `active_only` (افتراضي `true`) · `sort` (`discount` | `created_at`).\n\n**يرجع**: `{ offers[], pagination }` وكل عرض:\n`offer_id` · `product_id` · `product_name` · `audience` · `amount` ·\n`direction` (`INCREASE` للبائع / `DECREASE` للمشتري) · `discount_percentage` ·\n`base_price` · `offer_price` (محسوبان لشريحة القارئ) · `condition` ·\n`valid_from` · `valid_until`.\n\n`amount` **مقدار لا سعراً**: `offer_price` = سعر شريحتك ∓ المقدار حسب الاتجاه.\n\n**من**: `offers` ⋈ `products`، مُقيَّداً بـ **جمهور القارئ** (مشترٍ يرى عروض\nالمشترين فقط) وبأدواره — فلا يُطبَّق عرض بائع كزيادة على سعر مشترٍ أبداً.",
             "url": {
               "raw": "{{server}}:{{port}}/api/v1/waste/offers?page=1&limit=10&active_only=true&sort=discount",
               "host": [
@@ -1741,7 +1741,7 @@
                 "value": "application/json"
               }
             ],
-            "description": "**الصلاحية**: `cart.manage`.\n\n**يأخذ**:\n- `product_id` — UUID.\n- `quantity` — ≥ 0.001.\n- `unit_type` — رمز الوحدة، **يُحوَّل إلى أحرف كبيرة تلقائياً** فـ`kg` و`KG` يصلان لنفس الصفّ.\n- `condition` — **مطلوب لشرائح المصانع والمنشآت الحرّة** على المواد المُدرَّجة، ولا يلزم المواطن.\n- `add_offer` — اختياري: يستخدم سعر العرض إن كان نافذاً.\n\n**يرجع**: السلّة كاملة بعد الإضافة.\n\n**يكتب**: صفّاً في `cart_items` وفيه `unit_price` **محسوباً من `product_pricing`**\nبشريحة المُنادي. والسعر المفقود **يُرفض** لا يُصفَّر: مادة بلا سعر لهذه الشريحة\nمادةٌ لم يكن يُفترض أن يراها أصلاً.",
+            "description": "**الصلاحية**: `cart.manage`.\n\n**يأخذ**:\n- `product_id` — UUID.\n- `quantity` — ≥ 0.001.\n- `unit_type` — رمز الوحدة، **يُحوَّل إلى أحرف كبيرة تلقائياً** فـ`kg` و`KG` يصلان لنفس الصفّ.\n- `condition` — **مطلوب لشرائح المصانع والمنشآت الحرّة** على المواد المُدرَّجة، ولا يلزم المواطن.\n- `add_offer` — اختياري ومهمّته الحالة: يثبّت الحالة التي يسمّيها العرض.\n  أمّا **السعر فيُطبَّق عرضُ المادة الحيّ تلقائياً** سواءٌ رُفع أو لا — العرض\n  هو سعر المادة لدورك الآن، لا إضافةٌ اختيارية.\n\n**يرجع**: السلّة كاملة بعد الإضافة.\n\n**يكتب**: صفّاً في `cart_items` وفيه `unit_price` **من السعر الفعّال**\n(سعر شريحتك ∓ مقدار العرض الحيّ) عبر نفس المُوحِّد الذي يستخدمه الكتالوج والدفع.\nوالسعر المفقود **يُرفض** لا يُصفَّر: مادة بلا سعر لهذه الشريحة مادةٌ لم يكن يُفترض\nأن يراها أصلاً.",
             "url": {
               "raw": "{{server}}:{{port}}/api/v1/cart/items",
               "host": [
@@ -1870,7 +1870,7 @@
                 "value": "application/json"
               }
             ],
-            "description": "**يأخذ**: `offer_id` · `quantity` · `unit_type`.\n\n**يكتب** بنداً في `cart_items` بـ `is_offer = true` وسعره من `offers.offer_price`\nبعد التأكّد أن العرض **نافذ الآن** و**موجَّه لدور المُنادي**.",
+            "description": "**يأخذ**: `offer_id` · `quantity` · `unit_type`.\n\n**يكتب** بنداً في `cart_items` بـ `is_offer = true` وسعره **السعر الفعّال**\n(سعر شريحتك ∓ مقدار العرض) بعد التأكّد أن العرض **نافذ الآن** و**موجَّه لدورك**.",
             "url": {
               "raw": "{{server}}:{{port}}/api/v1/cart/offers",
               "host": [

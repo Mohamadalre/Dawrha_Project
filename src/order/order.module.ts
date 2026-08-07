@@ -11,6 +11,7 @@ import { OrderPart } from './entities/order-part.entity';
 import { OrderPartLine } from './entities/order-part-line.entity';
 import { OrderPartOffer } from './entities/order-part-offer.entity';
 import { OrderMinimum } from './entities/order-minimum.entity';
+import { OrderSpendingCap } from './entities/order-spending-cap.entity';
 import { DistanceCache } from './entities/distance-cache.entity';
 import { OrderPartRating } from './entities/order-part-rating.entity';
 import { OrderComplaint } from './entities/order-complaint.entity';
@@ -26,6 +27,7 @@ import { FactoryProfile } from '@src/user/entities/profile/factory-profile.entit
 import { ExternalPartnerProfile } from '@src/user/entities/profile/external-partner-profile.entity';
 import { OrderStateService } from './providers/order-state.service';
 import { OrderMinimumService } from './providers/order-minimum.service';
+import { OrderSpendingCapService } from './providers/order-spending-cap.service';
 import { DistanceService } from './providers/distance.service';
 import { OrderAllocationService } from './providers/order-allocation.service';
 import { OfferExpiryService } from './providers/offer-expiry.service';
@@ -33,6 +35,7 @@ import { DistanceRefreshService } from './providers/distance-refresh.service';
 import { OrderCheckoutService } from './providers/order-checkout.service';
 import { OrderViewService } from './providers/order-view.service';
 import { OrderController } from './order.controller';
+import { OrderConstraintsController } from './order-constraints.controller';
 import { PermissionsModule } from '@src/permission/permissions.module';
 import { WasteCommonModule } from '@src/waste-management/common/waste-common.module';
 
@@ -56,6 +59,7 @@ import { WasteCommonModule } from '@src/waste-management/common/waste-common.mod
       OrderPartLine,
       OrderPartOffer,
       OrderMinimum,
+      OrderSpendingCap,
       DistanceCache,
       Warehouse,
       WarehouseInventory,
@@ -84,6 +88,7 @@ import { WasteCommonModule } from '@src/waste-management/common/waste-common.mod
   providers: [
     OrderStateService,
     OrderMinimumService,
+    OrderSpendingCapService,
     DistanceService,
     OrderAllocationService,
     OfferExpiryService,
@@ -92,10 +97,11 @@ import { WasteCommonModule } from '@src/waste-management/common/waste-common.mod
     OrderViewService,
     DeliveryTripService,
   ],
-  controllers: [OrderController, DeliveryTripController],
+  controllers: [OrderController, OrderConstraintsController, DeliveryTripController],
   exports: [
     OrderStateService,
     OrderMinimumService,
+    OrderSpendingCapService,
     DistanceService,
     OrderAllocationService,
   ],

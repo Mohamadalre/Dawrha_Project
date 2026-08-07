@@ -80,6 +80,32 @@ export class ConditionsService {
   }
 
   /**
+   * A grade BY ID, asserted to belong to this material.
+   *
+   * The check is the whole point of taking an id rather than a code: a code is
+   * unique only inside its own material, so nothing about the string "GOOD"
+   * says whose GOOD it is, and a record filed against another material's grade
+   * would never match anything while still looking correct.
+   *
+   * Returns the row, so the caller can copy its code from the resolved record
+   * instead of trusting one that was sent alongside — the two can then never
+   * disagree.
+   */
+  async resolveActiveById(
+    productId: string,
+    conditionId: string,
+  ): Promise<{ id: string; code: string }> {
+    const conditions = await this.activeForProduct(productId);
+    const found = conditions.find((c) => c.id === conditionId);
+    if (!found) {
+      // Reported as the codes this material DOES have: the admin picked from a
+      // list, so the useful answer is which list they should have picked from.
+      throw new InvalidConditionCodeException(conditions.map((c) => c.code));
+    }
+    return { id: found.id, code: found.code };
+  }
+
+  /**
    * The grade a buyer's order line should carry.
    *
    * Ungraded material → null, and sending a code is refused rather than

@@ -4,7 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { WasteCategory } from '../entities/waste-category.entity';
 import { Product } from '../entities/product.entity';
 import { CartItem } from '../entities/cart-item.entity';
@@ -15,6 +15,14 @@ import { ProductPricing } from '../entities/product-pricing.entity';
 import { Offer } from '../entities/offer.entity';
 import { Role } from '@src/user/enums/role.enum';
 import { OdooSyncStatus } from '../enums/odoo-sync-status.enum';
+import { PricingTier, tierForRole } from '../enums/pricing-tier.enum';
+import {
+  AUDIENCE_ROLES,
+  OfferAudience,
+  offerPercentage,
+  tiersForAudience,
+} from '../enums/offer-audience.enum';
+import { OfferBasis, amountFromPercentage } from '../enums/offer-basis.enum';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
 import { AuditService } from '@src/waste-management/common/providers/audit.service';
 import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
@@ -41,6 +49,7 @@ import {
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import {
   AdminListQueryDto,
+  OFFER_TARGETABLE_ROLES,
   CreateCategoryDto,
   CreateConditionDto,
   CreateOfferDto,
@@ -48,10 +57,41 @@ import {
   CreateUnitDto,
   UpdateCategoryDto,
   UpdateConditionDto,
-  UpdateOfferDto,
+  UpdateOfferAmountDto,
+  UpdateOfferValidityDto,
+  OfferTimelineQueryDto,
   UpdateProductDto,
   UpdateUnitDto,
 } from './dto/admin-catalog.dto';
+
+/**
+ * One offer row this request will produce.
+ *
+ * Both the grade's ID and its CODE travel: the id is the link the database
+ * enforces, the code is the join key the price sheet and the basket are keyed
+ * by. The code is always copied from the resolved grade, never from the
+ * request, so the pair cannot disagree.
+ *
+ * `amount` is what MOVES the price — added for sellers, taken off for buyers —
+ * and `percentage` is what that represents, derived from the base it faces.
+ */
+interface OfferPlanRow {
+  conditionId: string | null;
+  conditionCode: string | null;
+  amount: number;
+  roles: Role[];
+  audience: OfferAudience;
+  percentage: number;
+  /**
+   * What the administrator PROMISED — and so what a later price edit must keep.
+   *
+   * AMOUNT rows keep their number; PERCENTAGE rows keep their ratio and have
+   * the amount recomputed. Distinct from `percentage` above, which is derived
+   * and exists for every row.
+   */
+  basis: OfferBasis;
+  basisPercentage: number | null;
+}
 
 /**
  * Admin write-side for the catalogue. Every mutation is persisted locally with a
@@ -82,6 +122,9 @@ export class AdminCatalogService {
     private readonly cache: CatalogCacheService,
     private readonly units: UnitsService,
     private readonly conditionsService: ConditionsService,
+    // Offer creation writes SEVERAL rows for one request; they commit together
+    // or not at all, so a graded offer can never land half-priced.
+    private readonly dataSource: DataSource,
   ) {}
 
   // --- Categories -----------------------------------------------------------
@@ -101,7 +144,7 @@ export class AdminCatalogService {
     };
   }
 
-  async createCategory(adminId: string, dto: CreateCategoryDto) {
+  async createCategory(adminId: string, dto: CreateCategoryDto, imageUrl?: string) {
     const exists = await this.categoryRepo.findOne({ where: { name: dto.name } });
     if (exists) throw new CategoryAlreadyExistsException();
 
@@ -109,7 +152,7 @@ export class AdminCatalogService {
       this.categoryRepo.create({
         name: dto.name,
         description: dto.description,
-        imageCategoryURL: dto.image ?? '',
+        imageCategoryURL: imageUrl ?? '',
         isActive: dto.is_active ?? true,
         odooSyncStatus: OdooSyncStatus.PENDING,
       }),
@@ -133,14 +176,14 @@ export class AdminCatalogService {
     };
   }
 
-  async updateCategory(adminId: string, id: string, dto: UpdateCategoryDto) {
+  async updateCategory(adminId: string, id: string, dto: UpdateCategoryDto, imageUrl?: string) {
     const category = await this.categoryRepo.findOne({ where: { id } });
     if (!category) throw new CategoryNotFoundException();
 
     const before = { ...category };
     if (dto.name !== undefined) category.name = dto.name;
     if (dto.description !== undefined) category.description = dto.description;
-    if (dto.image !== undefined) category.imageCategoryURL = dto.image;
+    if (imageUrl !== undefined) category.imageCategoryURL = imageUrl;
     if (dto.is_active !== undefined) category.isActive = dto.is_active;
     category.odooSyncStatus = OdooSyncStatus.PENDING;
     await this.categoryRepo.save(category);
@@ -155,7 +198,7 @@ export class AdminCatalogService {
       newValues: { name: category.name, isActive: category.isActive },
     });
 
-    await this.cache.invalidate('categories', 'products');
+    await this.cache.invalidate('categories', 'products', 'offers');
 
     return { category_id: id, odoo_status: 'PENDING_SYNC', message: 'Category updated successfully' };
   }
@@ -181,7 +224,7 @@ export class AdminCatalogService {
       oldValues: { name: category.name },
     });
 
-    await this.cache.invalidate('categories', 'products');
+    await this.cache.invalidate('categories', 'products', 'offers');
 
     return { message: 'Category deleted successfully' };
   }
@@ -229,7 +272,7 @@ export class AdminCatalogService {
     return null as unknown as MeasurementUnit;
   }
 
-  async createProduct(adminId: string, dto: CreateProductDto) {
+  async createProduct(adminId: string, dto: CreateProductDto, imageUrl?: string) {
     const category = await this.categoryRepo.findOne({ where: { id: dto.category_id } });
     if (!category) throw new CategoryNotFoundException();
 
@@ -240,7 +283,7 @@ export class AdminCatalogService {
         name: dto.name,
         description: dto.description,
         categoryId: dto.category_id,
-        imageURL: dto.image,
+        imageURL: imageUrl ?? null,
         // Both written together, always. `unitId` is the link; `unitType` is
         // the denormalised code Odoo and the cart read, and letting the two
         // drift apart would mean the material is measured in one unit and
@@ -261,19 +304,19 @@ export class AdminCatalogService {
       newValues: { name: dto.name, categoryId: dto.category_id },
     });
 
-    await this.cache.invalidate('products', 'categories');
+    await this.cache.invalidate('products', 'categories', 'offers');
 
     return { product_id: product.id, odoo_sync_status: 'PENDING_SYNC' };
   }
 
-  async updateProduct(adminId: string, id: string, dto: UpdateProductDto) {
+  async updateProduct(adminId: string, id: string, dto: UpdateProductDto, imageUrl?: string) {
     const product = await this.productRepo.findOne({ where: { id } });
     if (!product) throw new ProductNotFoundException();
 
     if (dto.name !== undefined) product.name = dto.name;
     if (dto.description !== undefined) product.description = dto.description;
     if (dto.category_id !== undefined) product.categoryId = dto.category_id;
-    if (dto.image !== undefined) product.imageURL = dto.image;
+    if (imageUrl !== undefined) product.imageURL = imageUrl;
     if (dto.unit_id !== undefined) {
       const unit = await this.resolveUnit(dto.unit_id, true);
       product.unitId = unit.id;
@@ -292,7 +335,7 @@ export class AdminCatalogService {
       newValues: { name: product.name },
     });
 
-    await this.cache.invalidate('products', 'categories');
+    await this.cache.invalidate('products', 'categories', 'offers');
 
     return { product_id: id, odoo_sync_status: 'PENDING_SYNC' };
   }
@@ -341,7 +384,7 @@ export class AdminCatalogService {
       oldValues: { name: product.name },
     });
 
-    await this.cache.invalidate('products', 'categories');
+    await this.cache.invalidate('products', 'categories', 'offers');
 
     return { message: 'Product deleted successfully' };
   }
@@ -492,110 +535,613 @@ export class AdminCatalogService {
     };
   }
 
+  /**
+   * Create an offer — which is one ROW PER AUDIENCE-SHAPE, not one row.
+   *
+   * The two halves of the buyer base are priced differently, and an offer has
+   * to respect that or it cannot be stored at all. Citizens and institutions
+   * buy a material at one price; factories and free facilities buy it per
+   * GRADE. So an offer aimed at both is genuinely two statements:
+   *
+   *   "this material is 7 to a citizen"        → one flat row
+   *   "its EXCELLENT grade is 9 to a factory"  → one row per grade named
+   *
+   * Storing that as a single row would force one `condition_code` to mean a
+   * grade to one reader and nothing to another, and every query downstream
+   * would have to know which. Splitting it here keeps each row true on its own,
+   * which is what the read paths, the duplicate check and the Odoo mirror all
+   * already assume.
+   *
+   * All of it in ONE transaction: a graded offer that half-committed would put
+   * a price on "excellent" and leave "good" at list, which reads to a buyer as
+   * a deliberate decision rather than a failure.
+   */
   async createOffer(adminId: string, dto: CreateOfferDto) {
     const product = await this.productRepo.findOne({ where: { id: dto.product_id } });
     if (!product) throw new ProductNotFoundException();
 
-    const conditionCode = await this.resolveOfferCondition(
-      dto.product_id,
-      dto.condition,
-      dto.target_roles,
-    );
-    await this.assertNoDuplicateOffer(dto.product_id, conditionCode, dto.target_roles);
-
-    const offer = await this.offerRepo.save(
-      this.offerRepo.create({
-        productId: dto.product_id,
-        offerPrice: String(dto.offer_price),
-        discountPercentage: String(dto.discount_percentage ?? 0),
-        conditionCode,
-        targetRoles: dto.target_roles?.length ? dto.target_roles : null,
-        description: dto.description,
-        validFrom: dto.valid_from ? new Date(dto.valid_from) : new Date(),
-        validUntil: dto.valid_until ? new Date(dto.valid_until) : undefined,
-      }),
-    );
-
-    await this.cache.invalidate('offers', 'products');
-    await this.audit.record({
-      userId: adminId,
-      action: 'CREATE_OFFER',
-      entityType: 'offer',
-      entityId: offer.id,
-      newValues: { productId: dto.product_id, price: dto.offer_price, condition: conditionCode },
-    });
-
-    return { offer: this.mapAdminOffer(offer), message: 'Offer created successfully' };
-  }
-
-  async updateOffer(adminId: string, id: string, dto: UpdateOfferDto) {
-    const offer = await this.offerRepo.findOne({ where: { id } });
-    if (!offer) throw new OfferNotFoundException();
-
-    if (dto.offer_price !== undefined) offer.offerPrice = String(dto.offer_price);
-    if (dto.discount_percentage !== undefined) offer.discountPercentage = String(dto.discount_percentage);
-
-    // The condition/audience rules are re-checked on EDIT, against the values
-    // the offer will END UP with. Validating only on create leaves the rule
-    // trivially bypassable: create a legal factory offer naming a grade, then
-    // retarget it at citizens — who have no grades — and the offer now says
-    // something their price list cannot express.
-    const nextCondition =
-      dto.condition !== undefined ? dto.condition : (offer.conditionCode ?? undefined);
-    const nextRoles =
-      dto.target_roles !== undefined
-        ? dto.target_roles
-        : ((offer.targetRoles as Role[] | null) ?? undefined);
-
-    if (dto.condition !== undefined || dto.target_roles !== undefined) {
-      offer.conditionCode = await this.resolveOfferCondition(
-        offer.productId,
-        nextCondition || undefined,
-        nextRoles?.length ? nextRoles : undefined,
-      );
-      await this.assertNoDuplicateOffer(
-        offer.productId,
-        offer.conditionCode,
-        nextRoles?.length ? nextRoles : undefined,
-        offer.id,
+    /**
+     * A withdrawn material cannot carry an offer.
+     *
+     * `isActive = false` means the material is off the shelf: no buyer's
+     * catalogue lists it, no basket accepts it, and every price query filters
+     * it out. An offer on it would be a discount on something nobody can reach
+     * — invisible, unusable, and still sitting in the offers table looking
+     * live. Worse, it would come back the instant the material was reactivated,
+     * at whatever prices had moved to in the meantime.
+     */
+    if (!product.isActive) {
+      throw new BadRequestException(
+        'This material is not active, so it cannot carry an offer. Reactivate the material first.',
       );
     }
-    if (dto.target_roles !== undefined) {
-      offer.targetRoles = dto.target_roles.length ? dto.target_roles : null;
-    }
-    if (dto.description !== undefined) offer.description = dto.description;
-    if (dto.valid_from !== undefined) offer.validFrom = new Date(dto.valid_from);
-    if (dto.valid_until !== undefined) offer.validUntil = dto.valid_until ? new Date(dto.valid_until) : undefined;
-    if (dto.is_active !== undefined) offer.isActive = dto.is_active;
-    const saved = await this.offerRepo.save(offer);
 
-    await this.cache.invalidate('offers', 'products');
-    await this.audit.record({
-      userId: adminId,
-      action: 'UPDATE_OFFER',
-      entityType: 'offer',
-      entityId: id,
-      newValues: { ...dto },
+    const plan = await this.planOfferRows(dto.product_id, dto);
+
+    for (const row of plan) {
+      await this.assertNoDuplicateOffer(dto.product_id, row.conditionCode, row.roles);
+    }
+
+    const created = await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(Offer);
+      const rows: Offer[] = [];
+      for (const row of plan) {
+        rows.push(
+          await repo.save(
+            repo.create({
+              productId: dto.product_id,
+              audience: row.audience,
+              amount: String(row.amount),
+              // Derived, never accepted — see `buildOfferRow`.
+              discountPercentage: String(row.percentage ?? 0),
+              // The PROMISE, kept so a later price edit knows what to honour.
+              basis: row.basis,
+              basisPercentage:
+                row.basisPercentage == null ? null : String(row.basisPercentage),
+              conditionId: row.conditionId,
+              conditionCode: row.conditionCode,
+              targetRoles: row.roles,
+              description: dto.description,
+              validFrom: dto.valid_from ? new Date(dto.valid_from) : new Date(),
+              validUntil: dto.valid_until ? new Date(dto.valid_until) : undefined,
+            }),
+          ),
+        );
+      }
+      return rows;
     });
 
-    return { offer: this.mapAdminOffer(saved), message: 'Offer updated successfully' };
+    await this.afterOfferChange(product, adminId, 'CREATE_OFFER', created[0].id, {
+      productId: dto.product_id,
+      audience: created[0].audience,
+      rows: created.map((o) => ({
+        condition: o.conditionCode,
+        amount: Number(o.amount),
+        percentage: Number(o.discountPercentage),
+        roles: o.targetRoles,
+      })),
+    });
+
+    return {
+      offers: created.map((o) => this.mapAdminOffer(o)),
+      message:
+        created.length > 1
+          ? `Offer created successfully across ${created.length} lines`
+          : 'Offer created successfully',
+    };
   }
+
+  /**
+   * Work out exactly which offer rows this request means, and refuse it whole
+   * if any part of it cannot be honoured.
+   *
+   * The scenario in one paragraph. An offer names a SIDE of the trade and an
+   * AMOUNT. Sellers — citizens and institutions — are paid more, so the amount
+   * is added to their price. Buyers — factories and free facilities — are
+   * charged less, so it comes off theirs. Only buyers are priced per GRADE, so
+   * only a buyer offer may name one; a seller is paid before the material is
+   * ever sorted, and a grade on their offer describes a distinction their price
+   * list does not have.
+   *
+   * Every refusal below is a case where the offer would otherwise be STORED and
+   * then read as something the admin did not intend — which is worse than a
+   * rejection, because nothing afterwards looks wrong.
+   */
+  private async planOfferRows(
+    productId: string,
+    dto: {
+      audience: OfferAudience;
+      target_roles?: Role[];
+      amount?: number;
+      /** Alternative to `amount` — the offer stated as a share of the price. */
+      percentage?: number;
+      conditions?: { condition_id: string; amount: number }[];
+    },
+  ): Promise<OfferPlanRow[]> {
+    const audience = dto.audience;
+    const roles = await this.resolveAudienceRoles(audience, dto.target_roles);
+    const isGraded = await this.conditionsService.hasConditions(productId);
+    const plan: OfferPlanRow[] = [];
+
+    /**
+     * How the offer was expressed — an amount, or a percentage to derive one
+     * from. Exactly one.
+     *
+     * Sending both is refused rather than resolved by preference: the two
+     * disagree the moment a price moves, and nothing afterwards could say which
+     * the administrator meant to hold. Sending neither is caught per-branch
+     * below, where the message can name what that branch actually needs.
+     */
+    if (dto.amount != null && dto.percentage != null) {
+      throw new BadRequestException(
+        'Give an amount OR a percentage, not both — they would disagree the first time the price changed, and nothing would say which one you meant',
+      );
+    }
+    const spec: { amount?: number; percentage?: number } =
+      dto.percentage != null ? { percentage: dto.percentage } : { amount: dto.amount };
+    const given = dto.amount != null || dto.percentage != null;
+
+    // ── SELLERS: one amount, never a grade ─────────────────────────────
+    if (audience === OfferAudience.SELLERS) {
+      if (dto.conditions?.length) {
+        throw new BadRequestException(
+          'A seller offer cannot name a grade. Citizens and institutions are paid for the material as delivered — it is graded afterwards, during sorting, so there is no grade to price at the moment they are paid.',
+        );
+      }
+      if (!given) {
+        throw new BadRequestException(
+          'An amount or a percentage is required — it is what is ADDED to what these sellers are already paid',
+        );
+      }
+      plan.push(
+        await this.buildOfferRow(productId, audience, roles, null, null, spec),
+      );
+      return plan;
+    }
+
+    // ── BUYERS on an UNGRADED material: one amount, and no grade exists ──
+    if (!isGraded) {
+      if (dto.conditions?.length) {
+        throw new BadRequestException(
+          'This material has no grades, so an offer on it cannot name one',
+        );
+      }
+      if (!given) {
+        throw new BadRequestException('An amount or a percentage is required');
+      }
+      plan.push(
+        await this.buildOfferRow(productId, audience, roles, null, null, spec),
+      );
+      return plan;
+    }
+
+    // ── BUYERS on a GRADED material ────────────────────────────────────
+    //
+    // Either the grades are named one by one with their own amounts, or a
+    // single amount is given and applies to EVERY grade. The second is not a
+    // shortcut for the first: it is checked against each grade separately, so
+    // an amount that is a fair reduction on the dearest grade and would drive
+    // the cheapest below zero is refused rather than clamped.
+    if (dto.conditions?.length) {
+      const seen = new Set<string>();
+      for (const entry of dto.conditions) {
+        // Resolved BY ID against THIS material. An id names one row for good,
+        // where a code names one only inside its own material — so a grade
+        // borrowed from another material is refused here rather than stored
+        // and then silently matching nothing for the rest of its life.
+        const grade = await this.conditionsService.resolveActiveById(
+          productId,
+          entry.condition_id,
+        );
+        if (seen.has(grade.id)) {
+          throw new BadRequestException(
+            `The grade "${grade.code}" is listed twice — one amount per grade`,
+          );
+        }
+        seen.add(grade.id);
+        plan.push(
+          await this.buildOfferRow(
+            productId, audience, roles, grade.id, grade.code,
+            { amount: entry.amount },
+          ),
+        );
+      }
+      return plan;
+    }
+
+    if (!given) {
+      throw new BadRequestException(
+        'This material is graded — give an amount for each grade, or one amount (or percentage) to apply to every grade',
+      );
+    }
+    for (const grade of await this.conditionsService.activeForProduct(productId)) {
+      plan.push(
+        await this.buildOfferRow(
+          productId, audience, roles, grade.id, grade.code, spec,
+        ),
+      );
+    }
+    return plan;
+  }
+
+  /**
+   * The roles an offer actually reaches, and the check that they are all on
+   * the same side of the trade.
+   *
+   * Naming no role means BOTH roles of the audience, which is the common case.
+   * Naming one from the other side is refused rather than dropped: it would be
+   * an increase applied to a price that is supposed to fall, and silently
+   * ignoring it would leave the admin believing a role was covered when it was
+   * not.
+   */
+  private async resolveAudienceRoles(
+    audience: OfferAudience,
+    requested?: Role[],
+  ): Promise<Role[]> {
+    const allowed = AUDIENCE_ROLES[audience];
+    if (!requested?.length) return [...allowed];
+
+    const strangers = requested.filter((r) => !allowed.includes(r));
+    if (strangers.length) {
+      throw new BadRequestException(
+        `${strangers.join(', ')} ${strangers.length > 1 ? 'are' : 'is'} not part of the ${audience.toLowerCase()} — a ${audience === OfferAudience.SELLERS ? 'seller' : 'buyer'} offer can only name ${allowed.join(' or ')}`,
+      );
+    }
+    return [...new Set(requested)];
+  }
+
+  /**
+   * One offer row, with its amount checked against every price it will touch.
+   *
+   * The check is the reason this is not a simple insert. A buyer amount larger
+   * than a price does not produce a small number — it produces a NEGATIVE one,
+   * which means paying somebody to take the material away. And one row can face
+   * two tiers at different prices, so it has to hold for the cheaper of them,
+   * not the one the admin happened to be looking at.
+   */
+  private async buildOfferRow(
+    productId: string,
+    audience: OfferAudience,
+    roles: Role[],
+    conditionId: string | null,
+    conditionCode: string | null,
+    /** Exactly one of these: a fixed amount, or a percentage to derive it from. */
+    spec: { amount?: number; percentage?: number },
+  ): Promise<OfferPlanRow> {
+    let dearestBase: number | null = null;
+    let cheapestBase: number | null = null;
+
+    const tiers = tiersForAudience(audience, roles);
+
+    // Read every price this row faces BEFORE deciding the amount, because a
+    // percentage cannot be turned into one without knowing them.
+    const bases: number[] = [];
+    for (const tier of tiers) {
+      const base = await this.livePriceFor(productId, tier, conditionCode);
+      if (base == null) {
+        throw new BadRequestException(
+          conditionCode
+            ? `This material has no live ${tier} price for grade "${conditionCode}", so there is nothing for an offer to move`
+            : `This material has no live ${tier} price, so there is nothing for an offer to move`,
+        );
+      }
+      bases.push(base);
+      cheapestBase = cheapestBase == null ? base : Math.min(cheapestBase, base);
+    }
+
+    /**
+     * A percentage becomes an amount against the CHEAPEST price the row faces.
+     *
+     * One row holds one amount, but it can reach two tiers at different prices
+     * — and a percentage of each is a different number. Taking the cheapest
+     * makes the smaller of the two, which is the only choice that cannot drive
+     * any of them below zero. Deriving from the dearest instead would produce
+     * an amount that overshoots the cheaper tier, and the guard below would
+     * reject the whole offer with an error about a price the admin never
+     * mentioned.
+     *
+     * The percentage actually delivered is then reported honestly by
+     * `offerPercentage` further down, measured against the dearest base — so an
+     * offer that comes to 25% for one tier and 21% for another advertises 21%,
+     * the figure every targeted role is guaranteed.
+     */
+    /**
+     * A buyer's percentage can never reach 100.
+     *
+     * At exactly 100 the amount equals the price and the buyer pays nothing;
+     * past it the price goes negative, which means paying somebody to take the
+     * material away. The amount guard below catches this too, but only after
+     * the arithmetic — and it then reports a number the administrator never
+     * typed. Refusing the percentage names what they actually entered.
+     *
+     * Sellers are deliberately exempt: their amount is ADDED, so 150% is a
+     * generous rise, not an impossible one.
+     */
+    if (
+      spec.percentage != null &&
+      audience === OfferAudience.BUYERS &&
+      spec.percentage >= 100
+    ) {
+      throw new BadRequestException(
+        `A buyer offer cannot be ${spec.percentage}% — at 100% the price reaches zero, and beyond it the buyer would be paid to take the material away`,
+      );
+    }
+
+    const amount =
+      spec.amount ??
+      amountFromPercentage(cheapestBase ?? 0, spec.percentage as number);
+
+    if (!(amount > 0)) {
+      throw new BadRequestException(
+        'That percentage comes to nothing against this price — the offer would move it by zero',
+      );
+    }
+
+    for (const [i, tier] of tiers.entries()) {
+      const base = bases[i];
+      if (audience === OfferAudience.BUYERS && amount >= base) {
+        throw new BadRequestException(
+          conditionCode
+            ? `An amount of ${amount} is more than the ${tier} price of grade "${conditionCode}" (${base}) — it would take the price to zero or below, which means paying the buyer to take the material`
+            : `An amount of ${amount} is more than the ${tier} price (${base}) — it would take the price to zero or below, which means paying the buyer to take the material`,
+        );
+      }
+      dearestBase = dearestBase == null ? base : Math.max(dearestBase, base);
+    }
+
+    return {
+      conditionId,
+      conditionCode,
+      amount,
+      roles,
+      audience,
+      // What the admin actually promised, carried through to the row so a later
+      // price edit knows whether to keep the amount or recompute it.
+      basis: spec.percentage != null ? OfferBasis.PERCENTAGE : OfferBasis.AMOUNT,
+      basisPercentage: spec.percentage ?? null,
+      // Against the DEAREST base the row faces.
+      //
+      // The percentage is amount ÷ base, so the bigger the base the smaller the
+      // percentage — and the smallest is the one every targeted role is
+      // guaranteed to get at least. Taking 45 off prices of 100 and 90 is 45%
+      // for one and 50% for the other; advertising 50% promises half the
+      // audience a saving they will not receive.
+      percentage: offerPercentage(dearestBase ?? 0, amount),
+    };
+  }
+
+
+  /** The price in force right now for one tier (and grade, when graded). */
+  private async livePriceFor(
+    productId: string,
+    tier: PricingTier,
+    conditionCode: string | null,
+  ): Promise<number | null> {
+    const row = await this.pricingRepo
+      .createQueryBuilder('pp')
+      .where('pp.productId = :productId', { productId })
+      .andWhere('pp.tier = :tier', { tier })
+      .andWhere(
+        conditionCode
+          ? 'pp.conditionCode = :conditionCode'
+          : 'pp.conditionCode IS NULL',
+        conditionCode ? { conditionCode } : {},
+      )
+      .andWhere('pp.effectiveFrom <= NOW()')
+      .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())')
+      .orderBy('pp.effectiveFrom', 'DESC')
+      .getOne();
+
+    return row ? Number(row.price) : null;
+  }
+
 
   async deleteOffer(adminId: string, id: string) {
     const offer = await this.offerRepo.findOne({ where: { id } });
     if (!offer) throw new OfferNotFoundException();
 
     await this.offerRepo.delete(id);
-    await this.cache.invalidate('offers', 'products');
-    await this.audit.record({
-      userId: adminId,
-      action: 'DELETE_OFFER',
-      entityType: 'offer',
-      entityId: id,
-      oldValues: { productId: offer.productId },
-    });
+    // Odoo learns of it by re-reading the live offers: the deleted one is
+    // simply no longer among them, so its line falls back to the list price —
+    // the very same path an expiry takes. One behaviour, not two.
+    await this.afterOfferChange(
+      await this.productOfOffer(offer.productId),
+      adminId,
+      'DELETE_OFFER',
+      id,
+      { productId: offer.productId },
+    );
 
     return { message: 'Offer deleted successfully' };
+  }
+
+  /**
+   * Move an offer's window. Nothing else on it is touched.
+   *
+   * `valid_until: null` is honoured as "open-ended" rather than treated as
+   * absent — an offer that has once had an end date must be able to lose it.
+   */
+  async updateOfferValidity(adminId: string, id: string, dto: UpdateOfferValidityDto) {
+    const offer = await this.offerRepo.findOne({ where: { id } });
+    if (!offer) throw new OfferNotFoundException();
+
+    if (dto.valid_from !== undefined) offer.validFrom = new Date(dto.valid_from);
+    if (dto.valid_until !== undefined) {
+      offer.validUntil = dto.valid_until ? new Date(dto.valid_until) : undefined;
+    }
+    if (
+      offer.validUntil &&
+      new Date(offer.validUntil).getTime() <= new Date(offer.validFrom).getTime()
+    ) {
+      throw new BadRequestException('The offer must end after it starts');
+    }
+
+    const saved = await this.offerRepo.save(offer);
+    // Every reader of an offer is cached; a window change that did not clear
+    // them would leave an expired offer quoted until the cache aged out.
+    await this.afterOfferChange(
+      await this.productOfOffer(offer.productId),
+      adminId,
+      'UPDATE_OFFER_VALIDITY',
+      id,
+      { valid_from: offer.validFrom, valid_until: offer.validUntil ?? null },
+    );
+
+    return { offer: this.mapAdminOffer(saved) };
+  }
+
+  /**
+   * Change an offer's price. Nothing else on it is touched.
+   *
+   * Placed orders are unaffected BY CONSTRUCTION, not by anything done here:
+   * the cart stores `unitPrice` on the line when it is added, so the number a
+   * buyer was quoted is already a snapshot. This edit changes what the NEXT
+   * reader is quoted — the offers list, the material listings, and any cart
+   * line created after it.
+   */
+  async updateOfferAmount(adminId: string, id: string, dto: UpdateOfferAmountDto) {
+    const offer = await this.offerRepo.findOne({ where: { id } });
+    if (!offer) throw new OfferNotFoundException();
+
+    const previous = Number(offer.amount);
+
+    // Exactly one of amount / percentage — the same rule creation follows.
+    // Both would disagree the first time the price moved and nothing could then
+    // say which the administrator meant; neither leaves nothing to change.
+    if (dto.amount != null && dto.percentage != null) {
+      throw new BadRequestException(
+        'Give an amount OR a percentage, not both — they would disagree the first time the price changed, and nothing would say which one you meant',
+      );
+    }
+    if (dto.amount == null && dto.percentage == null) {
+      throw new BadRequestException('An amount or a percentage is required');
+    }
+    const spec =
+      dto.percentage != null ? { percentage: dto.percentage } : { amount: dto.amount };
+
+    // Re-validated through the SAME builder that created the row, so a changed
+    // size faces every check a new one does — including the one that matters
+    // most here: an amount raised past a price does not make it small, it makes
+    // it NEGATIVE, which means paying a buyer to take the material away.
+    const rebuilt = await this.buildOfferRow(
+      offer.productId,
+      offer.audience,
+      (offer.targetRoles as Role[] | null)?.length
+        ? (offer.targetRoles as Role[])
+        : [...AUDIENCE_ROLES[offer.audience]],
+      offer.conditionId ?? null,
+      offer.conditionCode ?? null,
+      spec,
+    );
+
+    // The BASIS follows what was sent, exactly as on creation. An explicit
+    // amount OVERRIDES a percentage basis — the admin has named the number they
+    // want, so the ratio is no longer the promise and must not silently
+    // reassert itself at the next price change. A percentage sets the promise
+    // to keep, so a later price move recomputes the amount from it.
+    offer.basis = rebuilt.basis;
+    offer.basisPercentage =
+      rebuilt.basisPercentage == null ? null : String(rebuilt.basisPercentage);
+    offer.amount = String(rebuilt.amount);
+    // Re-derived, never carried over: the old percentage described the old
+    // amount, and leaving it would advertise a change that no longer happens.
+    offer.discountPercentage = String(rebuilt.percentage);
+
+    // The window moves in the SAME transaction as the amount, because they are
+    // one decision. Done separately, the offer is live at the new amount on the
+    // old dates in between — long enough for a real order to be priced by it.
+    if (dto.valid_from !== undefined) offer.validFrom = new Date(dto.valid_from);
+    if (dto.valid_until !== undefined) {
+      offer.validUntil = dto.valid_until ? new Date(dto.valid_until) : undefined;
+    }
+    if (
+      offer.validUntil &&
+      new Date(offer.validUntil).getTime() <= new Date(offer.validFrom).getTime()
+    ) {
+      throw new BadRequestException('The offer must end after it starts');
+    }
+
+    const saved = await this.offerRepo.save(offer);
+    await this.afterOfferChange(
+      await this.productOfOffer(offer.productId),
+      adminId,
+      'UPDATE_OFFER_AMOUNT',
+      id,
+      {
+        previous_amount: previous,
+        amount: Number(offer.amount),
+        percentage: Number(offer.discountPercentage),
+        valid_from: offer.validFrom,
+        valid_until: offer.validUntil ?? null,
+      },
+    );
+
+    return { offer: this.mapAdminOffer(saved) };
+  }
+
+  /**
+   * The timeline of a material's offers — every offer it has carried, filterable
+   * by a point or a window in time.
+   *
+   * The question this answers is "what was on offer for this material on such a
+   * date". An offer's life is its validity window, so `on` returns the offers
+   * whose window CONTAINS that instant (started on or before it, not yet ended),
+   * and `from`/`to` return those whose window OVERLAPS the range. `on` wins when
+   * both are given — a single instant is the more specific ask. With no filter
+   * the whole timeline comes back, newest window first.
+   *
+   * It reads the offers table directly rather than an audit log: an offer that
+   * still exists carries its own history in `valid_from`/`valid_until`, and that
+   * is the record a "which offers on this date" view needs. Deleted offers are
+   * gone from both, by design — a withdrawn promotion is not part of what was on
+   * offer.
+   */
+  async offerTimeline(productId: string, query: OfferTimelineQueryDto) {
+    const product = await this.productRepo.findOne({ where: { id: productId } });
+    if (!product) throw new ProductNotFoundException();
+
+    const qb = this.offerRepo
+      .createQueryBuilder('o')
+      .leftJoinAndSelect('o.product', 'p')
+      .where('o.productId = :productId', { productId });
+
+    if (query.on) {
+      // Live on that instant: started on/before it and not yet ended.
+      qb.andWhere('o.validFrom <= :on', { on: query.on }).andWhere(
+        '(o.validUntil IS NULL OR o.validUntil > :on)',
+        { on: query.on },
+      );
+    } else {
+      // Overlaps [from, to]: begins on/before `to` and ends after `from`.
+      if (query.to) qb.andWhere('o.validFrom <= :to', { to: query.to });
+      if (query.from) {
+        qb.andWhere('(o.validUntil IS NULL OR o.validUntil > :from)', {
+          from: query.from,
+        });
+      }
+    }
+
+    qb.orderBy('o.validFrom', 'DESC')
+      .addOrderBy('o.createdAt', 'DESC')
+      .skip((query.page - 1) * query.limit)
+      .take(query.limit);
+
+    const [rows, total] = await qb.getManyAndCount();
+    return {
+      product: { id: product.id, name: product.name },
+      filter: {
+        on: query.on ?? null,
+        from: query.from ?? null,
+        to: query.to ?? null,
+      },
+      offers: rows.map((o) => ({
+        ...this.mapAdminOffer(o),
+        basis: o.basis,
+        basis_percentage: o.basisPercentage == null ? null : Number(o.basisPercentage),
+        created_at: o.createdAt,
+      })),
+      pagination: buildPagination(total, query.page, query.limit),
+    };
   }
 
   /**
@@ -614,6 +1160,48 @@ export class AdminCatalogService {
    * conditions defined has nothing to name, so a factory offer on it is flat
    * too.
    */
+  /**
+   * Everything that must happen after ANY offer moves.
+   *
+   * Three things, and the third was missing entirely: no offer operation
+   * reached Odoo. The mirror on `recycle.product.condition.price` was refreshed
+   * only when a MATERIAL PRICE changed, so an offer created, repriced, expired
+   * early or deleted here left the Odoo price sheet showing the old figure —
+   * for as long as nobody happened to edit that material's price. The admin
+   * looking at Odoo and the buyer looking at the app saw different numbers, and
+   * nothing on either screen said so.
+   *
+   * `enqueueUpdatePricing` is the right carrier because the Odoo sheet holds
+   * BOTH numbers per line — list price and offer price — so one job rewrites
+   * the pair and cannot leave them disagreeing. It re-reads the live offers, so
+   * a delete is expressed by their absence, exactly like an expiry.
+   */
+  private async afterOfferChange(
+    product: Product | null,
+    adminId: string,
+    action: string,
+    entityId: string,
+    values: Record<string, unknown>,
+  ): Promise<void> {
+    await this.cache.invalidate('offers', 'products');
+    await this.audit.record({
+      userId: adminId,
+      action,
+      entityType: 'offer',
+      entityId,
+      newValues: values,
+    });
+    // A material never mirrored into Odoo has no sheet to correct.
+    if (product?.odooProductId) {
+      await this.odooSync.enqueueUpdatePricing({ productId: product.id });
+    }
+  }
+
+  /** The material an offer belongs to — needed to reach its Odoo price sheet. */
+  private async productOfOffer(productId: string): Promise<Product | null> {
+    return this.productRepo.findOne({ where: { id: productId } });
+  }
+
   private async resolveOfferCondition(
     productId: string,
     condition: string | undefined,
@@ -687,19 +1275,74 @@ export class AdminCatalogService {
     }
   }
 
+  /**
+   * An offer, as the admin screen needs to read it.
+   *
+   * Grouped rather than flat, because the fields answer three different
+   * questions and mixing them is what made the old payload hard to act on:
+   *
+   *   `audience`  — WHO, and which way the price moves for them
+   *   `grade`     — WHICH grade, by id and code (buyer offers only)
+   *   `effect`    — WHAT it does: the amount, what that is as a percentage,
+   *                 and the direction spelled out rather than inferred
+   *   `validity`  — WHEN, and whether it is live at this instant
+   *
+   * `is_live` is computed on read against the clock, not stored: an offer that
+   * has simply run out must read as finished the moment it does, without
+   * anything having to expire it.
+   */
   private mapAdminOffer(o: Offer) {
+    const now = Date.now();
+    const started = new Date(o.validFrom).getTime() <= now;
+    const notEnded = !o.validUntil || new Date(o.validUntil).getTime() > now;
+
     return {
       offer_id: o.id,
       product_id: o.productId,
       product_name: o.product?.name ?? null,
-      offer_price: Number(o.offerPrice),
-      discount_percentage: Number(o.discountPercentage),
-      condition: o.conditionCode ?? null,
-      target_roles: o.targetRoles ?? null,
+
+      audience: {
+        type: o.audience,
+        // Empty target_roles means BOTH roles of the audience — resolved here
+        // so the reader never has to know that rule to answer "who sees this?".
+        roles: o.targetRoles?.length
+          ? o.targetRoles
+          : [...AUDIENCE_ROLES[o.audience]],
+        // Compared as a SET, not by asking whether the column is empty.
+        // Creating an offer for a whole audience stores its roles expanded, so
+        // a null-check answered "no, only some of them" for every offer that
+        // in fact reached all of them.
+        applies_to_all_of_type: AUDIENCE_ROLES[o.audience].every((r) =>
+          !o.targetRoles?.length ? true : o.targetRoles.includes(r),
+        ),
+      },
+
+      grade: o.conditionId
+        ? { id: o.conditionId, code: o.conditionCode }
+        : null,
+
+      effect: {
+        amount: Number(o.amount),
+        percentage: Number(o.discountPercentage),
+        // Spelled out. "Amount 5" alone cannot say whether a seller is paid
+        // five more or a buyer charged five less, and the reader should not
+        // have to re-derive it from the audience every time.
+        direction:
+          o.audience === OfferAudience.SELLERS ? 'INCREASE' : 'DECREASE',
+        description:
+          o.audience === OfferAudience.SELLERS
+            ? `Sellers are paid ${Number(o.amount)} more (${Number(o.discountPercentage)}% above the list price)`
+            : `Buyers pay ${Number(o.amount)} less (${Number(o.discountPercentage)}% off the list price)`,
+      },
+
+      validity: {
+        valid_from: o.validFrom,
+        valid_until: o.validUntil ?? null,
+        is_active: o.isActive,
+        is_live: o.isActive && started && notEnded,
+      },
+
       description: o.description ?? null,
-      valid_from: o.validFrom,
-      valid_until: o.validUntil ?? null,
-      is_active: o.isActive,
     };
   }
 

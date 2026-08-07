@@ -191,6 +191,25 @@ export class AccountManagementController {
   }
 
   /**
+   * Re-open a rejected application.
+   *
+   * Documents are frozen while an application is rejected: the decision has
+   * been taken and sent, and quietly re-marking the evidence underneath it
+   * changes what the applicant was refused for after they were told. This is
+   * how a rejection is reconsidered in the open — the application goes back
+   * under review, its documents become editable again, and the applicant is
+   * notified that it is being looked at once more.
+   */
+  @Post(':accountId/reopen')
+  @Permissions('admin.accounts.manage')
+  async reopenApplication(
+    @Param('accountId', ParseUUIDPipe) accountId: string,
+    @Body() dto: CancelReuploadRequestsDto,
+  ) {
+    return this.accountManagementService.reopenApplication(accountId, dto);
+  }
+
+  /**
    * Stop waiting for an applicant who never answered.
    *
    * The way out of the one state the review flow could not leave: asking for a

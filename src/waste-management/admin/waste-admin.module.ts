@@ -12,6 +12,7 @@ import { MaterialCondition } from '../entities/material-condition.entity';
 import { Offer } from '../entities/offer.entity';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { WasteCommonModule } from '../common/waste-common.module';
+import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
 import { AdminCatalogController } from './admin-catalog.controller';
 import { AdminCatalogService } from './admin-catalog.service';
 import { PricingController } from './pricing/pricing.controller';
@@ -35,6 +36,7 @@ import { StockTransferController } from './stock-transfer.controller';
     PermissionsModule,
     OdooSyncModule,
     WasteCommonModule,
+    CloudinaryModule,
   ],
   controllers: [
     AdminCatalogController,

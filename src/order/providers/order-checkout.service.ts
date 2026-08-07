@@ -14,6 +14,7 @@ import { Account } from '@src/user/entities/account.entity';
 import { Role } from '@src/user/enums/role.enum';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { SellabilityService } from '@src/waste-management/common/providers/sellability.service';
+import { EffectivePriceService } from '@src/waste-management/common/providers/effective-price.service';
 import { tierForRole } from '@src/waste-management/enums/pricing-tier.enum';
 import { Order } from '../entities/order.entity';
 import { OrderPart } from '../entities/order-part.entity';
@@ -30,6 +31,7 @@ import {
   resolveFulfilmentMode,
 } from '../enums/fulfilment-mode.enum';
 import { OrderMinimumService } from './order-minimum.service';
+import { OrderSpendingCapService } from './order-spending-cap.service';
 import {
   OrderAllocationService,
   RequestedLine,
@@ -68,9 +70,11 @@ export class OrderCheckoutService {
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
     private readonly minimums: OrderMinimumService,
+    private readonly spendingCaps: OrderSpendingCapService,
     private readonly allocation: OrderAllocationService,
     private readonly odooSync: OdooSyncService,
     private readonly sellability: SellabilityService,
+    private readonly effectivePrice: EffectivePriceService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -99,6 +103,21 @@ export class OrderCheckoutService {
     if (!check.passed) {
       throw new BadRequestException(
         `Order value ${goodsTotal} ${check.currency} is below the ${check.required} ${check.currency} minimum — add ${check.shortfall} ${check.currency} more`,
+      );
+    }
+
+    // Ceiling: the admin may cap how much a role spends per day or per month.
+    // Checked against the buyer's own non-cancelled orders in the current
+    // window PLUS this one, so a buyer cannot slip past by splitting an order.
+    const cap = await this.spendingCaps.check(
+      input.role,
+      input.accountId,
+      goodsTotal,
+    );
+    if (!cap.passed) {
+      const window = cap.period === 'DAILY' ? 'today' : 'this month';
+      throw new BadRequestException(
+        `This order would put your spending ${window} at ${round3(cap.alreadySpent + goodsTotal)} ${cap.currency}, over the ${cap.cap} ${cap.currency} limit — you have ${cap.remaining} ${cap.currency} left`,
       );
     }
 
@@ -240,12 +259,31 @@ export class OrderCheckoutService {
         );
       }
       // Refuses by name if the price list was withdrawn since it was basketed.
-      const unitPrice = await this.sellability.assertSellable(
+      await this.sellability.assertSellable(
         product.id,
         product.name,
         tier,
         item.conditionCode,
       );
+
+      // The price CHARGED, with any live offer applied.
+      //
+      // This used to be the list price straight from `assertSellable`, which
+      // meant the offer was shown on the catalogue, shown in the basket, agreed
+      // to — and then silently dropped by the one step that takes money. The
+      // buyer was invoiced the full amount and every screen they had seen said
+      // otherwise.
+      //
+      // Read fresh rather than trusted from the basket line: an offer can end
+      // while a basket sits open, and what is charged must be what is true at
+      // the moment the order is placed. From here on the line is a SNAPSHOT —
+      // this is the last moment the number can move.
+      const effective = await this.effectivePrice.effectivePrice(
+        product.id,
+        role,
+        item.conditionCode,
+      );
+      const unitPrice = effective!.price;
 
       lines.push({
         productId: item.productId,

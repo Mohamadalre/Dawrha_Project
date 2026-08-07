@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 import { validate as isUUID } from 'uuid';
@@ -28,6 +28,7 @@ import {
   MediaAlreadyReviewedException,
   NoMediaForProfileException,
   NothingRequestedException,
+  OnlyRejectedCanReopenException,
   ProfileNotFoundException,
   RejectionNeedsEveryDocumentJudgedException,
   ReuploadAlreadyRequestedException,
@@ -44,16 +45,23 @@ import { ApplicationsCacheService } from './providers/applications-cache.service
 const REVIEWABLE_ROLES = [Role.FACTORY, Role.INSTITUTIONS, Role.EXTERNAL_PARTNER];
 
 /**
- * The account statuses in which a reviewer may still act on documents.
+ * The account statuses in which a reviewer may still re-mark a DOCUMENT.
  *
- * ACTIVE is absent because an approval is final; BLOCKED because it is not a
- * review state at all. REJECTED *is* present: a rejection can be reconsidered,
- * so the evidence behind it has to stay reachable — see `requestReupload`.
+ * ACTIVE is absent because an approval is final: those documents are the
+ * evidence it rests on, and re-marking one afterwards rewrites the basis of a
+ * decision already acted upon. BLOCKED is not a review state at all.
+ *
+ * REJECTED is absent too, and that is the deliberate part. A rejection is a
+ * decision that has been taken and communicated; quietly flipping the documents
+ * underneath it changes what the applicant was refused for, after the fact,
+ * with the refusal already sent. Reconsidering is allowed — but it has to be
+ * done in the open, by RE-OPENING the application (`reopenApplication`), which
+ * puts it back under review where the documents are editable again and the
+ * applicant is told.
  */
 const UNDER_REVIEW = [
   AccountStatus.PENDING_APPROVAL,
   AccountStatus.NEED_CHANGES,
-  AccountStatus.REJECTED,
 ];
 
 /**
@@ -343,6 +351,50 @@ export class AccountManagementService {
     return media.map((m) => this.documentView(m));
   }
 
+  // ===========================================================================
+  // SELF-SERVICE — a factory / free facility reading its OWN application back
+  // ===========================================================================
+  //
+  // The admin routes above answer the review question by PROFILE id. A signed-in
+  // buyer asking about their own account wants the very same answers, so these
+  // resolve the caller's profile from the token and reuse the admin builders
+  // rather than duplicating them — one shape, one place it is computed.
+  //
+  // Restricted to FACTORY and EXTERNAL_PARTNER: they are the roles with a
+  // reviewed application, uploaded documents and a single onboarding location to
+  // show. The controller additionally gates these to ACTIVE accounts.
+
+  /** This account's own profile id for its role, or a clear refusal. */
+  private async ownProfileId(accountId: string, role: Role): Promise<string> {
+    if (role !== Role.FACTORY && role !== Role.EXTERNAL_PARTNER) {
+      throw new ForbiddenException(
+        'This view is available only to factories and free facilities',
+      );
+    }
+    const repo = this.profileResolver.getRepo(role);
+    const profile = await repo.findOne({
+      where: { account: { id: accountId } },
+      select: ['id'],
+    });
+    if (!profile) throw new ProfileNotFoundException();
+    return profile.id;
+  }
+
+  /** The caller's own account details (same shape as the admin review view). */
+  async getOwnAccountDetails(accountId: string, role: Role) {
+    return this.getAccountDetails(await this.ownProfileId(accountId, role));
+  }
+
+  /** The caller's own location. */
+  async getOwnLocation(accountId: string, role: Role) {
+    return this.getProfileLocation(await this.ownProfileId(accountId, role));
+  }
+
+  /** The caller's own uploaded documents / images. */
+  async getOwnDocuments(accountId: string, role: Role) {
+    return this.getProfileDocuments(await this.ownProfileId(accountId, role));
+  }
+
   /** Full details of a single document. */
   async getMediaDetails(mediaId: string) {
     if (!isUUID(mediaId)) throw new InvalidIdException('Invalid media ID');
@@ -383,8 +435,15 @@ export class AccountManagementService {
     return {
       profile_id: profileId,
       role,
+      // Province carries its names as `name_en`/`name_ar`; the old `.name` here
+      // was always undefined, so the location card showed a governorate with no
+      // name. Both languages travel so the app renders in whichever it is set.
       province: profile.province
-        ? { id: profile.province.id, name: profile.province.name }
+        ? {
+            id: profile.province.id,
+            name_en: profile.province.name_en,
+            name_ar: profile.province.name_ar,
+          }
         : null,
       address: profile.address ?? null,
       description: profile.DesscriptLocation ?? null,
@@ -524,6 +583,49 @@ export class AccountManagementService {
       media_id: mediaId,
       file_type: media.fileType,
       account_status: AccountStatus.NEED_CHANGES,
+    };
+  }
+
+  /**
+   * Re-open a rejected application, putting it back under review.
+   *
+   * The way to reconsider a rejection IN THE OPEN. Documents are frozen while
+   * an application is rejected — a decision has been taken and sent, and
+   * quietly re-marking the evidence underneath it changes what the applicant
+   * was refused for after they have already been told. So the reviewer says so
+   * first: the application returns to PENDING_APPROVAL, the documents become
+   * editable again, and the applicant is notified that it is being looked at
+   * once more.
+   *
+   * Without this, freezing the documents would recreate the dead end the
+   * cancel-request route exists to prevent: rejected, unchangeable, and
+   * impossible to revisit.
+   *
+   * The reviewer's original note is KEPT. It records why the application was
+   * refused the first time, and that history is exactly what makes a second
+   * look worth anything.
+   */
+  async reopenApplication(accountId: string, dto: { reason?: string }) {
+    if (!isUUID(accountId)) throw new InvalidIdException('Invalid account ID');
+
+    const account = await this.accountRepo.findOne({ where: { id: accountId } });
+    if (!account) throw new AdminAccountNotFoundException();
+    if (account.role === Role.COLLECTOR) throw new DriverManagedInOdooException();
+
+    if (account.accountStatus !== AccountStatus.REJECTED) {
+      throw new OnlyRejectedCanReopenException(account.accountStatus);
+    }
+
+    await this.accountRepo.update(accountId, {
+      accountStatus: AccountStatus.PENDING_APPROVAL,
+    });
+    await this.applicationsCache.invalidate(account.role);
+    await this.statusNotifier.notifyReopened(accountId, dto.reason);
+
+    return {
+      message: 'Application re-opened — it is under review again',
+      account_id: accountId,
+      account_status: AccountStatus.PENDING_APPROVAL,
     };
   }
 

@@ -1,28 +1,23 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Account } from '@src/user/entities/account.entity';
 import { Role } from '@src/user/enums/role.enum';
 import { NotificationService } from '@src/notification/notification.service';
 import { NotificationType } from '@src/notification/enums/notification-type.enum';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
 import { ProductSuggestion } from '../entities/product-suggestion.entity';
 import { WasteCategory } from '../entities/waste-category.entity';
-import { SuggestionStatus } from '../enums/suggestion-status.enum';
 import { SuggestionSource } from '../enums/suggestion-source.enum';
 import { AuditService } from '@src/waste-management/common/providers/audit.service';
-import { UnitsService } from '@src/waste-management/common/providers/units.service';
 import { CreateSuggestionDto } from './dto/create-suggestion.dto';
 import { OdooSuggestionDto } from './dto/odoo-suggestion.dto';
 import {
   ListSuggestionsQuery,
-  ReviewSuggestionDto,
 } from './dto/review-suggestion.dto';
 
 interface Caller {
@@ -37,30 +32,37 @@ export class SuggestionsService {
   constructor(
     @InjectRepository(ProductSuggestion)
     private readonly suggestionRepo: Repository<ProductSuggestion>,
-    @InjectRepository(Account)
-    private readonly accountRepo: Repository<Account>,
     @InjectRepository(WasteCategory)
     private readonly categoryRepo: Repository<WasteCategory>,
     private readonly notifications: NotificationService,
     private readonly audit: AuditService,
-    private readonly units: UnitsService,
   ) {}
 
-  async create(caller: Caller, dto: CreateSuggestionDto) {
-    const unitCode = await this.units.validateActiveCode(dto.unit_type);
+  /**
+   * A material suggestion from any buyer role: a NAME, an EXISTING category, and
+   * one or more images (already uploaded to Cloudinary by the controller).
+   *
+   * The proposer is told the idea is under review and thanked — nothing here
+   * creates a material, and there is no status for them to chase.
+   */
+  async create(caller: Caller, dto: CreateSuggestionDto, imageUrls: string[]) {
+    const category = await this.categoryRepo.findOne({
+      where: { id: dto.category_id },
+    });
+    if (!category) {
+      throw new BadRequestException('The chosen category does not exist');
+    }
+    if (!imageUrls.length) {
+      throw new BadRequestException('At least one image is required');
+    }
 
     const suggestion = await this.suggestionRepo.save(
       this.suggestionRepo.create({
         accountId: caller.id,
         productName: dto.product_name,
-        description: dto.additional_info
-          ? `${dto.description ?? ''}\n${dto.additional_info}`.trim()
-          : dto.description,
+        description: dto.description?.trim() || undefined,
         categoryId: dto.category_id,
-        unitType: unitCode,
-        estimatedPrice: dto.estimated_price != null ? String(dto.estimated_price) : undefined,
-        imageURL: dto.image,
-        status: SuggestionStatus.PENDING_REVIEW,
+        imageUrls,
       }),
     );
 
@@ -72,13 +74,19 @@ export class SuggestionsService {
       newValues: { productName: dto.product_name, role: caller.role },
     });
 
-    await this.notifyAdmins(suggestion.id, dto.product_name);
+    // The proposer hears back at once — the whole acknowledgement of their
+    // contribution — while the admin picks it up from the review queue.
+    await this.notifySubmitter(
+      caller.id,
+      'تم استلام اقتراحك',
+      `طلبك «${dto.product_name}» قيد الدراسة. شكراً على مشاركتك.`,
+      suggestion.id,
+    );
 
     return {
       suggestion_id: suggestion.id,
-      status: suggestion.status,
       created_at: suggestion.createdAt,
-      message: 'Suggestion submitted successfully',
+      message: 'Your suggestion is under review — thank you for your contribution',
     };
   }
 
@@ -94,8 +102,6 @@ export class SuggestionsService {
    * refresh the existing row, never file the proposal twice.
    */
   async ingestFromOdoo(dto: OdooSuggestionDto) {
-    const unitCode = await this.units.validateActiveCode(dto.unit_type);
-
     let categoryId: string | undefined;
     if (dto.category_name) {
       const category = await this.categoryRepo.findOne({
@@ -116,26 +122,19 @@ export class SuggestionsService {
       .trim();
 
     if (existing) {
-      // Only an untouched proposal may be refreshed. Once an admin has ruled on
-      // it, a late push must not quietly rewrite what was decided.
-      if (existing.status !== SuggestionStatus.PENDING_REVIEW) {
-        return {
-          message: 'Suggestion already reviewed',
-          suggestion_id: existing.id,
-          status: existing.status,
-        };
-      }
+      // A retried push refreshes the same row rather than filing a second copy.
+      // There is no status to guard any more — the admin reads and replies, they
+      // do not "rule" — so a later push simply carries the newest values.
       existing.productName = dto.product_name;
       existing.description = description || undefined;
       existing.categoryId = categoryId;
       existing.suggestedCategoryName = dto.new_category_name?.trim() || undefined;
-      existing.unitType = unitCode;
+      if (dto.image_urls?.length) existing.imageUrls = dto.image_urls;
       existing.suggestedByName = dto.suggested_by;
       await this.suggestionRepo.save(existing);
       return {
         message: 'Suggestion updated',
         suggestion_id: existing.id,
-        status: existing.status,
       };
     }
 
@@ -153,37 +152,42 @@ export class SuggestionsService {
         // spelled differently by the next proposer with nothing to merge them.
         // The reviewer reads the name and decides.
         suggestedCategoryName: dto.new_category_name?.trim() || undefined,
-        unitType: unitCode,
-        status: SuggestionStatus.PENDING_REVIEW,
+        imageUrls: dto.image_urls?.length ? dto.image_urls : undefined,
       }),
     );
-
-    await this.notifyAdmins(suggestion.id, dto.product_name);
 
     return {
       message: 'Suggestion submitted successfully',
       suggestion_id: suggestion.id,
-      status: suggestion.status,
       created_at: suggestion.createdAt,
     };
   }
 
-  /** The review queue, filterable by status and by which side proposed it. */
+  /**
+   * The admin's review queue — OLDEST first, so the longest-waiting proposal is
+   * dealt with first — filterable by WHO submitted it (a buyer role, or `ODOO`
+   * for the Odoo administrator's proposals).
+   */
   async listForAdmin(query: ListSuggestionsQuery) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
 
-    const where: Record<string, unknown> = {};
-    if (query.status) where.status = query.status;
-    if (query.source) where.source = query.source;
+    const qb = this.suggestionRepo
+      .createQueryBuilder('s')
+      .leftJoinAndSelect('s.account', 'account')
+      .leftJoinAndSelect('s.category', 'category')
+      .orderBy('s.createdAt', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit);
 
-    const [rows, total] = await this.suggestionRepo.findAndCount({
-      where,
-      relations: ['account', 'category'],
-      order: { createdAt: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+    if (query.submitted_by === 'ODOO') {
+      qb.andWhere('s.source = :src', { src: SuggestionSource.ODOO });
+    } else if (query.submitted_by) {
+      // App proposals from that role — join to the submitter's account.
+      qb.andWhere('account.role = :role', { role: query.submitted_by });
+    }
+
+    const [rows, total] = await qb.getManyAndCount();
 
     return {
       message: 'Suggestions fetched successfully',
@@ -202,58 +206,48 @@ export class SuggestionsService {
   }
 
   /**
-   * The admin's ruling on a proposal — and NOTHING else.
+   * The admin's reply to a proposer — a free-text message, delivered to them as
+   * a notification. The admin does NOT approve, reject, or change any status:
+   * they read the proposal and answer it. Nothing here creates a material.
    *
-   * Approving does not create a material. That is deliberate: a material born
-   * here would arrive with no prices, and an unpriced material is invisible to
-   * every buyer, so the system would have silently produced a row that appears
-   * nowhere and can be ordered by no one. The admin creates the real material
-   * themselves, with its price list, when they choose to.
-   *
-   * Which is why the wording sent to the proposer says the idea was accepted
-   * FOR STUDY, not that the material is now available: promising more than the
-   * system does is how a feature becomes a support ticket.
+   * Odoo proposals have no app account to answer, so a reply to one is refused
+   * rather than silently dropped.
    */
-  async review(adminId: string, suggestionId: string, dto: ReviewSuggestionDto) {
+  async reply(adminId: string, suggestionId: string, message: string) {
     const suggestion = await this.suggestionRepo.findOne({
       where: { id: suggestionId },
     });
     if (!suggestion) throw new NotFoundException('Suggestion not found');
-    if (suggestion.status !== SuggestionStatus.PENDING_REVIEW) {
-      throw new ConflictException(
-        `This suggestion was already ${suggestion.status.toLowerCase()}`,
+    if (!suggestion.accountId) {
+      throw new BadRequestException(
+        'This proposal came from Odoo and has no app account to reply to',
       );
     }
-    // A rejection with no reason tells the proposer nothing and cannot be
-    // appealed or corrected — so it is not accepted as a rejection at all.
-    if (dto.status === SuggestionStatus.REJECTED && !dto.admin_notes?.trim()) {
-      throw new BadRequestException('A rejection must say why');
-    }
 
-    suggestion.status = dto.status;
-    suggestion.adminNotes = dto.admin_notes?.trim() || undefined;
-    suggestion.reviewedBy = adminId;
-    suggestion.reviewedAt = new Date();
+    suggestion.adminReply = message.trim();
+    suggestion.repliedBy = adminId;
+    suggestion.repliedAt = new Date();
     await this.suggestionRepo.save(suggestion);
 
     await this.audit.record({
       userId: adminId,
-      action: 'REVIEW_PRODUCT_SUGGESTION',
+      action: 'REPLY_PRODUCT_SUGGESTION',
       entityType: 'product_suggestion',
       entityId: suggestion.id,
-      newValues: { status: dto.status, notes: suggestion.adminNotes ?? null },
+      newValues: { reply: suggestion.adminReply },
     });
 
-    await this.notifyProposer(suggestion);
+    await this.notifySubmitter(
+      suggestion.accountId,
+      'رد على اقتراحك',
+      `بخصوص اقتراحك «${suggestion.productName}»: ${suggestion.adminReply}`,
+      suggestion.id,
+    );
 
     return {
-      message: `Suggestion ${dto.status.toLowerCase()}`,
+      message: 'Reply sent to the submitter',
       suggestion_id: suggestion.id,
-      status: suggestion.status,
-      // Stated in the response too, so no client builds a screen around a
-      // material id that is never coming.
-      product_created: false,
-      reviewed_at: suggestion.reviewedAt,
+      replied_at: suggestion.repliedAt,
     };
   }
 
@@ -269,59 +263,45 @@ export class SuggestionsService {
       // `category` being null, which only means none was chosen — this says one
       // was ASKED FOR, and it is the reviewer's second decision on the proposal.
       suggested_category_name: row.suggestedCategoryName ?? null,
-      unit: row.unitType,
-      estimated_price: row.estimatedPrice != null ? Number(row.estimatedPrice) : null,
-      image: row.imageURL ?? null,
+      images: row.imageUrls ?? [],
       source: row.source,
       suggested_by:
         row.source === SuggestionSource.ODOO
-          ? { name: row.suggestedByName ?? 'Odoo administrator', account_id: null }
+          ? { name: row.suggestedByName ?? 'Odoo administrator', account_id: null, role: 'ODOO' }
           : {
               name: row.account?.name ?? null,
               account_id: row.accountId ?? null,
+              role: row.account?.role ?? null,
             },
-      status: row.status,
-      admin_notes: row.adminNotes ?? null,
-      reviewed_at: row.reviewedAt ?? null,
+      admin_reply: row.adminReply ?? null,
+      replied_at: row.repliedAt ?? null,
       created_at: row.createdAt,
     };
   }
 
-  /** Odoo-side proposals have no app account to notify — nothing to send. */
-  private async notifyProposer(suggestion: ProductSuggestion): Promise<void> {
-    if (!suggestion.accountId) return;
-    const approved = suggestion.status === SuggestionStatus.APPROVED;
+  /**
+   * Sends one notification to the proposer. Odoo-side proposals have no app
+   * account, so there is nothing to send; a failure to notify never fails the
+   * caller's action.
+   */
+  private async notifySubmitter(
+    accountId: string | undefined,
+    title: string,
+    body: string,
+    suggestionId: string,
+  ): Promise<void> {
+    if (!accountId) return;
     try {
       const notification = await this.notifications.createNotification({
-        userId: suggestion.accountId,
-        title: approved ? 'تمت الموافقة على اقتراحك' : 'لم يُقبل اقتراحك',
-        body: approved
-          ? `تمت الموافقة على اقتراحك «${suggestion.productName}» وسيُدرَس لإضافته`
-          : `لم يُقبل اقتراحك «${suggestion.productName}»: ${suggestion.adminNotes ?? ''}`.trim(),
+        userId: accountId,
+        title,
+        body,
         type: NotificationType.GENERAL,
-        metadata: { suggestionId: suggestion.id },
+        metadata: { suggestionId },
       });
       await this.notifications.enqueueNotification(notification.id);
     } catch (error) {
-      this.logger.warn('Failed to notify the proposer', error as Error);
-    }
-  }
-
-  private async notifyAdmins(suggestionId: string, productName: string): Promise<void> {
-    try {
-      const admins = await this.accountRepo.find({ where: { role: Role.ADMIN } });
-      for (const admin of admins) {
-        const notification = await this.notifications.createNotification({
-          userId: admin.id,
-          title: 'اقتراح منتج جديد',
-          body: `تم اقتراح منتج جديد: ${productName}`,
-          type: NotificationType.GENERAL,
-          metadata: { suggestionId, deepLink: `admin/suggestions/${suggestionId}` },
-        });
-        await this.notifications.enqueueNotification(notification.id);
-      }
-    } catch (error) {
-      this.logger.warn('Failed to notify admins about new suggestion', error as Error);
+      this.logger.warn('Failed to notify the submitter', error as Error);
     }
   }
 }

@@ -75,21 +75,47 @@ export class InventoryQueryService {
    * page cut through the raw rows would hand back half a material's grades and
    * the totals on that card would silently be wrong.
    */
-  async listForWarehouse(warehouseId: string, page = 1, limit = 10) {
+  async listForWarehouse(
+    warehouseId: string,
+    page = 1,
+    limit = 10,
+    search?: string,
+  ) {
     const warehouse = await this.warehouseRepo.findOne({
       where: { id: warehouseId },
     });
     if (!warehouse) throw new WarehouseNotFoundException();
 
-    // Materials present in this warehouse, ordered by name, one page of them.
-    const pageRows = await this.inventoryRepo
+    const term = search?.trim();
+
+    // Materials present in this warehouse, one page of them. When a search term
+    // is given, materials whose name CONTAINS it — case-insensitively — are kept,
+    // and those whose name STARTS with it are ranked first, the way an
+    // autocomplete behaves. Filtering happens in the DB so the page slice and
+    // the total below are computed over the SAME set.
+    const pageQb = this.inventoryRepo
       .createQueryBuilder('i')
       .select('i.odooProductId', 'odooProductId')
       .addSelect('MIN(i.productName)', 'productName')
       .where('i.warehouseId = :warehouseId', { warehouseId })
-      .andWhere('i.odooProductId IS NOT NULL')
-      .groupBy('i.odooProductId')
-      .orderBy('MIN(i.productName)', 'ASC')
+      .andWhere('i.odooProductId IS NOT NULL');
+
+    if (term) {
+      pageQb
+        .andWhere('i.productName ILIKE :contains', { contains: `%${term}%` })
+        .setParameter('prefix', `${term}%`)
+        .groupBy('i.odooProductId')
+        // Prefix matches first, then alphabetical — a stable order for paging.
+        .orderBy(
+          'CASE WHEN MIN(i.productName) ILIKE :prefix THEN 0 ELSE 1 END',
+          'ASC',
+        )
+        .addOrderBy('MIN(i.productName)', 'ASC');
+    } else {
+      pageQb.groupBy('i.odooProductId').orderBy('MIN(i.productName)', 'ASC');
+    }
+
+    const pageRows = await pageQb
       .offset((page - 1) * limit)
       .limit(limit)
       .getRawMany<{ odooProductId: number }>();
@@ -106,6 +132,13 @@ export class InventoryQueryService {
     // "3 materials" off page one of nine would be reading a lie.
     const summary = await this.warehouseSummary(warehouseId);
 
+    // Pagination counts what the QUERY returned: the whole warehouse normally,
+    // or the matching materials when a search narrowed it — otherwise paging a
+    // filtered list would report pages that do not exist.
+    const total = term
+      ? await this.countMaterials(warehouseId, term)
+      : summary.materials_count;
+
     return {
       message: 'Inventory fetched successfully',
       warehouse: {
@@ -113,11 +146,24 @@ export class InventoryQueryService {
         name: warehouse.name,
         code: warehouse.code,
       },
+      search: term || null,
       last_sync_from_odoo: warehouse.lastOdooSync ?? null,
       inventory: materials,
       summary,
-      pagination: buildPagination(summary.materials_count, page, limit),
+      pagination: buildPagination(total, page, limit),
     };
+  }
+
+  /** Distinct materials in a warehouse whose name matches the search term. */
+  private async countMaterials(warehouseId: string, term: string): Promise<number> {
+    const row = await this.inventoryRepo
+      .createQueryBuilder('i')
+      .select('COUNT(DISTINCT i.odooProductId)', 'count')
+      .where('i.warehouseId = :warehouseId', { warehouseId })
+      .andWhere('i.odooProductId IS NOT NULL')
+      .andWhere('i.productName ILIKE :contains', { contains: `%${term}%` })
+      .getRawOne<{ count: string }>();
+    return Number(row?.count ?? 0);
   }
 
   /** One material in one warehouse: what is on the shelf, grade by grade. */

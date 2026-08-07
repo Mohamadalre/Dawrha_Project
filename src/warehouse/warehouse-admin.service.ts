@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { Warehouse } from './entities/warehouse.entity';
+import { WarehouseState } from './enums/warehouse-state.enum';
 import {
   WarehouseCodeExistsException,
   WarehouseNameExistsException,
@@ -152,7 +153,6 @@ export class WarehouseAdminService {
       governorate: province.name_ar || province.name_en,
       zones: dto.zones?.map((z) => ({ name: z.name, type: z.type })),
       odooSyncStatus: OdooSyncStatus.PENDING,
-      isActive: true,
     });
     const saved = await this.warehouseRepo.save(warehouse);
 
@@ -221,7 +221,6 @@ export class WarehouseAdminService {
           odooWarehouseId: ow.id,
           name: ow.name,
           code: ow.code ?? String(ow.id),
-          isActive: true,
         });
         created++;
       } else {
@@ -273,8 +272,14 @@ export class WarehouseAdminService {
 
   async list(query: PaginationQueryDto & { status?: string; search?: string }) {
     const qb = this.warehouseRepo.createQueryBuilder('w').leftJoinAndSelect('w.manager', 'm');
-    if (query.status === 'active') qb.andWhere('w.isActive = true');
-    if (query.status === 'inactive') qb.andWhere('w.isActive = false');
+    // Filtered on the lifecycle `state` now that `isActive` is gone: "active"
+    // means operational (not permanently stopped), "inactive" means closed.
+    if (query.status === 'active') {
+      qb.andWhere('w.state != :whInactive', { whInactive: WarehouseState.INACTIVE });
+    }
+    if (query.status === 'inactive') {
+      qb.andWhere('w.state = :whInactive', { whInactive: WarehouseState.INACTIVE });
+    }
 
     // CLOSED warehouses are NOT filtered out by default, and that is the point.
     // A warehouse that has stopped taking new work still holds stock, still has
@@ -341,7 +346,7 @@ export class WarehouseAdminService {
               }
             : null,
           stock_summary: summary,
-          status: w.isActive ? 'active' : 'inactive',
+          status: w.state === WarehouseState.INACTIVE ? 'inactive' : 'active',
           synced_with_odoo: !!w.lastOdooSync,
           last_odoo_sync: w.lastOdooSync ?? null,
         };
@@ -396,7 +401,7 @@ export class WarehouseAdminService {
           }
         : null,
       stock_summary: summary,
-      status: w.isActive ? 'active' : 'inactive',
+      status: w.state === WarehouseState.INACTIVE ? 'inactive' : 'active',
       synced_with_odoo: !!w.lastOdooSync,
       last_odoo_sync: w.lastOdooSync ?? null,
     };

@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -24,14 +25,16 @@ export class OdooSuggestionDto {
   @MaxLength(150)
   product_name: string;
 
-  @IsString()
-  @IsNotEmpty()
-  unit_type: string;
-
   @IsOptional()
   @IsString()
   @MaxLength(150)
   category_name?: string;
+
+  /** Image URLs for the proposed material, if Odoo has any. */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  image_urls?: string[];
 
   /**
    * A category the proposer says does not exist yet.

@@ -1,4 +1,4 @@
-import { HttpException } from '@nestjs/common';
+import { HttpException, ConflictException, NotFoundException } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { AuthService } from './auth.service';
 import {
@@ -205,23 +205,41 @@ describe('AuthService — accounts created through Google', () => {
     expect(mailService.generateAndSendOtp).not.toHaveBeenCalled();
   });
 
-  it('sends no reset code for a Google account, and the response stays indistinguishable', async () => {
+  it('tells a Google account to sign in with Google instead of mailing a code', async () => {
     service = build(googleOnly);
 
-    const res = await service.forgotPassword({ email: 'g@e.com' } as any);
-
+    await expect(
+      service.forgotPassword({ email: 'g@e.com' } as any, 'user_app'),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(mailService.generateAndSendOtpForgot).not.toHaveBeenCalled();
-    // Byte-identical to the answer given for an address that does not exist —
-    // the guard must not become an account-enumeration oracle.
-    expect(res.message).toBe('If this email exists, an OTP has been sent.');
   });
 
-  it('does send a reset code for an ordinary local account', async () => {
+  it('sends a reset code AND confirms it clearly for a local account on ITS app', async () => {
     service = build({ ...googleOnly, passwordHash: 'hash', googleId: null, provider: AuthProvider.LOCAL });
 
-    await service.forgotPassword({ email: 'g@e.com' } as any);
+    const res = await service.forgotPassword({ email: 'g@e.com' } as any, 'user_app');
 
     expect(mailService.generateAndSendOtpForgot).toHaveBeenCalledWith('g@e.com');
+    expect(res.message).toBe('A password reset code has been sent to your email');
+  });
+
+  it('says the email is not registered when it belongs to another app (scoped like login)', async () => {
+    // A CITIZEN's email hitting the FACTORY app: no account for this app.
+    service = build({ ...googleOnly, passwordHash: 'hash', googleId: null, provider: AuthProvider.LOCAL });
+
+    await expect(
+      service.forgotPassword({ email: 'g@e.com' } as any, 'factory_app'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(mailService.generateAndSendOtpForgot).not.toHaveBeenCalled();
+  });
+
+  it('says the email is not registered when no account exists', async () => {
+    service = build(null);
+
+    await expect(
+      service.forgotPassword({ email: 'nope@e.com' } as any, 'user_app'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(mailService.generateAndSendOtpForgot).not.toHaveBeenCalled();
   });
 });
 

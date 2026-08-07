@@ -1,27 +1,24 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { Role } from '@src/user/enums/role.enum';
 import { Cart } from '../entities/cart.entity';
 import { CartItem } from '../entities/cart-item.entity';
 import { Product } from '../entities/product.entity';
-import { ProductPricing } from '../entities/product-pricing.entity';
-import { Offer } from '../entities/offer.entity';
-import { PricingTier, tierForRole } from '../enums/pricing-tier.enum';
 import { UnitsService } from '../common/providers/units.service';
 import { ConditionsService } from '../common/providers/conditions.service';
+import { EffectivePriceService } from '../common/providers/effective-price.service';
 import {
   ConditionRequiredException,
-  OfferNotAvailableException,
   ProductNotFoundException,
 } from '../exceptions/waste.exceptions';
-import { cartLimitsFor } from './cart.config';
-import { AddOfferToCartDto, AddToCartDto, UpdateCartItemDto } from './dto/cart.dto';
+import { AddToCartDto, UpdateCartItemDto } from './dto/cart.dto';
 
 interface Caller {
   id: string;
@@ -37,12 +34,13 @@ export class CartService {
     private readonly itemRepo: Repository<CartItem>,
     @InjectRepository(Product)
     private readonly productRepo: Repository<Product>,
-    @InjectRepository(ProductPricing)
-    private readonly pricingRepo: Repository<ProductPricing>,
-    @InjectRepository(Offer)
-    private readonly offerRepo: Repository<Offer>,
     private readonly units: UnitsService,
     private readonly conditionsService: ConditionsService,
+    // The single resolver for "what does THIS role pay for THIS grade right
+    // now" — list price with any live offer already applied in the right
+    // direction. The basket must not compute that itself: a second copy of the
+    // sign is how a catalogue that subtracts ends up beside a basket that adds.
+    private readonly effectivePrice: EffectivePriceService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -54,31 +52,74 @@ export class CartService {
     });
     if (!product) throw new ProductNotFoundException();
 
-    await this.enforceDailyMax(caller, dto.quantity);
-
-    let unitPrice: number;
-    let offer: Offer | null = null;
-    let isOffer = false;
-
-    // Resolved against THIS material: a bare code means nothing, and an
-    // ungraded material must refuse one rather than silently drop it.
-    let conditionCode = await this.conditionsService.resolveOrderedCondition(
-      product.id,
-      dto.condition,
-    );
-
-    if (dto.add_offer) {
-      offer = await this.currentOfferForProduct(product.id, caller.role);
-      if (!offer) throw new BadRequestException('No active offer for this product');
-      unitPrice = Number(offer.offerPrice);
-      isOffer = true;
-      // A condition-targeted offer fixes the grade being bought.
-      conditionCode = offer.conditionCode ?? conditionCode;
-    } else {
-      unitPrice = await this.tierPrice(product.id, caller.role, conditionCode);
+    // Which grade is being bought depends on WHO is buying, not only on the
+    // material:
+    //
+    //   Factories and free facilities are priced PER GRADE, so on a graded
+    //   material they must name one — BY ID — and it is asked for only when the
+    //   material actually has grades. On an ungraded material there is no grade
+    //   to send. Each grade is its own line (add the material again with another
+    //   grade to buy more than one).
+    //
+    //   Citizens and institutions are priced FLAT — they do not deal in grades
+    //   at all — so a grade is neither required nor used, even when the material
+    //   happens to be graded.
+    const buysPerGrade =
+      caller.role === Role.FACTORY || caller.role === Role.EXTERNAL_PARTNER;
+    let conditionCode: string | null = null;
+    if (buysPerGrade && (await this.conditionsService.hasConditions(product.id))) {
+      if (!dto.condition_id) {
+        throw new ConditionRequiredException();
+      }
+      // Resolve BY ID against this material, and take the code from the resolved
+      // row so a mismatched pair can never slip through.
+      conditionCode = (
+        await this.conditionsService.resolveActiveById(product.id, dto.condition_id)
+      ).code;
     }
 
+    // The price comes from the MATERIAL ID: the one resolver returns the list
+    // price with any live offer already applied FOR THIS ROLE AND GRADE — an
+    // offer that does not target the caller's role, or targets a different
+    // grade, is not applied. The buyer opts into nothing; if an offer is
+    // running for them it simply IS the price, exactly as the catalogue shows.
+    const effective = await this.effectivePrice.effectivePrice(
+      product.id,
+      caller.role,
+      conditionCode,
+    );
+    if (!effective) {
+      throw new BadRequestException('This material has no price for your account type');
+    }
+    const unitPrice = effective.price;
+    const offer = effective.offer;
+    const isOffer = !!offer;
+
     const cart = await this.getOrCreateCart(caller.id);
+
+    // One line per (material, grade). Adding the SAME material again is not a
+    // second line — it is an edit of the one already there:
+    //   • flat buyers (citizen/institution): the material has no grade, so the
+    //     material alone identifies the line — a repeat is a duplicate.
+    //   • graded buyers (factory/free-facility): the grade is part of the
+    //     identity, so the SAME material with a DIFFERENT grade is a new line,
+    //     but the same material+grade already in the basket is a duplicate.
+    // A duplicate is refused with a pointer to edit the quantity instead.
+    const duplicate = await this.itemRepo.findOne({
+      where: {
+        cartId: cart.id,
+        productId: product.id,
+        conditionCode: conditionCode ?? IsNull(),
+      },
+    });
+    if (duplicate) {
+      throw new ConflictException(
+        conditionCode
+          ? 'This material with this grade is already in your cart — edit its quantity instead'
+          : 'This material is already in your cart — edit its quantity instead',
+      );
+    }
+
     const subtotal = +(unitPrice * dto.quantity).toFixed(3);
 
     const item = await this.itemRepo.save(
@@ -88,7 +129,8 @@ export class CartService {
         offerId: offer?.id,
         quantity: String(dto.quantity),
         conditionCode,
-        unitType: await this.units.validateActiveCode(dto.unit_type),
+        // The unit is the material's own, never entered by the buyer.
+        unitType: product.unitType,
         unitPrice: String(unitPrice),
         subtotal: String(subtotal),
         isOffer,
@@ -99,56 +141,26 @@ export class CartService {
     return {
       cart_id: cart.id,
       item_id: item.id,
+      // Surfaced so the caller can see, per line, whether an offer was applied
+      // and at what unit — the same figures the invoice will carry.
+      item: {
+        product_id: product.id,
+        condition_id: dto.condition_id ?? '',
+        quantity: dto.quantity,
+        unit_type: product.unitType,
+        unit_price: unitPrice,
+        subtotal,
+        is_offer: isOffer,
+        offer_id: offer?.id ?? '',
+        currency: 'JOD',
+      },
       cart_summary: {
         total_items: summary.total_items,
         total_price: summary.total,
         currency: 'JOD',
-        minimum_requirement_met: summary.meets_minimum,
         can_proceed_to_checkout: summary.can_checkout,
-        min_required: summary.minimum_required,
-        max_allowed: summary.daily_limit,
       },
     };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Add offer
-  // ---------------------------------------------------------------------------
-  async addOffer(caller: Caller, dto: AddOfferToCartDto) {
-    const offer = await this.offerRepo.findOne({
-      where: { id: dto.offer_id },
-      relations: ['product'],
-    });
-    if (!offer || !offer.isActive) throw new NotFoundException('Offer not found');
-    if (offer.validUntil && new Date(offer.validUntil).getTime() < Date.now()) {
-      throw new BadRequestException('Offer has expired');
-    }
-    if (offer.targetRoles?.length && !offer.targetRoles.includes(caller.role)) {
-      throw new OfferNotAvailableException();
-    }
-
-    await this.enforceDailyMax(caller, dto.quantity);
-
-    const cart = await this.getOrCreateCart(caller.id);
-    const unitPrice = Number(offer.offerPrice);
-    const subtotal = +(unitPrice * dto.quantity).toFixed(3);
-
-    const item = await this.itemRepo.save(
-      this.itemRepo.create({
-        cartId: cart.id,
-        productId: offer.productId,
-        offerId: offer.id,
-        quantity: String(dto.quantity),
-        conditionCode: offer.conditionCode ?? null,
-        unitType: await this.units.validateActiveCode(dto.unit_type),
-        unitPrice: String(unitPrice),
-        subtotal: String(subtotal),
-        isOffer: true,
-      }),
-    );
-
-    const summary = await this.buildSummary(cart.id, caller.role);
-    return { cart_id: cart.id, item_id: item.id, cart_summary: summary };
   }
 
   // ---------------------------------------------------------------------------
@@ -157,11 +169,10 @@ export class CartService {
   async updateItem(caller: Caller, itemId: string, dto: UpdateCartItemDto) {
     const item = await this.loadOwnedItem(caller.id, itemId);
 
+    // Quantity only: the unit is the material's, and the price is the frozen
+    // basket figure — changing how much re-totals the line, nothing else.
     const unitPrice = Number(item.unitPrice);
     item.quantity = String(dto.quantity);
-    if (dto.unit_type) {
-      item.unitType = await this.units.validateActiveCode(dto.unit_type);
-    }
     item.subtotal = String(+(unitPrice * dto.quantity).toFixed(3));
     await this.itemRepo.save(item);
 
@@ -242,104 +253,22 @@ export class CartService {
     return item;
   }
 
-  /**
-   * The price this buyer pays for this material, or a refusal.
-   *
-   * Whether a grade is involved is decided by the MATERIAL, not by the tier:
-   * an ungraded material carries ONE price for every tier, factories included,
-   * so demanding a grade there would look for a row that cannot exist and the
-   * material would appear unbuyable to a factory while a citizen could buy it.
-   *
-   * A missing price is refused outright rather than defaulted. A material with
-   * no price for this tier is one this buyer was never meant to see — the
-   * catalogue already hides it — and the only way to reach here is a basket
-   * left open while an admin withdrew the price list.
-   */
-  private async tierPrice(
-    productId: string,
-    role: Role,
-    conditionCode: string | null = null,
-  ): Promise<number> {
-    const tier = tierForRole(role);
-    const graded = await this.conditionsService.hasConditions(productId);
-    const perCondition =
-      graded &&
-      (tier === PricingTier.FACTORY || tier === PricingTier.FREE_FACILITY);
-
-    const qb = this.pricingRepo
-      .createQueryBuilder('pp')
-      .where('pp.productId = :productId', { productId })
-      .andWhere('pp.tier = :tier', { tier })
-      .andWhere('pp.effectiveFrom <= NOW()')
-      .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())');
-
-    if (perCondition) {
-      if (!conditionCode) throw new ConditionRequiredException();
-      qb.andWhere('pp.conditionCode = :conditionCode', { conditionCode });
-    } else {
-      qb.andWhere('pp.conditionCode IS NULL');
-    }
-
-    const price = await qb.orderBy('pp.effectiveFrom', 'DESC').getOne();
-    if (!price) {
-      throw new BadRequestException(
-        'This material is not available for purchase at the moment',
-      );
-    }
-    return Number(price.price);
-  }
-  private async currentOfferForProduct(productId: string, callerRole: Role): Promise<Offer | null> {
-    return this.offerRepo
-      .createQueryBuilder('o')
-      .where('o.productId = :productId', { productId })
-      .andWhere('(o.targetRoles IS NULL OR :callerRole = ANY(o.targetRoles))', { callerRole })
-      .andWhere('o.isActive = true')
-      .andWhere('o.validFrom <= NOW()')
-      .andWhere('(o.validUntil IS NULL OR o.validUntil > NOW())')
-      .orderBy('o.discountPercentage', 'DESC')
-      .getOne();
-  }
-
-  /** Citizens have a per-day unit cap; companies/factories do not. */
-  private async enforceDailyMax(caller: Caller, addingQty: number): Promise<void> {
-    const limits = cartLimitsFor(caller.role);
-    if (limits.dailyMax == null) return;
-
-    const cart = await this.cartRepo.findOne({ where: { accountId: caller.id } });
-    if (!cart) return;
-
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
-
-    const todays = await this.itemRepo.find({
-      where: { cartId: cart.id, createdAt: Between(start, end) },
-    });
-    const todayTotal = todays.reduce((sum, it) => sum + Number(it.quantity), 0);
-
-    if (todayTotal + addingQty > limits.dailyMax) {
-      throw new BadRequestException(
-        `Daily limit exceeded. Maximum ${limits.dailyMax} units per day.`,
-      );
-    }
-  }
-
   private async buildSummary(cartId: string, role: Role, preloaded?: CartItem[]) {
     const items = preloaded ?? (await this.itemRepo.find({ where: { cartId } }));
-    const limits = cartLimitsFor(role);
 
     const subtotal = items.reduce((s, it) => s + Number(it.subtotal), 0);
-    const totalUnits = items.reduce((s, it) => s + Number(it.quantity), 0);
-    // Weight-based minimum: sum quantities of items whose unit is flagged
-    // is_weight in measurement_units (KG by default; admin can add TON, ...).
+    // Sum quantities of items whose unit is flagged is_weight in
+    // measurement_units (KG by default; admin can add TON, ...).
     const weightCodes = await this.units.weightCodes();
     const totalWeight = items
       .filter((it) => weightCodes.has(it.unitType))
       .reduce((s, it) => s + Number(it.quantity), 0);
 
-    const meetsMinimum = totalUnits >= limits.minQuantity;
-
+    // No quantity floor or daily unit cap here any more: the commercial
+    // guardrails are VALUE-based and admin-managed (minimum order value +
+    // spending cap), enforced at CHECKOUT — the single place that turns a
+    // basket into money. The cart is just a basket, so it can be checked out
+    // whenever it holds something.
     return {
       total_items: items.length,
       total_weight: +totalWeight.toFixed(3),
@@ -348,10 +277,7 @@ export class CartService {
       tax: 0,
       total: +subtotal.toFixed(3),
       currency: 'JOD',
-      meets_minimum: meetsMinimum,
-      minimum_required: limits.minQuantity,
-      daily_limit: limits.dailyMax,
-      can_checkout: meetsMinimum && items.length > 0,
+      can_checkout: items.length > 0,
     };
   }
 }

@@ -4,16 +4,22 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
+import { imageMemoryStorage } from '@src/common/config/multer/image-memory.config';
+import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { AdminCatalogService } from './admin-catalog.service';
 import {
   AdminListQueryDto,
@@ -24,7 +30,9 @@ import {
   CreateUnitDto,
   UpdateCategoryDto,
   UpdateConditionDto,
-  UpdateOfferDto,
+  UpdateOfferAmountDto,
+  UpdateOfferValidityDto,
+  OfferTimelineQueryDto,
   UpdateProductDto,
   UpdateUnitDto,
 } from './dto/admin-catalog.dto';
@@ -32,7 +40,30 @@ import {
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller({ path: 'admin/waste', version: '1' })
 export class AdminCatalogController {
-  constructor(private readonly adminCatalog: AdminCatalogService) {}
+  constructor(
+    private readonly adminCatalog: AdminCatalogService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
+
+  /**
+   * Uploads an image FILE (when one is attached) and returns its URL.
+   *
+   * Category and product images arrive as a MULTIPART FILE in the request body,
+   * never as a pasted URL: a link the client sends could point anywhere, would
+   * bypass validation and cloud storage, and would rot the moment its source
+   * moved. The file is uploaded here and only the resulting Cloudinary URL is
+   * handed to the service. `undefined` (no file) leaves the image unchanged on
+   * an edit and empty on a create.
+   */
+  private async uploadedImageUrl(
+    file: Express.Multer.File | undefined,
+    ownerId: string,
+    kind: 'category' | 'product',
+  ): Promise<string | undefined> {
+    if (!file) return undefined;
+    const uploaded = await this.cloudinary.uploadFile(file, ownerId, 'catalog', kind);
+    return uploaded.imageUrl;
+  }
 
   // Categories
   @Get('categories')
@@ -44,18 +75,27 @@ export class AdminCatalogController {
 
   @Post('categories')
   @Permissions('admin.waste.create')
-  async createCategory(@CurrentUser() user, @Body() dto: CreateCategoryDto) {
-    return this.adminCatalog.createCategory(user.id, dto);
+  @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
+  async createCategory(
+    @CurrentUser() user,
+    @Body() dto: CreateCategoryDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const imageUrl = await this.uploadedImageUrl(file, user.id, 'category');
+    return this.adminCatalog.createCategory(user.id, dto, imageUrl);
   }
 
   @Put('categories/:categoryId')
   @Permissions('admin.waste.update')
+  @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
   async updateCategory(
     @CurrentUser() user,
     @Param('categoryId', ParseUUIDPipe) categoryId: string,
     @Body() dto: UpdateCategoryDto,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.adminCatalog.updateCategory(user.id, categoryId, dto);
+    const imageUrl = await this.uploadedImageUrl(file, user.id, 'category');
+    return this.adminCatalog.updateCategory(user.id, categoryId, dto, imageUrl);
   }
 
   @Delete('categories/:categoryId')
@@ -77,19 +117,28 @@ export class AdminCatalogController {
 
   @Post('products')
   @Permissions('admin.waste.create')
-  async createProduct(@CurrentUser() user, @Body() dto: CreateProductDto) {
-    const result = await this.adminCatalog.createProduct(user.id, dto);
+  @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
+  async createProduct(
+    @CurrentUser() user,
+    @Body() dto: CreateProductDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const imageUrl = await this.uploadedImageUrl(file, user.id, 'product');
+    const result = await this.adminCatalog.createProduct(user.id, dto, imageUrl);
     return { message: 'Product created successfully', result };
   }
 
   @Put('products/:productId')
   @Permissions('admin.waste.update')
+  @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
   async updateProduct(
     @CurrentUser() user,
     @Param('productId', ParseUUIDPipe) productId: string,
     @Body() dto: UpdateProductDto,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
-    const result = await this.adminCatalog.updateProduct(user.id, productId, dto);
+    const imageUrl = await this.uploadedImageUrl(file, user.id, 'product');
+    const result = await this.adminCatalog.updateProduct(user.id, productId, dto, imageUrl);
     return { message: 'Product updated successfully', result };
   }
 
@@ -116,14 +165,59 @@ export class AdminCatalogController {
     return this.adminCatalog.createOffer(user.id, dto);
   }
 
-  @Put('offers/:offerId')
+  // The general "edit the whole offer" route (PUT offers/:offerId) was removed
+  // on purpose. An offer is edited through the two FOCUSED routes below —
+  // `/amount` (with its dates) and `/validity` — which each re-validate exactly
+  // what they touch. The general route required re-sending the audience and the
+  // amount on every edit, where a slip silently rewrote them; deleting it closes
+  // that footgun and leaves one clear way to make each kind of change.
+
+  /**
+   * Change ONLY when the offer ends.
+   *
+   * Separate from the general update because it is the common edit and the one
+   * an operator reaches for under time pressure — extending an offer that is
+   * about to lapse. Sending it through the full update means composing a body
+   * that repeats the price and the audience, and a mistake there silently
+   * rewrites them.
+   *
+   * Null clears the date, making the offer open-ended.
+   */
+  @Patch('offers/:offerId/validity')
   @Permissions('admin.waste.update')
-  async updateOffer(
+  async updateOfferValidity(
     @CurrentUser() user,
     @Param('offerId', ParseUUIDPipe) offerId: string,
-    @Body() dto: UpdateOfferDto,
+    @Body() dto: UpdateOfferValidityDto,
   ) {
-    return this.adminCatalog.updateOffer(user.id, offerId, dto);
+    const result = await this.adminCatalog.updateOfferValidity(user.id, offerId, dto);
+    return { message: 'Offer validity updated successfully', result };
+  }
+
+  /**
+   * Change the AMOUNT the price moves by — and, in the same request, when the
+   * offer runs.
+   *
+   * They travel together because they are one decision in practice ("make it 2
+   * off, and run it to the end of the month"), and split across two calls the
+   * offer is briefly live at the new amount on the old dates — long enough for
+   * a real order to be priced by it. Both dates are optional: send only the
+   * amount and the window is left exactly as it was.
+   *
+   * Takes effect everywhere the offer is read — the offers list, the material
+   * listings, and any cart line added AFTER the change. Orders already placed
+   * keep the price they were quoted: the cart snapshots `unit_price` when the
+   * line is created, so a later edit cannot reprice work already committed.
+   */
+  @Patch('offers/:offerId/amount')
+  @Permissions('admin.waste.update')
+  async updateOfferAmount(
+    @CurrentUser() user,
+    @Param('offerId', ParseUUIDPipe) offerId: string,
+    @Body() dto: UpdateOfferAmountDto,
+  ) {
+    const result = await this.adminCatalog.updateOfferAmount(user.id, offerId, dto);
+    return { message: 'Offer amount updated successfully', result };
   }
 
   @Delete('offers/:offerId')
@@ -133,6 +227,24 @@ export class AdminCatalogController {
     @Param('offerId', ParseUUIDPipe) offerId: string,
   ) {
     return this.adminCatalog.deleteOffer(user.id, offerId);
+  }
+
+  /**
+   * The timeline of ONE material's offers, filterable by time.
+   *
+   * `?on=<date>` returns the offers that were live on that date (their validity
+   * window contains it); `?from=&to=` returns those whose window overlaps the
+   * range; with neither, the whole timeline comes back, newest window first.
+   * This is the "what was on offer for this material on such a day" view.
+   */
+  @Get('products/:productId/offers/timeline')
+  @Permissions('admin.waste.manage')
+  async offerTimeline(
+    @Param('productId', ParseUUIDPipe) productId: string,
+    @Query() query: OfferTimelineQueryDto,
+  ) {
+    const result = await this.adminCatalog.offerTimeline(productId, query);
+    return { message: 'Offer timeline fetched successfully', result };
   }
 
   // Measurement units (dynamic — no fixed enum)

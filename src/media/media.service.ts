@@ -4,10 +4,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, IsNull, Not } from 'typeorm';
 import { Media, MediaType, OwnerType, statusMedia } from './entities/media.entity';
 import {
+  AccountNotAwaitingChangesException,
   DuplicateImageTypeException,
   MediaNotFoundException,
   NotYourImageException,
   OnlyRejectedReuploadException,
+  ReuploadNotRequestedException,
 } from './exceptions/media.exceptions';
 import { Account } from '@src/user/entities/account.entity';
 import { CommonService } from '@src/common/common.service';
@@ -71,7 +73,28 @@ export class MediaService {
       throw new MediaNotFoundException();
     }
     if (media.status !== statusMedia.REJECTED) {
+      // An APPROVED document is settled. Letting it be replaced would let an
+      // applicant swap out the very file a reviewer accepted, after the fact,
+      // with nothing on the account to show the accepted one ever existed.
       throw new OnlyRejectedReuploadException();
+    }
+
+    // REJECTED IS NOT ENOUGH — it must have been ASKED FOR.
+    //
+    // Rejection is silent by design: a reviewer marks a document unacceptable
+    // while still working through the rest, and the applicant is told nothing.
+    // So an account can carry a rejected document its owner has never been
+    // told about and cannot see on any screen.
+    //
+    // Without this check, that document is quietly re-uploadable — the
+    // applicant replaces a file nobody asked for, the account bounces back to
+    // PENDING_APPROVAL mid-review, and the reviewer's half-finished pass is
+    // interrupted by a change they did not request and cannot explain.
+    //
+    // The request is what turns a private finding into something the applicant
+    // has been told to act on. Only then may they act.
+    if (!media.reuploadRequestedAt) {
+      throw new ReuploadNotRequestedException();
     }
 
     // Ownership: the caller's profile (of its role) must own this media.
@@ -80,6 +103,20 @@ export class MediaService {
       .findOne({ where: { account: { id: userId } } });
     if (!profile || profile.id !== media.ownerId) {
       throw new NotYourImageException();
+    }
+
+    // …and the ACCOUNT must be the one waiting on them.
+    //
+    // Checked separately from the document because they can disagree: an
+    // application that was rejected outright, or approved, may still carry a
+    // document with an outstanding request on it. Replacing a file then would
+    // reopen a decision that has already been taken, from the applicant's side,
+    // without the reviewer doing anything.
+    const account = await this.accountRepository.findOne({
+      where: { id: userId },
+    });
+    if (account?.accountStatus !== AccountStatus.NEED_CHANGES) {
+      throw new AccountNotAwaitingChangesException(account?.accountStatus);
     }
 
     const oldPublicId = media.publicId;

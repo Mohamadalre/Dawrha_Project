@@ -120,6 +120,23 @@ export class OdooDriverDecisionDto {
   @IsOptional()
   @IsBoolean()
   cancel_reupload?: boolean;
+
+  /**
+   * Documents the Odoo reviewer marked ACCEPTABLE.
+   *
+   * Rejecting one always travelled; accepting one did not — so the mirror kept
+   * the document REJECTED while Odoo showed it accepted, and the driver could
+   * still be asked to replace a file that had already been taken.
+   *
+   * Validated exactly like `rejected_media_ids`: these are backend media ids,
+   * and a loose string rule here would let a malformed id through to a query
+   * that silently matches nothing.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsUUID('all', { each: true })
+  approved_media_ids?: string[];
 }
 
 export class OdooShiftChangeDecisionDto {

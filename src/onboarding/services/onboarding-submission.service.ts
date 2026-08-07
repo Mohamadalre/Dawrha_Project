@@ -331,6 +331,21 @@ export class OnboardingSubmissionService {
       if (dto[dtoField] !== undefined) profile[column] = dto[dtoField];
     }
 
+    // The national ID is validated EXPLICITLY on edit, exactly as on add
+    // (collector onboarding checks it before insert). The unique index is the
+    // final guard, but reaching it surfaces a generic constraint error; a buyer
+    // changing their ID to one another collector already holds is refused by
+    // name here, so the edit path and the add path enforce the same rule the
+    // same way rather than one checking and the other hoping.
+    if (role === Role.COLLECTOR && dto.NationalID !== undefined) {
+      const clash = await this.resolver
+        .getRepo(role)
+        .findOne({ where: { NationalID: dto.NationalID } });
+      if (clash && clash.id !== profile.id) {
+        throw new ConflictException('This National ID is already used by another account');
+      }
+    }
+
     // Relations need a lookup + validation.
     if (role === Role.INSTITUTIONS && dto.institutionTypeId !== undefined) {
       const type = await this.institutionTypeRepo.findOne({

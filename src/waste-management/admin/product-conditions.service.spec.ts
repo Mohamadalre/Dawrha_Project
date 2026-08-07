@@ -63,6 +63,8 @@ describe('ProductConditionsService — addressing a grade', () => {
       productRepo,
       pricingRepo,
       inventoryRepo,
+      // Deleting a grade also has to know whether a live offer names it.
+      { count: jest.fn().mockResolvedValue(0) } as any,
       { enqueueSyncCondition: jest.fn() } as any,
       { record: jest.fn(), log: jest.fn() } as any,
       { invalidate: jest.fn() } as any,

@@ -12,4 +12,13 @@ export const NOTIFICATION_BACKOFF_DELAY_MS = 5000;
  * The row still stays FAILED so the failure remains visible for support.
  */
 export const PERMANENT_FAILURE_NO_DEVICE = 'No device tokens registered';
-export const PERMANENT_FAILURE_REASONS: string[] = [PERMANENT_FAILURE_NO_DEVICE];
+/**
+ * Every device token FCM knew about was rejected as permanently dead (app
+ * uninstalled / token rotated) and has been pruned. Retrying cannot help — the
+ * user has no live token — so this is permanent, exactly like NO_DEVICE.
+ */
+export const PERMANENT_FAILURE_INVALID_TOKENS = 'All device tokens invalid';
+export const PERMANENT_FAILURE_REASONS: string[] = [
+  PERMANENT_FAILURE_NO_DEVICE,
+  PERMANENT_FAILURE_INVALID_TOKENS,
+];

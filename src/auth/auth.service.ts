@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, Inject, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Inject, HttpException, HttpStatus, NotFoundException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -51,7 +51,7 @@ import { NeedChangeHandler } from './handlers/needChange.handler';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 import { VerifyResetOtpDto } from './dto/verifyReset-otp.dto';
 import { Language } from '@src/common/enums/language.enum';
-import { AllowedAccountType } from './utils/constants/AllowedAccountType';
+import { AllowedAccountType, AppType } from './utils/constants/AllowedAccountType';
 
 
 
@@ -255,46 +255,43 @@ export class AuthService {
    * @param dto contains email
    * @returns success message after sending the reset URL
    */
-  async forgotPassword({ email }: ForgotPasswordDto) {
-    // Uniform behaviour whether or not the account exists — never reveal which
-    // emails are registered (anti-enumeration). Same response, same timing.
+  async forgotPassword({ email }: ForgotPasswordDto, app: AppType) {
     const cdKey = `forgotPassword:cooldown:${email}`;
     const ttl = await this.redis.ttl(cdKey);
     if (ttl > 0) {
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          message: 'Please wait before requesting again',
+          message: 'Please wait before requesting a new code',
           remainingSeconds: ttl,
         },
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
-    // Set the cooldown up-front (existent or not) so timing is indistinguishable.
-    await this.redis.set(cdKey, 'locked', 'EX', OTP_COOLDOWN_SECONDS);
-
     const account = await this.accountRepository.findOne({ where: { email } });
-    if (account && this.isGoogleOnly(account)) {
-      // Nothing to reset — the account has no password. The RESPONSE stays
-      // identical so the anti-enumeration guarantee above is not undone by this
-      // branch; only the pointless email is skipped.
-      winstonLogger.warn(`Forgot-password requested for a Google-only account: ${email}`, {
-        context: 'ForgotPassword',
-        channel: 'app',
-        metadata: { task: 'auth' },
-      });
-    } else if (account) {
-      await this.mailService.generateAndSendOtpForgot(account.email);
-    } else {
-      winstonLogger.warn(`Forgot-password requested for non-existent email: ${email}`, {
-        context: 'ForgotPassword',
-        channel: 'app',
-        metadata: { task: 'auth' },
-      });
+
+    // No account for THIS app — say so plainly. Reset is scoped to the app the
+    // request came from (a factory email cannot reset from the user app), so an
+    // account that belongs to another app is "not registered" as far as this
+    // app is concerned.
+    if (!account || !AllowedAccountType[app]?.includes(account.role)) {
+      throw new NotFoundException('No account is registered with this email');
     }
 
-    return { message: 'If this email exists, an OTP has been sent.' };
+    // A Google account has no password to reset — point the user to Google
+    // rather than mailing a code that leads nowhere.
+    if (this.isGoogleOnly(account)) {
+      throw new ConflictException(
+        'This email is registered with Google. Please sign in with Google instead.',
+      );
+    }
+
+    // From here it is a real, resettable account: rate-limit, send, and confirm.
+    await this.redis.set(cdKey, 'locked', 'EX', OTP_COOLDOWN_SECONDS);
+    await this.mailService.generateAndSendOtpForgot(account.email);
+
+    return { message: 'A password reset code has been sent to your email' };
   }
 
   /**
@@ -302,17 +299,28 @@ export class AuthService {
    * the registration resend. Keeps the anti-enumeration behaviour: the response
    * and timing are identical whether or not the email is registered.
    */
-  async resendForgotPasswordOtp({ email }: ForgotPasswordDto) {
+  async resendForgotPasswordOtp({ email }: ForgotPasswordDto, app: AppType) {
     const cooldownKey = `forgotPassword:cooldown:${email}`;
     const ttl = await this.redis.ttl(cooldownKey);
     if (ttl > 0) {
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          message: 'Please wait before requesting again',
+          message: 'Please wait before requesting a new code',
           remainingSeconds: ttl,
         },
         HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const account = await this.accountRepository.findOne({ where: { email } });
+    // Same rules as forgotPassword — but now stated plainly instead of hidden.
+    if (!account || !AllowedAccountType[app]?.includes(account.role)) {
+      throw new NotFoundException('No account is registered with this email');
+    }
+    if (this.isGoogleOnly(account)) {
+      throw new ConflictException(
+        'This email is registered with Google. Please sign in with Google instead.',
       );
     }
 
@@ -331,15 +339,12 @@ export class AuthService {
     }
 
     await this.redis.set(cooldownKey, 'locked', 'EX', OTP_COOLDOWN_SECONDS);
+    await this.mailService.generateAndSendOtpForgot(account.email);
 
-    const account = await this.accountRepository.findOne({ where: { email } });
-    // Same rule as forgotPassword: a Google-only account has no password to
-    // reset, so no code is sent — and the response is unchanged either way.
-    if (account && !this.isGoogleOnly(account)) {
-      await this.mailService.generateAndSendOtpForgot(account.email);
-    }
-
-    return { cooldownSeconds: OTP_COOLDOWN_SECONDS };
+    return {
+      message: 'A new password reset code has been sent to your email',
+      cooldownSeconds: OTP_COOLDOWN_SECONDS,
+    };
   }
 
   async verifyResetOtp({ email, otpCode }: VerifyResetOtpDto) {
@@ -627,7 +632,7 @@ export class AuthService {
   }
 
 
-  async registerWithGoogle({ TokenId, deviceId, deviceType, fcmToken }: LoginGoogleDto, role: Role) {
+  async registerWithGoogle({ TokenId, phone, deviceId, deviceType, fcmToken }: LoginGoogleDto, role: Role) {
     const { name, email, googleId, picture } = await verifyGoogleToken(TokenId);
 
 
@@ -639,11 +644,21 @@ export class AuthService {
       throw new EmailAlreadyExistsException('The email already exists. Please login instead.');
     }
 
+    // Google's ID token carries no phone, so a phone that should be kept arrives
+    // on the request. Refuse a duplicate BEFORE creating the account — the phone
+    // column is unique, and letting the insert fail would surface a raw
+    // constraint error instead of a phone-taken message the client can show.
+    if (phone) {
+      const phoneOwner = await this.accountRepository.findOne({ where: { phone } });
+      if (phoneOwner) throw new PhoneAlreadyExistsException();
+    }
+
 
     const accountCreated = this.accountRepository.create({
       name: name,
       email: email,
       role,
+      phone: phone ?? undefined,
       isEmailVerified: true,
       provider: AuthProvider.GOOGLE,
       googleId: googleId,

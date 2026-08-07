@@ -9,7 +9,6 @@ import { ProductPricing } from '../entities/product-pricing.entity';
 import { Offer } from '../entities/offer.entity';
 import { WasteCommonModule } from '../common/waste-common.module';
 import { CatalogController } from './catalog.controller';
-import { PublicCatalogController } from './public-catalog.controller';
 import {
   FactoryAppGuestController,
   UserAppGuestController,
@@ -44,7 +43,10 @@ import { GuestAppService } from './guest-app.service';
   ],
   controllers: [
     CatalogController,
-    PublicCatalogController,
+    // The app-agnostic `waste/public/*` catalogue was removed: a visitor now
+    // browses through the per-app visitor catalogues below, whose PATH fixes
+    // the audience (and therefore the price sheet). A priceless, audience-less
+    // public listing no longer had a caller.
     // Per-app visitor catalogues. Separate controllers rather than one route
     // with an `app` parameter: the audience decides which price sheet is
     // revealed, so it must be fixed by the path and unreachable from the query.

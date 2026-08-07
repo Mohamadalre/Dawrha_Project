@@ -136,6 +136,10 @@ function routesInCollection(file = COLLECTION) {
 const NOT_A_CITIZEN_ROUTE = [
   [/^api\/v1\/admin\//, 'admin'],
   [/^api\/v1\/account-management\//, 'admin.accounts.* — account moderation'],
+  // The admin's read-only window onto ONE buyer's favourites. Sits under the
+  // buyer path because it reads the same data, but it is refused to buyers —
+  // a citizen has no business reading another citizen's shortlist.
+  [/^api\/v1\/favourites\/account\//, 'admin read-only view of a buyer’s favourites'],
   [/^api\/v1\/auth\/login\/admin$/, 'admin'],
   [/^api\/v1\/odoo\/webhooks\//, 'server-to-server'],
   [/^api\/v1\/onboarding\/(collector|factory|institution|external-partner)\//, 'other roles onboarding'],

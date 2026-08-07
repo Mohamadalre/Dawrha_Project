@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
   ValidateNested,
@@ -26,6 +27,31 @@ const normalizeConditionCode = ({ value }: { value: unknown }) =>
  * tier has no defined meaning.
  */
 export class ConditionPriceDto {
+  /**
+   * The grade, BY ID.
+   *
+   * A code is unique only inside its own material, so "GOOD" is a different
+   * grade for paper than for copper and the string alone names neither. An id
+   * names one row for good — which matters most here, because this is the
+   * table the invoice is read from: a price filed against the wrong grade is
+   * money charged for something the buyer did not order.
+   *
+   * Optional because an UNGRADED material is priced once for the tier, and
+   * that single line names no grade at all.
+   */
+  @IsOptional()
+  @IsUUID()
+  condition_id?: string;
+
+  /**
+   * The same grade's CODE.
+   *
+   * Still accepted for callers written before the link existed, and resolved
+   * to the row so the price is never left unlinked. Sending BOTH is allowed
+   * only when they agree — a mismatch is refused rather than settled by
+   * precedence, since either could have been the intent and quietly picking
+   * one is how a grade gets priced as another.
+   */
   @IsOptional()
   @Transform(normalizeConditionCode)
   @IsString()

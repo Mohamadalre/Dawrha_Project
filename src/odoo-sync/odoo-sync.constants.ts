@@ -192,6 +192,11 @@ export interface DriverDecisionPayload {
    * keep their status — giving up waiting is not accepting what was sent.
    */
   cancelReupload?: boolean;
+  /**
+   * Documents the Odoo reviewer ACCEPTED. Marked APPROVED here, and any
+   * outstanding request for them closed — there is nothing left to send.
+   */
+  approvedMediaIds?: string[];
 }
 export interface ShiftChangeDecisionPayload {
   /** Backend request id echoed back by Odoo. */

@@ -1,3 +1,4 @@
+import { normalizeSyrianPhoneNumber } from '@src/common/utils/phone-normalization.provider';
 import { Transform } from 'class-transformer';
 import { IsNotEmpty, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 
@@ -13,12 +14,22 @@ export class UpdateProfileDto {
   name?: string;
 
   @IsOptional()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @Matches(/^\+?\d{7,15}$/, { message: 'Invalid phone number format' })
-  phone?: string;
+  @IsString()
+  @Transform(({ value }) => normalizeSyrianPhoneNumber(value)) 
+  @Matches(/^9639[3-9][0-9]{7}$/, {
+    message: 'The phone number must be a Syrian number',
+  })
+  phone: string;
+
 
   @IsOptional()
   @IsString()
   @MaxLength(1000)
   description?: string;
+
+  // The image is DELIBERATELY not editable here. It is a binary asset with a
+  // cloud copy to keep in step, so it has its own routes — POST/PATCH/DELETE
+  // `user/profile/image` — which upload, replace and clean up the Cloudinary
+  // file. Letting this PATCH set a raw `profileImage` URL let a stale or
+  // arbitrary link bypass that upload+cleanup path and orphan the old asset.
 }

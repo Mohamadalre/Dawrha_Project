@@ -10,6 +10,7 @@ import { MaterialCondition } from '../entities/material-condition.entity';
 import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
+import { Offer } from '../entities/offer.entity';
 import { OdooSyncStatus } from '../enums/odoo-sync-status.enum';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { AuditService } from '../common/providers/audit.service';
@@ -42,6 +43,10 @@ export class ProductConditionsService {
     // Deleting a grade has to know whether any of it is still on a shelf.
     @InjectRepository(WarehouseInventory)
     private readonly inventoryRepo: Repository<WarehouseInventory>,
+    // …and whether a live offer names it. The foreign key refuses that anyway;
+    // this is here so the admin gets a sentence rather than a constraint error.
+    @InjectRepository(Offer)
+    private readonly offerRepo: Repository<Offer>,
     private readonly odooSync: OdooSyncService,
     private readonly audit: AuditService,
     private readonly cache: CatalogCacheService,
@@ -256,6 +261,26 @@ export class ProductConditionsService {
       );
     }
 
+    // A grade that is being OFFERED cannot be deleted either.
+    //
+    // This was missing: stock and the price list were checked, offers were not,
+    // so deleting a grade left every offer on it pointing at a code that no
+    // longer existed — still listed, still inside its dates, and silently
+    // unable to match anything ever again.
+    //
+    // The foreign key now refuses this at the database, which is the guarantee
+    // that holds for code paths nobody has written yet. This check exists so
+    // the admin is told WHY in a sentence they can act on, instead of a raw
+    // constraint violation.
+    const offered = await this.offerRepo.count({
+      where: { conditionId: condition.id },
+    });
+    if (offered > 0) {
+      throw new ConflictException(
+        'This condition is used by a live offer — end or delete the offer first',
+      );
+    }
+
     await this.conditionRepo.delete(conditionId);
     if (condition.odooConditionId) {
       await this.odooSync.enqueueDeleteCondition({
@@ -397,7 +422,11 @@ export class ProductConditionsService {
       entityId,
       newValues: values,
     });
-    await this.cache.invalidate('products');
+    // 'offers' as well as 'products': offers are made PER CONDITION, and the
+    // offers listing shows each one's grade and grade-price — so adding,
+    // renaming or removing a grade changes what that cached page should say,
+    // and dropping only 'products' would leave the offers page stale.
+    await this.cache.invalidate('products', 'offers');
   }
 
   private map(c: MaterialCondition) {

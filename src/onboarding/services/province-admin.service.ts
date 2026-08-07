@@ -1,14 +1,17 @@
 import {
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Not, Repository } from 'typeorm';
+import Redis from 'ioredis';
 import { Province } from '@src/user/entities/location/province.entity';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { ProvinceUsageService } from './province-usage.service';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
+import { PROVINCES_CACHE_VERSION_KEY } from '@src/common/constants/cache.constants';
 
 /** Postgres foreign-key violation — a province still referenced by a profile. */
 const PG_FK_VIOLATION = '23503';
@@ -33,10 +36,27 @@ export class ProvinceAdminService {
     private readonly provinceRepo: Repository<Province>,
     private readonly odooSync: OdooSyncService,
     private readonly usage: ProvinceUsageService,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
   private toResponse(p: Province) {
     return { id: p.id, name_en: p.name_en, name_ar: p.name_ar };
+  }
+
+  /**
+   * Drop the globally-cached province list read by the user app.
+   *
+   * Bumps the shared version counter so every previously cached page becomes
+   * unreachable at once — a rename or a new governorate reaches the app on its
+   * next request rather than after the 24h TTL. Best-effort: a Redis hiccup
+   * must never fail an admin write, and the TTL is the backstop.
+   */
+  private async invalidateProvinceCache(): Promise<void> {
+    try {
+      await this.redis.incr(PROVINCES_CACHE_VERSION_KEY);
+    } catch {
+      // best-effort — the TTL still bounds staleness
+    }
   }
 
   /**
@@ -106,6 +126,7 @@ export class ProvinceAdminService {
   async create(dto: { name_en: string; name_ar: string }) {
     await this.assertNamesFree(dto.name_en, dto.name_ar);
     const saved = await this.provinceRepo.save(this.provinceRepo.create(dto));
+    await this.invalidateProvinceCache();
     await this.pushToOdoo(saved.id);
     return { province: this.toResponse(saved) };
   }
@@ -116,6 +137,7 @@ export class ProvinceAdminService {
     if (dto.name_en !== undefined) province.name_en = dto.name_en;
     if (dto.name_ar !== undefined) province.name_ar = dto.name_ar;
     const saved = await this.provinceRepo.save(province);
+    await this.invalidateProvinceCache();
     await this.pushToOdoo(saved.id);
     return { province: this.toResponse(saved) };
   }
@@ -154,6 +176,8 @@ export class ProvinceAdminService {
       }
       throw err;
     }
+
+    await this.invalidateProvinceCache();
 
     // Odoo ARCHIVES its copy rather than deleting it: warehouses created while
     // this governorate existed still point at it, and that history must survive.

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { isUUID } from 'class-validator';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Repository } from 'typeorm';
+import { Brackets, In, Repository, SelectQueryBuilder } from 'typeorm';
 import { Role } from '@src/user/enums/role.enum';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { WasteCategory } from '../entities/waste-category.entity';
@@ -8,12 +9,19 @@ import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
 import { Offer } from '../entities/offer.entity';
 import { PricingTier, tierForRole } from '../enums/pricing-tier.enum';
+import {
+  OfferAudience,
+  audienceForRole,
+  offerPercentage,
+  priceAfterOffer,
+} from '../enums/offer-audience.enum';
 import { AssignedCategoryProvider } from '@src/waste-management/common/providers/assigned-category.provider';
 import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
 import { UnitsService } from '@src/waste-management/common/providers/units.service';
 import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
 import { BuyerProfileService } from '@src/waste-management/common/providers/buyer-profile.service';
 import { WarehouseState } from '@src/warehouse/enums/warehouse-state.enum';
+import { EffectivePriceService } from '@src/waste-management/common/providers/effective-price.service';
 import {
   CategoryNotAccessibleException,
   CategoryNotFoundException,
@@ -104,6 +112,7 @@ export class CatalogService {
     private readonly units: UnitsService,
     private readonly conditionsService: ConditionsService,
     private readonly buyerProfiles: BuyerProfileService,
+    private readonly effectivePrice: EffectivePriceService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -111,17 +120,133 @@ export class CatalogService {
   // A global picker would offer a buyer grades the material in front of them
   // does not have, and an ungraded material would appear to have some.
   // ---------------------------------------------------------------------------
-  async getConditions(productId: string) {
+  /**
+   * The grades of ONE material, each with how much is on hand and what it costs
+   * — the picker a factory or free facility uses before ordering.
+   *
+   * For a graded material it returns, per condition:
+   *   - `available`: the stock a buyer in THIS governorate could actually be
+   *     filled from (allocation never reaches out of the buyer's governorate,
+   *     so a nationwide figure would overpromise);
+   *   - `base_price` / `price`: the caller's OWN tier price, with any live offer
+   *     applied to `price` (offer details alongside).
+   *
+   * A material with NO grades is not an error — it just is not sold by grade, so
+   * it says so plainly rather than returning an empty list the client has to
+   * interpret. Prices and stock are only meaningful for the graded buyer tiers
+   * (factory / free facility); other roles get the grade metadata alone.
+   */
+  async getConditions(caller: Caller, productId: string) {
+    const product = await this.productRepo.findOne({
+      where: { id: productId, isActive: true, category: { isActive: true } },
+      relations: ['category'],
+    });
+    if (!product) throw new ProductNotFoundException();
+
+    // A category-restricted buyer must not read a material outside their scope.
+    const allowed = await this.allowedCategoryIds(caller);
+    if (allowed && !allowed.includes(product.categoryId)) {
+      throw new ProductNotFoundException();
+    }
+
     const conditions = await this.conditionsService.activeForProduct(productId);
-    return {
-      conditions: conditions.map((c) => ({
-        id: c.id,
-        code: c.code,
-        name_en: c.nameEn,
-        name_ar: c.nameAr,
-        sort_order: c.sortOrder,
-      })),
-    };
+    if (conditions.length === 0) {
+      return {
+        product_id: productId,
+        has_conditions: false,
+        message: 'This material has no conditions',
+        conditions: [],
+      };
+    }
+
+    const tier = tierForRole(caller.role);
+    const graded =
+      tier === PricingTier.FACTORY || tier === PricingTier.FREE_FACILITY;
+
+    // Per-condition available stock in the buyer's OWN governorate. Empty for a
+    // flat-tier caller — stock-by-grade is a graded-buyer concern.
+    const stock = graded
+      ? await this.conditionAvailabilityInGovernorate(product, caller)
+      : new Map<string, number>();
+
+    const rows = await Promise.all(
+      conditions.map(async (c) => {
+        const base: Record<string, unknown> = {
+          id: c.id,
+          code: c.code,
+          name_en: c.nameEn,
+          name_ar: c.nameAr,
+          sort_order: c.sortOrder,
+        };
+        if (!graded) return base;
+
+        // The caller's own price for this grade, offer applied — one helper,
+        // shared with the basket and checkout, so the three never disagree.
+        const eff = await this.effectivePrice.effectivePrice(
+          productId,
+          caller.role,
+          c.code,
+        );
+        return {
+          ...base,
+          available: stock.get(c.code) ?? 0,
+          base_price: eff?.basePrice ?? null,
+          price: eff?.price ?? null,
+          has_offer: !!eff?.offer,
+          discount_percentage:
+            eff?.offer && eff.basePrice
+              ? offerPercentage(eff.basePrice, Number(eff.offer.amount))
+              : null,
+          currency: 'JOD',
+        };
+      }),
+    );
+
+    return { product_id: productId, has_conditions: true, conditions: rows };
+  }
+
+  /**
+   * Total available stock per condition for this material, counting ONLY the
+   * warehouses a buyer in the caller's governorate could be allocated from —
+   * active, in their governorate, and not closing. Mirrors the scope the
+   * availability route and the allocator use.
+   */
+  private async conditionAvailabilityInGovernorate(
+    product: Product,
+    caller: Caller,
+  ): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (!product.odooProductId) return map; // never synced → no stock lines
+
+    const provinceId = await this.buyerProfiles.provinceForBuyer(
+      caller.id,
+      caller.role,
+    );
+
+    const qb = this.inventoryRepo
+      .createQueryBuilder('inv')
+      .innerJoin('inv.warehouse', 'w')
+      .where('inv.odooProductId = :odooProductId', {
+        odooProductId: product.odooProductId,
+      })
+      .andWhere('w.state = :whActive', { whActive: WarehouseState.ACTIVE });
+    if (provinceId) {
+      qb.andWhere('w.provinceId = :provinceId', { provinceId }).andWhere(
+        'w.state = :active',
+        { active: WarehouseState.ACTIVE },
+      );
+    }
+
+    const rows = await qb.getMany();
+    for (const r of rows) {
+      const available = Math.max(
+        Number(r.quantity) - Number(r.reservedQuantity),
+        0,
+      );
+      const code = r.conditionCode ?? '';
+      map.set(code, (map.get(code) ?? 0) + available);
+    }
+    return map;
   }
 
   // ---------------------------------------------------------------------------
@@ -447,6 +572,37 @@ export class CatalogService {
     };
   }
 
+  /**
+   * EVERY material the caller can buy, across all categories — one route with a
+   * name search AND a price band, instead of forcing the client to pick between
+   * "search" and "by-price".
+   *
+   * The shared `queryProducts` does the work, so this inherits every rule the
+   * catalogue already enforces: only materials with a LIVE price for the
+   * caller's TIER (an unpriced or inactive material never appears), inside a
+   * live category, scoped to the roles that are category-restricted. Each item
+   * carries the caller's OWN price and — for factories / free facilities — its
+   * per-condition prices, plus the offers targeted at their role. `search` is a
+   * substring match on the name (a single letter returns everything containing
+   * it); `price_min` / `price_max` bound the caller's own price. Cached like the
+   * category listing, and dropped by the same price/offer/product invalidations.
+   */
+  async getAllMaterials(caller: Caller, query: ProductQueryDto) {
+    const cacheParts = `${this.scopeFor(caller)}:all:${query.page}:${query.limit}:${query.search ?? ''}:${query.price_min ?? ''}:${query.price_max ?? ''}:${query.sort}:${query.order}`;
+    const cached = await this.cache.get<ProductListResult>('products', cacheParts);
+    if (cached) return cached;
+
+    const { items, total } = await this.queryProducts(caller, query, {
+      search: query.search,
+    });
+    const result = {
+      products: items,
+      pagination: buildPagination(total, query.page, query.limit),
+    };
+    await this.cache.set('products', cacheParts, result);
+    return result;
+  }
+
   // ---------------------------------------------------------------------------
   // Search products & categories
   // ---------------------------------------------------------------------------
@@ -496,14 +652,17 @@ export class CatalogService {
     if (query.sort === 'created_at') {
       qb.orderBy('o.createdAt', 'DESC');
     } else {
-      qb.orderBy('o.discountPercentage', 'DESC');
+      this.orderByRealDiscount(qb, caller?.role ?? null);
     }
 
     qb.skip((query.page - 1) * query.limit).take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
+    const bases = await this.basePricesForOffers(rows, this.buyingTier(caller));
     const result = {
-      offers: rows.map((o) => this.mapOffer(o, !caller)),
+      offers: rows.map((o) =>
+        this.mapOffer(o, !caller, bases.get(`${o.productId}:${o.conditionCode ?? ''}`)),
+      ),
       pagination: buildPagination(total, query.page, query.limit),
     };
     await this.cache.set('offers', cacheParts, result);
@@ -516,9 +675,19 @@ export class CatalogService {
       return this.emptyList('offers', query.page, query.limit);
     }
 
+    // Search by material NAME or by an id — the material's id or the offer's.
+    // A buyer who copies an id from one screen into the search box expects a
+    // hit, not silence; a term that is a valid UUID is matched against the ids
+    // AS WELL AS the name, and a plain word is matched by name alone.
+    const term = query.query.trim();
+    const byId = isUUID(term);
+
     const qb = this.baseOfferQuery(allowed, true, caller?.role ?? null)
-      .andWhere('p.name ILIKE :q', { q: `%${query.query}%` })
-      .setParameter('qPrefix', `${query.query}%`);
+      .andWhere(
+        byId ? '(p.name ILIKE :q OR p.id = :term OR o.id = :term)' : 'p.name ILIKE :q',
+        byId ? { q: `%${term}%`, term } : { q: `%${term}%` },
+      )
+      .setParameter('qPrefix', `${term}%`);
 
     if (query.category_id) {
       qb.andWhere('p.categoryId = :cid', { cid: query.category_id });
@@ -531,8 +700,11 @@ export class CatalogService {
       .take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
+    const bases = await this.basePricesForOffers(rows, this.buyingTier(caller));
     return {
-      offers: rows.map((o) => this.mapOffer(o, !caller)),
+      offers: rows.map((o) =>
+        this.mapOffer(o, !caller, bases.get(`${o.productId}:${o.conditionCode ?? ''}`)),
+      ),
       pagination: buildPagination(total, query.page, query.limit),
     };
   }
@@ -642,7 +814,7 @@ export class CatalogService {
       .createQueryBuilder('inv')
       .innerJoinAndSelect('inv.warehouse', 'w')
       .where('inv.odooProductId = :odooProductId', { odooProductId: product.odooProductId })
-      .andWhere('w.isActive = true');
+      .andWhere('w.state = :whActive', { whActive: WarehouseState.ACTIVE });
 
     if (provinceId) {
       qb.andWhere('w.provinceId = :provinceId', { provinceId })
@@ -874,24 +1046,80 @@ export class CatalogService {
       ),
     );
 
-    // Price sort applied on the materialised page using the caller's own tier.
+    // Price sort applied on the materialised page. Each item now carries a
+    // single `price` — the caller's own tier — so the sort reads that directly
+    // instead of picking a column out of a four-tier matrix.
     if (query.sort === 'price') {
-      const tier = tierForRole(caller.role);
-      const key = tier.toLowerCase() as
-        | 'individual'
-        | 'company'
-        | 'factory'
-        | 'free_facility';
       items = items.sort((a, b) => {
-        const pricingA = a.pricing as unknown as Record<string, number>;
-        const pricingB = b.pricing as unknown as Record<string, number>;
-        const pa = pricingA[key] || 0;
-        const pb = pricingB[key] || 0;
+        const pa = (a as { price?: number }).price ?? 0;
+        const pb = (b as { price?: number }).price ?? 0;
         return query.order === 'desc' ? pb - pa : pa - pb;
       });
     }
 
     return { items, total };
+  }
+
+  /**
+   * Rank offers by the saving the buyer ACTUALLY receives.
+   *
+   * The old ordering was `o.discountPercentage DESC` — a column an
+   * administrator types by hand, free to disagree with the two prices either
+   * side of it. Ranking a "biggest discounts" list by it ranks by somebody's
+   * arithmetic instead of by the money saved.
+   *
+   * The comparison is per material against ITS OWN price, which is the point:
+   * 100 → 50 is half off and must outrank 200 → 190, even though 190 is the
+   * larger number and 10 the larger absolute cut. Comparing offers to each
+   * other would invert exactly that.
+   *
+   * Done in SQL rather than by sorting the page in memory, because the page is
+   * cut by LIMIT/OFFSET before it is read: sorting afterwards would order 20
+   * arbitrary rows and call it the top 20.
+   *
+   * The base price is matched on the offer's OWN condition — an offer on
+   * "excellent" is a discount off the excellent price, not off the cheapest
+   * grade — and `IS NOT DISTINCT FROM` is what makes that hold when both sides
+   * are NULL, which `=` does not.
+   */
+  private orderByRealDiscount(
+    qb: SelectQueryBuilder<Offer>,
+    _callerRole: Role | null,
+  ): void {
+    // Rank by the stored `discountPercentage`, which now IS the real saving.
+    //
+    // This used to compute the saving on the fly by joining the price sheet and
+    // taking (price - offer_price) / price. Two things made that both broken and
+    // unnecessary. Broken: the offer no longer holds an `offer_price` column at
+    // all — it holds an amount and an audience — so the expression referenced a
+    // field that does not exist, and the whole "biggest offers" list threw the
+    // moment it was sorted. Unnecessary: `discountPercentage` is no longer a
+    // number an administrator types (the redesign removed that field); it is
+    // DERIVED against the dearest tier the offer faces and kept in step on every
+    // create, edit and price change. So the column is exactly the figure the
+    // join was recomputing, and ranking by it needs no join — the same way
+    // `searchOffers` already orders.
+    qb.orderBy('o.discountPercentage', 'DESC')
+      // Ties broken by recency so the order is stable across pages.
+      .addOrderBy('o.createdAt', 'DESC');
+  }
+
+  /**
+   * Constrain an offer query to the audience the caller belongs to.
+   *
+   * A buyer must see only buyer offers and a seller only seller offers — the
+   * price move runs the opposite way for each, so applying the wrong side's
+   * offer does not shrink a price, it inverts it. The role filter alone cannot
+   * guarantee this once `targetRoles` may be null, so the audience is pinned
+   * explicitly. Guests belong to neither side; they are left to the role
+   * clause, which already limits them to untargeted offers.
+   */
+  private applyAudienceFilter(
+    qb: { andWhere: (clause: string, params?: Record<string, unknown>) => unknown },
+    callerRole: Role | null,
+  ): void {
+    const audience = callerRole ? audienceForRole(callerRole) : null;
+    if (audience) qb.andWhere('o.audience = :audience', { audience });
   }
 
   private baseOfferQuery(allowed: string[] | null, activeOnly: boolean, callerRole: Role | null) {
@@ -907,6 +1135,9 @@ export class CatalogService {
     } else {
       qb.andWhere('o.targetRoles IS NULL');
     }
+    // …and by audience, so a seller offer never surfaces on a buyer's list even
+    // if its roles were cleared to null. See `activeOffersForProducts`.
+    this.applyAudienceFilter(qb, callerRole);
 
     if (activeOnly) {
       qb.andWhere('o.isActive = true')
@@ -958,14 +1189,27 @@ export class CatalogService {
     return map;
   }
 
+  /**
+   * EVERY live offer per material, not the best one.
+   *
+   * This used to keep the first row per product and drop the rest, which was
+   * wrong the moment a graded material could carry more than one offer: a
+   * factory may hold a separate offer on "excellent", "good" and "poor" of the
+   * same material, and collapsing them to one meant two of the three prices
+   * simply never reached the buyer — silently, and differently depending on
+   * which row the sort happened to put first.
+   *
+   * Still ordered best-discount-first, so `[0]` remains the headline offer for
+   * callers that want a single number.
+   */
   private async activeOffersForProducts(
     productIds: string[],
     callerRole: Role | null,
-  ): Promise<Map<string, Offer>> {
-    const map = new Map<string, Offer>();
+  ): Promise<Map<string, Offer[]>> {
+    const map = new Map<string, Offer[]>();
     if (productIds.length === 0) return map;
 
-    const rows = await this.offerRepo
+    const qb = this.offerRepo
       .createQueryBuilder('o')
       .where('o.productId IN (:...ids)', { ids: productIds })
       .andWhere(
@@ -977,11 +1221,22 @@ export class CatalogService {
       .andWhere('o.isActive = true')
       .andWhere('o.validFrom <= NOW()')
       .andWhere('(o.validUntil IS NULL OR o.validUntil > NOW())')
-      .orderBy('o.discountPercentage', 'DESC')
-      .getMany();
+      .orderBy('o.discountPercentage', 'DESC');
+
+    // Filter by AUDIENCE, not only by role. The role clause above is not enough
+    // on its own: an offer can end up with `targetRoles = NULL` (an edit that
+    // clears them), and null reads as "everyone" — so a SELLERS offer would
+    // match a buyer here and then be applied as an INCREASE to their price,
+    // because the reader multiplies by the offer's own audience direction. The
+    // same guard is on every other offer read path; this one had been missed.
+    this.applyAudienceFilter(qb, callerRole);
+
+    const rows = await qb.getMany();
 
     for (const o of rows) {
-      if (!map.has(o.productId)) map.set(o.productId, o); // best offer per product
+      const list = map.get(o.productId) ?? [];
+      list.push(o);
+      map.set(o.productId, list);
     }
     return map;
   }
@@ -1009,39 +1264,138 @@ export class CatalogService {
     );
   }
 
-  private mapPricing(prices: ProductPricing[]) {
-    const flat = (tier: PricingTier): number => {
-      const current = this.liveRows(prices, tier)
-        .filter((p) => !p.conditionCode)
-        .sort((a, b) => new Date(b.effectiveFrom).getTime() - new Date(a.effectiveFrom).getTime())[0];
-      return current ? Number(current.price) : 0;
-    };
-    // Graded tiers are priced per condition — the headline number is the
-    // LOWEST condition price ("starting from"); the full matrix is in
-    // condition_prices on the product payload.
-    const minGraded = (tier: PricingTier): number => {
-      const rows = this.liveRows(prices, tier).filter((p) => p.conditionCode);
-      if (rows.length === 0) return 0;
-      return Math.min(...rows.map((r) => Number(r.price)));
-    };
+  /**
+   * The headline price for ONE tier — the reader's own, and no other.
+   *
+   * A listing must never hand a citizen a factory's price (or the reverse), so
+   * the payload carries a single number for the caller's role rather than the
+   * whole four-tier matrix it used to. A flat tier (citizen / company) has one
+   * price; a graded tier (factory / free facility) is priced per condition, so
+   * the headline is the LOWEST condition price ("starting from") and the full
+   * breakdown travels in `condition_prices`.
+   */
+  private tierHeadlinePrice(prices: ProductPricing[], tier: PricingTier): number {
+    const rows = this.liveRows(prices, tier);
+    const graded =
+      tier === PricingTier.FACTORY || tier === PricingTier.FREE_FACILITY;
+    if (graded) {
+      const g = rows.filter((p) => p.conditionCode);
+      return g.length ? Math.min(...g.map((r) => Number(r.price))) : 0;
+    }
+    const flat = rows
+      .filter((p) => !p.conditionCode)
+      .sort(
+        (a, b) =>
+          new Date(b.effectiveFrom).getTime() - new Date(a.effectiveFrom).getTime(),
+      )[0];
+    return flat ? Number(flat.price) : 0;
+  }
 
-    return {
-      individual: flat(PricingTier.INDIVIDUAL),
-      company: flat(PricingTier.COMPANY),
-      factory: minGraded(PricingTier.FACTORY),
-      free_facility: minGraded(PricingTier.FREE_FACILITY),
-      currency: 'JOD',
-    };
+  /**
+   * The price a buyer of this tier would pay WITHOUT any offer.
+   *
+   * This is what an offer is a discount *from*, so it is what the discount has
+   * to be measured against. A graded tier is priced per condition, so the base
+   * depends on which condition the offer names — an offer on "excellent" is not
+   * a discount off the cheapest grade.
+   */
+  private basePriceFor(
+    prices: ProductPricing[],
+    tier: PricingTier,
+    conditionCode?: string | null,
+  ): number | null {
+    const rows = this.liveRows(prices, tier).filter((r) =>
+      conditionCode ? r.conditionCode === conditionCode : !r.conditionCode,
+    );
+    if (!rows.length) return null;
+    // Newest effective row wins, matching how `mapPricing` reads a flat price.
+    const current = rows.sort(
+      (a, b) => new Date(b.effectiveFrom).getTime() - new Date(a.effectiveFrom).getTime(),
+    )[0];
+    return Number(current.price);
+  }
+
+  /**
+   * How much this offer actually takes off, as a fraction of the material's own
+   * price for this buyer.
+   *
+   * Computed, never read from `offer.discountPercentage`: that column is typed
+   * in by an administrator and is free to disagree with the two numbers either
+   * side of it. Sorting a "biggest discounts" list by a field somebody typed
+   * ranks by their arithmetic rather than by the saving the buyer receives.
+   *
+   * Returns null when there is no base price to compare against — a material
+   * priced for nobody has no discount, and 0 would sort it among the honest
+   * small ones.
+   */
+  private realDiscount(
+    offer: Offer,
+    prices: ProductPricing[],
+    tier: PricingTier,
+  ): number | null {
+    const base = this.basePriceFor(prices, tier, offer.conditionCode);
+    if (base == null || base <= 0) return null;
+    const amount = Number(offer.amount);
+    if (!Number.isFinite(amount)) return null;
+    // Against THIS tier's own price. The offer holds an amount, so the same
+    // offer is a bigger proportion to a buyer paying less — which is exactly
+    // what a "biggest offers" list should be ranking by.
+    return offerPercentage(base, amount);
+  }
+
+  /**
+   * What this reader actually pays, with the offer applied.
+   *
+   * Computed from their own list price rather than read off the offer: one
+   * offer reaches two roles priced differently, so a stored final price could
+   * only ever have been right for one of them.
+   */
+  private offeredPriceFor(
+    offer: Offer,
+    prices: ProductPricing[],
+    tier: PricingTier,
+  ): number | null {
+    const base = this.basePriceFor(prices, tier, offer.conditionCode);
+    if (base == null) return null;
+    return priceAfterOffer(base, Number(offer.amount), offer.audience);
   }
 
   private mapProduct(
     p: Product,
     prices: ProductPricing[],
-    bestOffer?: Offer,
+    liveOffers?: Offer[],
     unitLabels?: Map<string, string>,
     callerTier?: PricingTier,
     conditionLabels?: Map<string, string>,
   ) {
+    const offers = liveOffers ?? [];
+    const tier = callerTier ?? PricingTier.INDIVIDUAL;
+
+    // Every live offer, each with the grade it applies to and when it ends.
+    // A graded material can carry one per condition, and the buyer needs all of
+    // them: which grade is discounted is the whole decision.
+    const offerRows = offers
+      .map((o) => ({
+        condition: o.conditionCode ?? null,
+        condition_label: o.conditionCode
+          ? (conditionLabels?.get(o.conditionCode) ?? o.conditionCode)
+          : null,
+        // Both numbers, and the amount between them. An offer is a CHANGE of
+        // price: showing only the new figure answers "what does it cost" while
+        // losing "what did it cost", which is what makes the change legible.
+        base_price: this.basePriceFor(prices, tier, o.conditionCode),
+        offer_price: this.offeredPriceFor(o, prices, tier),
+        amount: Number(o.amount),
+        direction: o.audience === OfferAudience.SELLERS ? 'INCREASE' : 'DECREASE',
+        discount_percentage: this.realDiscount(o, prices, tier),
+        // Null means open-ended. The client needs the difference: a countdown
+        // on an offer that never ends is a lie, and no date on one that does is
+        // worse.
+        valid_until: o.validUntil ?? null,
+      }))
+      .sort((a, b) => (b.discount_percentage ?? -1) - (a.discount_percentage ?? -1));
+
+    const bestOffer = offers[0];
     // Factories / free facilities buy by grade: expose each condition of the
     // product with its own price for THEIR tier.
     const isGradedTier =
@@ -1066,10 +1420,19 @@ export class CatalogService {
       category_name: p.category?.name ?? null,
       unit_type: p.unitType,
       unit_label: unitLabels?.get(p.unitType) ?? p.unitType,
-      pricing: this.mapPricing(prices),
-      has_offer: !!bestOffer,
-      offer_price: bestOffer ? Number(bestOffer.offerPrice) : null,
-      discount_percentage: bestOffer ? Number(bestOffer.discountPercentage) : null,
+      // ONLY the caller's own price (see tierHeadlinePrice) — never the whole
+      // tier matrix, so a user token can never read a factory's number.
+      price: this.tierHeadlinePrice(prices, tier),
+      currency: 'JOD',
+      has_offer: offerRows.length > 0,
+      // The headline offer — biggest real saving — kept flat for callers that
+      // want one number. `offers` below carries the rest.
+      offer_price: offerRows.length ? offerRows[0].offer_price : null,
+      discount_percentage: offerRows.length ? offerRows[0].discount_percentage : null,
+      /** When the headline offer ends; null = open-ended. */
+      offer_valid_until: offerRows.length ? offerRows[0].valid_until : null,
+      /** Every live offer on this material, best saving first. */
+      offers: offerRows,
       ...(conditionPrices ? { condition_prices: conditionPrices } : {}),
       created_at: p.createdAt,
     };
@@ -1090,7 +1453,47 @@ export class CatalogService {
    * more thing a future call site can forget to use; a rule at the single point
    * where offers become JSON cannot be bypassed by forgetting.
    */
-  private mapOffer(o: Offer, isGuest = false) {
+  /**
+   * The list price each of these offers moves FROM, for the caller's own tier.
+   *
+   * The offers list used to hand back an amount with nothing to apply it to, so
+   * a client could show "5 off" but not what the material actually costs — and
+   * the only way for it to find out was another request per offer. One query
+   * for the whole page instead, keyed by material and grade.
+   *
+   * Empty for a guest: they are not on any tier, so there is no price of theirs
+   * to move.
+   */
+  private async basePricesForOffers(
+    rows: Offer[],
+    tier: PricingTier | null,
+  ): Promise<Map<string, number>> {
+    const byKey = new Map<string, number>();
+    if (!tier || !rows.length) return byKey;
+
+    const prices = await this.pricingRepo.find({
+      where: { productId: In([...new Set(rows.map((o) => o.productId))]), tier },
+    });
+    // Grouped by product FIRST. `basePriceFor` filters only by tier and grade,
+    // not by product, because it was written to receive one material's price
+    // rows; handed the whole page's rows it would match another material's
+    // price for the same tier and grade — so every ungraded offer would show
+    // whichever product's row happened to be newest. Each offer must be priced
+    // against its OWN material's sheet.
+    const byProduct = new Map<string, ProductPricing[]>();
+    for (const p of prices) {
+      const list = byProduct.get(p.productId) ?? [];
+      list.push(p);
+      byProduct.set(p.productId, list);
+    }
+    for (const o of rows) {
+      const base = this.basePriceFor(byProduct.get(o.productId) ?? [], tier, o.conditionCode);
+      if (base != null) byKey.set(`${o.productId}:${o.conditionCode ?? ''}`, base);
+    }
+    return byKey;
+  }
+
+  private mapOffer(o: Offer, isGuest = false, basePrice?: number | null) {
     return {
       offer_id: o.id,
       product_id: o.productId,
@@ -1099,9 +1502,25 @@ export class CatalogService {
       ...(isGuest
         ? { requires_login: true }
         : {
-            offer_price: Number(o.offerPrice),
+            // The offer holds an AMOUNT, not a final price — one offer reaches
+            // two roles priced differently, so a single stored price could only
+            // ever have been right for one of them. `base_price` and
+            // `offer_price` are filled in by the caller that knows the reader's
+            // own tier; the amount and its direction are true regardless.
+            amount: Number(o.amount),
+            direction:
+              o.audience === OfferAudience.SELLERS ? 'INCREASE' : 'DECREASE',
             discount_percentage: Number(o.discountPercentage),
+            ...(basePrice != null
+              ? {
+                  base_price: basePrice,
+                  offer_price: priceAfterOffer(
+                    basePrice, Number(o.amount), o.audience,
+                  ),
+                }
+              : {}),
           }),
+      audience: o.audience,
       condition: o.conditionCode ?? null,
       description: o.description ?? null,
       valid_from: o.validFrom,

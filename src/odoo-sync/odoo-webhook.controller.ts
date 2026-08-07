@@ -161,6 +161,7 @@ export class OdooWebhookController {
       documentsOnly: dto.documents_only,
       requestReupload: dto.request_reupload,
       cancelReupload: dto.cancel_reupload,
+      approvedMediaIds: dto.approved_media_ids,
     });
     return { message: 'Driver decision queued', result: { queued: 1 } };
   }

@@ -108,8 +108,10 @@ export class Warehouse {
   @Column({ type: 'int', default: 0 })
   shipmentCount: number;
 
-  @Column({ default: true })
-  isActive: boolean;
+  // The redundant `isActive` boolean was removed: a warehouse's lifecycle is
+  // owned by `state` (ACTIVE / CLOSING / INACTIVE), mirrored from Odoo, and a
+  // second flag that had to be kept in step with it was one more thing to drift.
+  // "Operational" now means `state = ACTIVE`; "closed" means `state = INACTIVE`.
 
   @Column({ type: 'timestamptz', nullable: true })
   lastOdooSync?: Date;

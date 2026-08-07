@@ -13,6 +13,7 @@ import { AuditService } from '@src/waste-management/common/providers/audit.servi
 import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
 import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
 import { ProductConditionsService } from '@src/waste-management/admin/product-conditions.service';
+import { OfferSettlementService } from '@src/waste-management/common/providers/offer-settlement.service';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { TransformInterceptor } from '@src/common/interceptors/transform.interceptor';
@@ -34,7 +35,7 @@ describe('PricingController (integration)', () => {
     execute: jest.fn().mockResolvedValue({}),
   };
 
-  const productRepo = { findOne: jest.fn().mockResolvedValue({ id: PRODUCT_ID }) };
+  const productRepo = { findOne: jest.fn().mockResolvedValue({ id: PRODUCT_ID, isActive: true }) };
   const pricingRepo = {
     createQueryBuilder: jest.fn().mockReturnValue(updateQb),
     create: jest.fn((x) => x),
@@ -67,6 +68,15 @@ describe('PricingController (integration)', () => {
           useValue: {
             validateActiveCode: jest.fn(async (c: string) => String(c).toUpperCase()),
             labelMapFor: jest.fn(async () => new Map()),
+          },
+        },
+        {
+          // A price change re-settles the offers on that material: the stored
+          // percentage is computed against the old price, and an amount that no
+          // longer fits the new one would make the price negative.
+          provide: OfferSettlementService,
+          useValue: {
+            resettle: jest.fn().mockResolvedValue({ repriced: 0, suspended: 0 }),
           },
         },
         {
@@ -125,8 +135,11 @@ describe('PricingController (integration)', () => {
     expect(res.body.data.pricing).toEqual({
       individual: 0.3,
       company: 0.27,
-      factory: [{ condition: 'EXCELLENT', price: 0.25 }],
-      free_facility: [{ condition: 'EXCELLENT', price: 0.26 }],
+      // Sent as a CODE and returned with the grade's ID resolved beside it —
+      // a caller written before the link existed keeps working, and its price
+      // is still filed against a real grade rather than left unlinked.
+      factory: [{ condition: 'EXCELLENT', conditionId: 'cond-EXCELLENT', price: 0.25 }],
+      free_facility: [{ condition: 'EXCELLENT', conditionId: 'cond-EXCELLENT', price: 0.26 }],
     });
     expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: PRODUCT_ID });
   });

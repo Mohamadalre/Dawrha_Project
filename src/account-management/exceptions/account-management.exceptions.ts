@@ -161,6 +161,22 @@ export class NothingRequestedException extends ConflictException {
   }
 }
 
+/**
+ * Only a REJECTED application can be re-opened.
+ *
+ * One that is still under review has nothing to re-open, and an approved one
+ * is finished — re-opening that would put a member back into the applicant
+ * queue and take away access they already have.
+ */
+export class OnlyRejectedCanReopenException extends ConflictException {
+  constructor(status: string) {
+    super({
+      message: `Only a rejected application can be re-opened — this one is ${status.toLowerCase().replace('_', ' ')}`,
+      errorCode: 'ONLY_REJECTED_CAN_REOPEN',
+    });
+  }
+}
+
 /** Blocking is for accounts that are actually in use. */
 export class BlockNeedsApprovedAccountException extends ConflictException {
   constructor(_status: string) {

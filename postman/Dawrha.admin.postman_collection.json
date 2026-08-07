@@ -31,7 +31,15 @@
       "value": ""
     },
     {
+      "key": "gradedProductId",
+      "value": ""
+    },
+    {
       "key": "conditionId",
+      "value": ""
+    },
+    {
+      "key": "conditionId2",
       "value": ""
     },
     {
@@ -1951,6 +1959,7 @@
           "request": {
             "method": "GET",
             "header": [],
+            "description": "الرد منظَّم بأقسام: `audience` (النوع، الأدوار، وهل يشمل كل النوع)، `grade` (الحالة بالمعرّف والكود، أو null)، `effect` (المقدار، النسبة المشتقّة، والاتجاه INCREASE للبائعين / DECREASE للمشترين مع وصف)، و`validity` (from/until و`is_live` محسوبة على الساعة).",
             "url": {
               "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers?status=all&page=1&limit=10",
               "host": [
@@ -1993,7 +2002,7 @@
           "response": []
         },
         {
-          "name": "➕ إضافة عرض",
+          "name": "➕ إضافة عرض — للبائعين بمقدار ⚙️",
           "id": "adm43",
           "request": {
             "method": "POST",
@@ -2003,6 +2012,7 @@
                 "value": "application/json"
               }
             ],
+            "description": "**لا يوجد عرض «لكل الأدوار».** هناك جمهوران فقط:\n- **`SELLERS`** = مواطن + مؤسسات (يُدفع لهم)، فالمقدار **يُضاف** إلى سعرهم.\n- **`BUYERS`** = معمل + جهة حرّة (يدفعون)، فالمقدار **يُنقَص** من سعرهم.\n\n`amount` **مقدار لا سعراً نهائياً**: العرض الواحد يصل دورين مسعَّرين بشكل مختلف، فلا سعر نهائي واحد يصحّ لكليهما.\n\n**البائع لا يُقيَّد بحالة** — يُدفع له قبل الفرز، ولا مانع أن يتجاوز المقدار السعر (زيادة كريمة)، لكن سعر ما بعد العرض لا ينزل أبداً تحت سعر ما قبله.\n\n`target_roles` اختياري: إغفاله يعني **كلا دوري الجمهور**؛ وذكر دور من الجهة الأخرى يُرفَض. ⚙️ يدفع صفحة أسعار المادة إلى أودو فوراً.",
             "url": {
               "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers",
               "host": [
@@ -2029,7 +2039,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"offer_price\": 7.5,\n  \"discount_percentage\": 20,\n  \"valid_from\": \"2026-08-01T00:00:00.000Z\",\n  \"valid_until\": \"2026-09-01T00:00:00.000Z\"\n}",
+              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"audience\": \"SELLERS\",\n  \"amount\": 10,\n  \"valid_from\": \"2026-08-01T00:00:00.000Z\",\n  \"valid_until\": \"2026-09-01T00:00:00.000Z\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2040,8 +2050,200 @@
           "response": []
         },
         {
-          "name": "✏️ تعديل عرض",
+          "name": "➕ إضافة عرض — للبائعين بنسبة",
           "id": "adm44",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "`percentage` **بديل عن `amount`** (إرسالهما معاً يُرفَض). يُشتقّ منه المقدار مقابل سعر كل شريحة، ويُخزَّن «النوع = نسبة» فيُعاد حساب المقدار كلما تحرّك السعر لاحقاً — بينما عرض المقدار يبقي مقداره.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "offers"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"audience\": \"SELLERS\",\n  \"target_roles\": [\n    \"INSTITUTIONS\"\n  ],\n  \"percentage\": 15\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة عرض — للمشترين، مادة بلا حالات",
+          "id": "adm45",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "مادة **بلا حالات** ← مقدار واحد بلا `conditions`. ويُرفَض المقدار إن ساوى السعر أو تجاوزه (يجعله صفراً أو سالباً = تدفع للمشتري ليأخذ المادة).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "offers"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"audience\": \"BUYERS\",\n  \"amount\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة عرض — للمشترين بالحالات (مقدار لكل حالة) ⚙️",
+          "id": "adm46",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "معمل/جهة حرّة يشترون **بالحالة**، فالمقدار يُذكَر لكل حالة في `conditions[]` **بالمعرّف** (الكود فريد داخل مادته فقط). وكلها لازم تتبع **نفس المادة**؛ والمفتاح الأجنبي يمنع حذف حالة يسمّيها عرض حيّ (DELETE يُردّ بـ23001).\n\nكل حالة تُفحَص وحدها ضد سعرها، وتُشتقّ نسبتها من سعرها هي.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "offers"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{gradedProductId}}\",\n  \"audience\": \"BUYERS\",\n  \"conditions\": [\n    {\n      \"condition_id\": \"{{conditionId}}\",\n      \"amount\": 3\n    },\n    {\n      \"condition_id\": \"{{conditionId2}}\",\n      \"amount\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "➕ إضافة عرض — للمشترين بنسبة على كل الحالات ⚙️",
+          "id": "adm47",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "مادة مصنَّفة **بلا ذكر حالة** + نسبة ← تُطبَّق على **كل حالة** ويُشتقّ لكل واحدة مقدارها من **سعرها هي**: ٢٥٪ من حالة سعرها ٧٠ = ١٧٫٥، ومن ٦٠ = ١٥. (ولو أُرسل `amount` بدل النسبة، طُبّق نفسه على كل حالة ورُفض إن أنزل أرخصها تحت الصفر — والرسالة تسمّي الحالة العاجزة.) ونسبة المشتري لا تبلغ ١٠٠٪.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "offers"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{gradedProductId}}\",\n  \"audience\": \"BUYERS\",\n  \"percentage\": 25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ تعديل عرض ⚙️",
+          "id": "adm48",
           "request": {
             "method": "PUT",
             "header": [
@@ -2050,6 +2252,7 @@
                 "value": "application/json"
               }
             ],
+            "description": "قواعد الحالة والجمهور تُعاد هنا كما في الإنشاء. الحقل `amount` (لا `offer_price`)، و**النسبة تُعاد اشتقاقها في كل تعديل** لأن الخصم يتوقف على المقدار والحالة والشرائح، وهذا الراوت يحرّك أياً منها. ⚙️",
             "url": {
               "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers/{{offerId}}",
               "host": [
@@ -2077,7 +2280,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"discount_percentage\": 25\n}",
+              "raw": "{\n  \"amount\": 3,\n  \"target_roles\": [\n    \"FACTORY\"\n  ],\n  \"valid_until\": \"2026-12-31T00:00:00.000Z\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2088,11 +2291,146 @@
           "response": []
         },
         {
-          "name": "🗑️ حذف عرض",
-          "id": "adm45",
+          "name": "⏱️ تعديل مدة العرض ⚙️",
+          "id": "adm49",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "راوت مستقلّ لتمديد عرض يوشك أن ينتهي دون إعادة إرسال المقدار والجمهور.\n\nالتاريخ **بالساعة والثانية** (timestamp)، فتنتهي المدة في لحظتها بالضبط. و`valid_until: null` تعني **مفتوح حتى إشعار آخر**.\n\n⚙️ يصل أودو فوراً: تقصير المدة يُنهي العرض، وصفحة أودو تكفّ عن شطب السعر في اللحظة نفسها (has_offer محسوبة على الساعة).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers/{{offerId}}/validity",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "offers",
+                "{{offerId}}",
+                "validity"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"valid_until\": \"2026-12-31T23:59:59.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "💲 تعديل مقدار العرض + التاريخ ⚙️",
+          "id": "adm50",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "`amount` (لا `offer_price`)، والتاريخان اختياريان **في نفس الطلب** لأنهما قرار واحد؛ فصلهما يترك العرض حيّاً بالمقدار الجديد على التواريخ القديمة لحظةً.\n\n**الطلبيات المنفَّذة لا تتأثر**: سطر الطلب يُثبّت السعر لقطةً عند إنشائه. والمقدار يُعاد التحقق منه كالإنشاء (يُرفَض إن جعل السعر صفراً أو سالباً)، والنسبة تُعاد اشتقاقها. ⚙️",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers/{{offerId}}/amount",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "waste",
+                "offers",
+                "{{offerId}}",
+                "amount"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 4,\n  \"valid_until\": \"2026-10-15T12:30:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "⭐ مفضّلة حساب (قراءة فقط)",
+          "id": "adm51",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "النافذة **الوحيدة** للأدمن على المفضّلة: يقرأ مفضّلة حساب مُعيَّن ولا يضيف ولا يعدّل ولا يحذف — والثلاثة مرفوضة له صراحةً.\n\nالمفضّلة كالسلة: مجموعة عمل خاصة بالمشتري لا يكتب فيها أحد سواه. و`cart.view` وحدها لا تعبّر عن ذلك لأن الأدمن يملك كل مفاتيح الكتالوج، فالأدوار مسمّاة صراحةً في كل راوت.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/favourites/account/{{accountId}}",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "favourites",
+                "account",
+                "{{accountId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف عرض ⚙️",
+          "id": "adm52",
           "request": {
             "method": "DELETE",
             "header": [],
+            "description": "أودو يعلم بالحذف عبر **غياب** العرض عند القراءة التالية — وهو نفس مسار انتهاء المدة تماماً. سلوك واحد لا اثنان، فالسطر يعود إلى سعر القائمة في الحالتين.",
             "url": {
               "raw": "{{server}}:{{port}}/api/v1/admin/waste/offers/{{offerId}}",
               "host": [
@@ -2128,7 +2466,7 @@
       "item": [
         {
           "name": "📄 عرض المستودعات",
-          "id": "adm46",
+          "id": "adm53",
           "request": {
             "method": "GET",
             "header": [],
@@ -2179,7 +2517,7 @@
         },
         {
           "name": "📄 مستودع واحد",
-          "id": "adm47",
+          "id": "adm54",
           "request": {
             "method": "GET",
             "header": [],
@@ -2213,7 +2551,7 @@
         },
         {
           "name": "➕ إضافة مستودع ⚙️",
-          "id": "adm48",
+          "id": "adm55",
           "request": {
             "method": "POST",
             "header": [
@@ -2260,7 +2598,7 @@
         },
         {
           "name": "✏️ تعديل مستودع ⚙️",
-          "id": "adm49",
+          "id": "adm56",
           "request": {
             "method": "PATCH",
             "header": [
@@ -2308,7 +2646,7 @@
         },
         {
           "name": "🔄 مزامنة المستودع من أودو ⚙️",
-          "id": "adm50",
+          "id": "adm57",
           "request": {
             "method": "POST",
             "header": [
@@ -2356,7 +2694,7 @@
         },
         {
           "name": "🔄 مزامنة المدير من أودو ⚙️",
-          "id": "adm51",
+          "id": "adm58",
           "request": {
             "method": "POST",
             "header": [],
@@ -2390,7 +2728,7 @@
         },
         {
           "name": "⬇️ استيراد المستودعات من أودو ⚙️",
-          "id": "adm52",
+          "id": "adm59",
           "request": {
             "method": "POST",
             "header": [],
@@ -2428,7 +2766,7 @@
       "item": [
         {
           "name": "📄 مخزون مستودع (مُصفَّح)",
-          "id": "adm53",
+          "id": "adm60",
           "request": {
             "method": "GET",
             "header": [],
@@ -2473,7 +2811,7 @@
         },
         {
           "name": "📄 مادة في مستودع",
-          "id": "adm54",
+          "id": "adm61",
           "request": {
             "method": "GET",
             "header": [],
@@ -2510,7 +2848,7 @@
         },
         {
           "name": "📄 مادة في كل المستودعات",
-          "id": "adm55",
+          "id": "adm62",
           "request": {
             "method": "GET",
             "header": [],
@@ -2549,13 +2887,14 @@
       "name": "1️⃣1️⃣ اقتراحات المواد",
       "item": [
         {
-          "name": "📄 كل الاقتراحات",
-          "id": "adm56",
+          "name": "📄 كل الاقتراحات (الأقدم أولاً، فلترة بدور المقدِّم)",
+          "id": "adm63",
           "request": {
             "method": "GET",
             "header": [],
+            "description": "الأقدم أولاً. فلترة اختيارية بدور المقدِّم: submitted_by = CITIZEN | INSTITUTIONS | FACTORY | EXTERNAL_PARTNER | ODOO.",
             "url": {
-              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions?page=1&limit=10&status=PENDING_REVIEW",
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions?page=1&limit=10&submitted_by=FACTORY",
               "host": [
                 "{{server}}"
               ],
@@ -2577,8 +2916,8 @@
                   "value": "10"
                 },
                 {
-                  "key": "status",
-                  "value": "PENDING_REVIEW"
+                  "key": "submitted_by",
+                  "value": "FACTORY"
                 }
               ]
             },
@@ -2597,13 +2936,13 @@
         },
         {
           "name": "📄 اقتراحات أدمن أودو فقط",
-          "id": "adm57",
+          "id": "adm64",
           "request": {
             "method": "GET",
             "header": [],
             "description": "قائمة الاطّلاع على ما اقترحه أدمن أودو بعد أن مُنع من إنشاء المواد.",
             "url": {
-              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions?source=ODOO&page=1&limit=10",
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions?submitted_by=ODOO&page=1&limit=10",
               "host": [
                 "{{server}}"
               ],
@@ -2617,7 +2956,7 @@
               ],
               "query": [
                 {
-                  "key": "source",
+                  "key": "submitted_by",
                   "value": "ODOO"
                 },
                 {
@@ -2645,7 +2984,7 @@
         },
         {
           "name": "📄 اقتراح واحد",
-          "id": "adm58",
+          "id": "adm65",
           "request": {
             "method": "GET",
             "header": [],
@@ -2678,19 +3017,19 @@
           "response": []
         },
         {
-          "name": "✅ قبول (شكليّ)",
-          "id": "adm59",
+          "name": "✉️ رد على صاحب الاقتراح (يصل كإشعار)",
+          "id": "adm66",
           "request": {
-            "method": "PATCH",
+            "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "description": "القبول **لا يُنشئ مادة** — الرد يقول `product_created: false` صراحةً. والمقترِح يُبلَّغ أن اقتراحه سيُدرَس للإضافة، لا أنه أُضيف.",
+            "description": "لا قبول/رفض ولا حالة. الأدمن يقرأ ويرسل رداً نصياً يصل صاحب الاقتراح **كإشعار**. اقتراح أودو بلا حساب يُرفض الرد عليه.",
             "url": {
-              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions/{{suggestionId}}/review",
+              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions/{{suggestionId}}/reply",
               "host": [
                 "{{server}}"
               ],
@@ -2702,7 +3041,7 @@
                 "waste",
                 "suggestions",
                 "{{suggestionId}}",
-                "review"
+                "reply"
               ]
             },
             "auth": {
@@ -2717,57 +3056,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"APPROVED\",\n  \"admin_notes\": \"فكرة جيدة\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "❌ رفض",
-          "id": "adm60",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "description": "الرفض **بلا سبب مرفوض**: لا يفيد المقترِح ولا يمكن تصحيحه.",
-            "url": {
-              "raw": "{{server}}:{{port}}/api/v1/admin/waste/suggestions/{{suggestionId}}/review",
-              "host": [
-                "{{server}}"
-              ],
-              "port": "{{port}}",
-              "path": [
-                "api",
-                "v1",
-                "admin",
-                "waste",
-                "suggestions",
-                "{{suggestionId}}",
-                "review"
-              ]
-            },
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{adminToken}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"status\": \"REJECTED\",\n  \"admin_notes\": \"مادة موجودة باسم آخر\"\n}",
+              "raw": "{\n  \"message\": \"شكراً لاقتراحك، سنضيف المادة قريباً.\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2784,7 +3073,7 @@
       "item": [
         {
           "name": "📄 عرض الطلبات",
-          "id": "adm61",
+          "id": "adm68",
           "request": {
             "method": "GET",
             "header": [],
@@ -2827,7 +3116,7 @@
         },
         {
           "name": "✅ قبول",
-          "id": "adm62",
+          "id": "adm69",
           "request": {
             "method": "PATCH",
             "header": [
@@ -2876,7 +3165,7 @@
         },
         {
           "name": "❌ رفض",
-          "id": "adm63",
+          "id": "adm70",
           "request": {
             "method": "PATCH",
             "header": [
@@ -2930,7 +3219,7 @@
       "item": [
         {
           "name": "📄 الشاحنات",
-          "id": "adm64",
+          "id": "adm71",
           "request": {
             "method": "GET",
             "header": [],
@@ -2971,7 +3260,7 @@
         },
         {
           "name": "📄 السائقون (مُصفَّح)",
-          "id": "adm65",
+          "id": "adm72",
           "request": {
             "method": "GET",
             "header": [],
@@ -3018,7 +3307,7 @@
         },
         {
           "name": "📄 شاحنة واحدة",
-          "id": "adm66",
+          "id": "adm73",
           "request": {
             "method": "GET",
             "header": [],
@@ -3050,7 +3339,7 @@
         },
         {
           "name": "📍 الشاحنات العاملة الآن",
-          "id": "adm67",
+          "id": "adm74",
           "request": {
             "method": "GET",
             "header": [],
@@ -3082,7 +3371,7 @@
         },
         {
           "name": "📍 موقع شاحنة",
-          "id": "adm68",
+          "id": "adm75",
           "request": {
             "method": "GET",
             "header": [],
@@ -3115,7 +3404,7 @@
         },
         {
           "name": "📍 آخر توقّف",
-          "id": "adm69",
+          "id": "adm76",
           "request": {
             "method": "GET",
             "header": [],
@@ -3148,7 +3437,7 @@
         },
         {
           "name": "📍 مسار شاحنة",
-          "id": "adm70",
+          "id": "adm77",
           "request": {
             "method": "GET",
             "header": [],
@@ -3186,7 +3475,7 @@
       "item": [
         {
           "name": "💰 التعرفة الحالية + السجل",
-          "id": "adm71",
+          "id": "adm78",
           "request": {
             "method": "GET",
             "header": [],
@@ -3218,7 +3507,7 @@
         },
         {
           "name": "➕ تحديد تعرفة جديدة",
-          "id": "adm72",
+          "id": "adm79",
           "request": {
             "method": "POST",
             "header": [
@@ -3264,7 +3553,7 @@
         },
         {
           "name": "✏️ تصحيح التعرفة النافذة",
-          "id": "adm73",
+          "id": "adm80",
           "request": {
             "method": "PATCH",
             "header": [
@@ -3311,7 +3600,7 @@
         },
         {
           "name": "🧮 احتساب كلفة مسافة",
-          "id": "adm74",
+          "id": "adm81",
           "request": {
             "method": "GET",
             "header": [],
@@ -3355,7 +3644,7 @@
       "item": [
         {
           "name": "🗺️ تخطيط الرحلة (الأبعد أولاً)",
-          "id": "adm75",
+          "id": "adm82",
           "request": {
             "method": "POST",
             "header": [
@@ -3405,7 +3694,7 @@
         },
         {
           "name": "🚚 عرض رحلات الطلبية",
-          "id": "adm76",
+          "id": "adm83",
           "request": {
             "method": "GET",
             "header": [],
@@ -3439,7 +3728,7 @@
         },
         {
           "name": "👷 إسناد شاحنة وسائق",
-          "id": "adm77",
+          "id": "adm84",
           "request": {
             "method": "POST",
             "header": [
@@ -3489,7 +3778,7 @@
         },
         {
           "name": "📋 رحلات سائق التوصيل",
-          "id": "adm78",
+          "id": "adm85",
           "request": {
             "method": "GET",
             "header": [],
@@ -3526,7 +3815,7 @@
         },
         {
           "name": "✅ تأكيد استلام جزء من مستودع",
-          "id": "adm79",
+          "id": "adm86",
           "request": {
             "method": "POST",
             "header": [
@@ -3579,7 +3868,7 @@
         },
         {
           "name": "🏁 إنهاء الرحلة عند المعمل",
-          "id": "adm80",
+          "id": "adm87",
           "request": {
             "method": "POST",
             "header": [],
@@ -3622,7 +3911,7 @@
       "item": [
         {
           "name": "⏳ طابور المعامل (الأقدم أولاً)",
-          "id": "adm81",
+          "id": "adm88",
           "request": {
             "method": "GET",
             "header": [],
@@ -3666,7 +3955,7 @@
         },
         {
           "name": "⏳ طابور المؤسسات (الأقدم أولاً)",
-          "id": "adm82",
+          "id": "adm89",
           "request": {
             "method": "GET",
             "header": [],
@@ -3709,7 +3998,7 @@
         },
         {
           "name": "⏳ طابور الجهات الحرّة (الأقدم أولاً)",
-          "id": "adm83",
+          "id": "adm90",
           "request": {
             "method": "GET",
             "header": [],
@@ -3752,7 +4041,7 @@
         },
         {
           "name": "🏭 المعامل (حسب الحالة)",
-          "id": "adm84",
+          "id": "adm91",
           "request": {
             "method": "GET",
             "header": [],
@@ -3799,7 +4088,7 @@
         },
         {
           "name": "🏢 المؤسسات (حسب الحالة)",
-          "id": "adm85",
+          "id": "adm92",
           "request": {
             "method": "GET",
             "header": [],
@@ -3845,7 +4134,7 @@
         },
         {
           "name": "🤝 الجهات الحرّة (حسب الحالة)",
-          "id": "adm86",
+          "id": "adm93",
           "request": {
             "method": "GET",
             "header": [],
@@ -3891,7 +4180,7 @@
         },
         {
           "name": "📄 تفاصيل الحساب",
-          "id": "adm87",
+          "id": "adm94",
           "request": {
             "method": "GET",
             "header": [],
@@ -3925,7 +4214,7 @@
         },
         {
           "name": "📍 موقع الحساب",
-          "id": "adm88",
+          "id": "adm95",
           "request": {
             "method": "GET",
             "header": [],
@@ -3959,7 +4248,7 @@
         },
         {
           "name": "🖼️ وثائق الحساب",
-          "id": "adm89",
+          "id": "adm96",
           "request": {
             "method": "GET",
             "header": [],
@@ -3993,7 +4282,7 @@
         },
         {
           "name": "🖼️ وثيقة واحدة",
-          "id": "adm90",
+          "id": "adm97",
           "request": {
             "method": "GET",
             "header": [],
@@ -4026,7 +4315,7 @@
         },
         {
           "name": "🟡 رفض/قبول وثيقة (صامت)",
-          "id": "adm91",
+          "id": "adm98",
           "request": {
             "method": "PATCH",
             "header": [
@@ -4075,7 +4364,7 @@
         },
         {
           "name": "📨 طلب إعادة رفع وثيقة ⚠️",
-          "id": "adm92",
+          "id": "adm99",
           "request": {
             "method": "POST",
             "header": [
@@ -4123,8 +4412,56 @@
           "response": []
         },
         {
+          "name": "♻️ إعادة فتح طلب مرفوض",
+          "id": "adm100",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "**وثائق الطلب المرفوض مجمَّدة.** القرار اتُّخذ و**أُرسِل**، وإعادة وسم الأدلة تحته تغيّر *ما رُفض المتقدّم بسببه* بعد أن أُبلِغ به — ولا شيء على أي من الشاشتين يقول إن الأسباب تحرّكت.\n\nفإعادة النظر مسموحة، لكن **في العلن**: هذا الراوت يعيد الطلب إلى `PENDING_APPROVAL`، فتعود الوثائق قابلة للتعديل، **ويُبلَّغ المتقدّم** أن طلبه يُنظَر فيه من جديد. آخر ما سمعه كان رفضاً؛ إعادة النظر بصمت تتركه لا يعلم أن عليه انتظار جواب.\n\n**بابٌ واحد لا بابان**: طلبُ وثيقة من حساب مرفوض كان سيصير إعادة فتح من الباب الخلفي — يُسحَب المتقدّم إلى `NEED_CHANGES` دون أن يُقال له إن الرفض يُعاد النظر فيه. لذلك `request-reupload` يرفض الآن على المرفوض حتى يُعاد فتحه.\n\n**وملاحظة المراجع تبقى** — هي سبب الرفض الأول، وتلك السابقة هي ما يجعل النظرة الثانية ذات معنى.\n\n**409** إن لم يكن الطلب مرفوضاً.\n\nونفس الفعل في أودو للسائق: زرّ **«إعادة فتح الطلب»** (`action_reactivate`).",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/account-management/{{accountId}}/reopen",
+              "host": [
+                "{{server}}"
+              ],
+              "port": "{{port}}",
+              "path": [
+                "api",
+                "v1",
+                "account-management",
+                "{{accountId}}",
+                "reopen"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"سنعيد النظر في طلبك\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "⏹️ إيقاف انتظار مقدّم الطلب",
-          "id": "adm93",
+          "id": "adm101",
           "request": {
             "method": "POST",
             "header": [
@@ -4172,7 +4509,7 @@
         },
         {
           "name": "✅ قبول / رفض الحساب",
-          "id": "adm94",
+          "id": "adm102",
           "request": {
             "method": "PATCH",
             "header": [
@@ -4220,7 +4557,7 @@
         },
         {
           "name": "🚫 حظر / رفع حظر",
-          "id": "adm95",
+          "id": "adm103",
           "request": {
             "method": "PATCH",
             "header": [
@@ -4274,7 +4611,7 @@
       "item": [
         {
           "name": "⭐ المفضلة — عرض 🔸 (المواطن/المؤسسة/المصنع/الجهة الحرّة)",
-          "id": "adm96",
+          "id": "adm104",
           "request": {
             "method": "GET",
             "header": [],
@@ -4316,7 +4653,7 @@
         },
         {
           "name": "⭐ المفضلة — إضافة 🔸",
-          "id": "adm97",
+          "id": "adm105",
           "request": {
             "method": "POST",
             "header": [
@@ -4362,7 +4699,7 @@
         },
         {
           "name": "⭐ المفضلة — تعديل الملاحظة 🔸",
-          "id": "adm98",
+          "id": "adm106",
           "request": {
             "method": "PATCH",
             "header": [
@@ -4409,7 +4746,7 @@
         },
         {
           "name": "⭐ المفضلة — حذف 🔸",
-          "id": "adm99",
+          "id": "adm107",
           "request": {
             "method": "DELETE",
             "header": [],
@@ -4442,7 +4779,7 @@
         },
         {
           "name": "🏷️ موادّي (تصنيفات التسجيل) 🔸 (المؤسسة/المصنع/الجهة الحرّة)",
-          "id": "adm100",
+          "id": "adm108",
           "request": {
             "method": "GET",
             "header": [],
@@ -4485,7 +4822,7 @@
         },
         {
           "name": "🏷️ تصنيفاتي 🔸",
-          "id": "adm101",
+          "id": "adm109",
           "request": {
             "method": "GET",
             "header": [],
@@ -4518,7 +4855,7 @@
         },
         {
           "name": "📦 توفّر مادة في المستودعات 🔸 (المصنع/الجهة الحرّة)",
-          "id": "adm102",
+          "id": "adm110",
           "request": {
             "method": "GET",
             "header": [],
@@ -4553,7 +4890,7 @@
         },
         {
           "name": "➕ طلب تصنيف إضافي 🔸 (المؤسسة وحدها)",
-          "id": "adm103",
+          "id": "adm111",
           "request": {
             "method": "POST",
             "header": [
@@ -4605,7 +4942,7 @@
       "item": [
         {
           "name": "📦 تغيّر المخزون",
-          "id": "adm104",
+          "id": "adm112",
           "request": {
             "method": "POST",
             "header": [
@@ -4647,7 +4984,7 @@
         },
         {
           "name": "🏭 تغيّر مستودع",
-          "id": "adm105",
+          "id": "adm113",
           "request": {
             "method": "POST",
             "header": [
@@ -4688,7 +5025,7 @@
         },
         {
           "name": "🚚 تغيّر الأسطول",
-          "id": "adm106",
+          "id": "adm114",
           "request": {
             "method": "POST",
             "header": [
@@ -4729,7 +5066,7 @@
         },
         {
           "name": "💰 تغيّرت تعرفة التوصيل",
-          "id": "adm107",
+          "id": "adm115",
           "request": {
             "method": "POST",
             "header": [
@@ -4770,7 +5107,7 @@
         },
         {
           "name": "📋 حدث على طلبية",
-          "id": "adm108",
+          "id": "adm116",
           "request": {
             "method": "POST",
             "header": [
@@ -4812,7 +5149,7 @@
         },
         {
           "name": "💡 اقتراح مادة من أودو",
-          "id": "adm109",
+          "id": "adm117",
           "request": {
             "method": "POST",
             "header": [
@@ -4854,7 +5191,7 @@
         },
         {
           "name": "🧑‍✈️ قرار على سائق",
-          "id": "adm110",
+          "id": "adm118",
           "request": {
             "method": "POST",
             "header": [
@@ -4895,7 +5232,7 @@
         },
         {
           "name": "🕐 قرار تغيير وردية",
-          "id": "adm111",
+          "id": "adm119",
           "request": {
             "method": "POST",
             "header": [
@@ -4930,6 +5267,163 @@
                   "language": "json"
                 }
               }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1️⃣7️⃣ قيود الطلبات (حد أدنى + سقف إنفاق)",
+      "description": "قيود الأدمن على **قيمة** الطلبات لكل دور — لا علاقة لها بسلال المستخدمين (الأدمن لا يرى/يعدّل سلة أحد).\n\n• **الحد الأدنى (floor):** أقل قيمة بضاعة يُسمح بإنشاء طلبية بها. يُقاس على البضاعة فقط (بلا توصيل). صفر + is_active=false = بلا حدّ.\n\n• **سقف الإنفاق (ceiling):** أعلى إنفاق مسموح لدور خلال نافذة `DAILY` (من منتصف ليل اليوم) أو `MONTHLY` (من أول الشهر). يجمع قيمة بضاعة طلبات المشتري غير الملغاة في النافذة، فإن كان `المُنفَق + هذه الطلبية > السقف` رُفضت الطلبية برسالة تبيّن المتبقّي.\n\nالدور في المسار أحد: CITIZEN, INSTITUTIONS, FACTORY, EXTERNAL_PARTNER (اللذان يطلبان اليوم: FACTORY و EXTERNAL_PARTNER).",
+      "item": [
+        {
+          "name": "📄 عرض الحدود الدنيا (كل الأدوار)",
+          "id": "adm-oc1",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/order-constraints/minimums",
+              "host": ["{{server}}"],
+              "port": "{{port}}",
+              "path": ["api", "v1", "admin", "order-constraints", "minimums"]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ ضبط حد أدنى لدور (معمل)",
+          "id": "adm-oc2",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "description": "upsert بالدور. min_order_value = أقل قيمة بضاعة. is_active=true لتفعيل الحدّ.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/order-constraints/minimums/FACTORY",
+              "host": ["{{server}}"],
+              "port": "{{port}}",
+              "path": ["api", "v1", "admin", "order-constraints", "minimums", "FACTORY"]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"min_order_value\": 50,\n  \"currency\": \"JOD\",\n  \"is_active\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف حد أدنى لدور (معمل)",
+          "id": "adm-oc3",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/order-constraints/minimums/FACTORY",
+              "host": ["{{server}}"],
+              "port": "{{port}}",
+              "path": ["api", "v1", "admin", "order-constraints", "minimums", "FACTORY"]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "📄 عرض سقوف الإنفاق (كل الأدوار)",
+          "id": "adm-oc4",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/order-constraints/spending-caps",
+              "host": ["{{server}}"],
+              "port": "{{port}}",
+              "path": ["api", "v1", "admin", "order-constraints", "spending-caps"]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ ضبط سقف إنفاق شهري (معمل)",
+          "id": "adm-oc5",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "description": "period=MONTHLY: النافذة من أول الشهر. max_amount = سقف إنفاق البضاعة خلالها.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/order-constraints/spending-caps/FACTORY",
+              "host": ["{{server}}"],
+              "port": "{{port}}",
+              "path": ["api", "v1", "admin", "order-constraints", "spending-caps", "FACTORY"]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"max_amount\": 5000,\n  \"period\": \"MONTHLY\",\n  \"currency\": \"JOD\",\n  \"is_active\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "✏️ ضبط سقف إنفاق يومي (جهة حرة)",
+          "id": "adm-oc6",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "description": "period=DAILY: النافذة من منتصف ليل اليوم. تُصفَّر تلقائياً كل يوم.",
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/order-constraints/spending-caps/EXTERNAL_PARTNER",
+              "host": ["{{server}}"],
+              "port": "{{port}}",
+              "path": ["api", "v1", "admin", "order-constraints", "spending-caps", "EXTERNAL_PARTNER"]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"max_amount\": 1000,\n  \"period\": \"DAILY\",\n  \"currency\": \"JOD\",\n  \"is_active\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "🗑️ حذف سقف إنفاق لدور (معمل)",
+          "id": "adm-oc7",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{server}}:{{port}}/api/v1/admin/order-constraints/spending-caps/FACTORY",
+              "host": ["{{server}}"],
+              "port": "{{port}}",
+              "path": ["api", "v1", "admin", "order-constraints", "spending-caps", "FACTORY"]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
             }
           },
           "response": []

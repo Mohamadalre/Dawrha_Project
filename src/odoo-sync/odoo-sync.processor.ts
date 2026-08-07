@@ -6,6 +6,12 @@ import { OdooService } from '@src/odoo/odoo.service';
 import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
 import { Product } from '@src/waste-management/entities/product.entity';
 import { ProductPricing } from '@src/waste-management/entities/product-pricing.entity';
+import { Offer } from '@src/waste-management/entities/offer.entity';
+import {
+  OfferAudience,
+  offerPercentage,
+  priceAfterOffer,
+} from '@src/waste-management/enums/offer-audience.enum';
 import { MeasurementUnit } from '@src/waste-management/entities/measurement-unit.entity';
 import {
   MaterialCondition,
@@ -124,6 +130,9 @@ export class OdooSyncProcessor extends WorkerHost {
     private readonly productRepo: Repository<Product>,
     @InjectRepository(ProductPricing)
     private readonly pricingRepo: Repository<ProductPricing>,
+    // Read-only: the offer mirror pushed onto Odoo's price sheet.
+    @InjectRepository(Offer)
+    private readonly offerRepo: Repository<Offer>,
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
     @InjectRepository(Warehouse)
@@ -314,18 +323,82 @@ export class OdooSyncProcessor extends WorkerHost {
 
     for (const [tier, odooTier] of tiers) {
       const rows = await this.livePricingRows(product.id, tier);
+      // Live offers for the buyers this tier serves, keyed by the grade each
+      // one names. Odoo shows the list price struck through beside it, so the
+      // administrator sees the change rather than only its result.
+      const offers = await this.liveOffersByCondition(product.id, tier);
+
       await this.odoo.replaceConditionPrices(
         product.odooProductId,
         odooTier,
         // A material with no conditions is priced once for the tier; that row
         // has a null conditionCode and MUST travel too — filtering it out left
         // such materials priceless on the Odoo side.
-        rows.map((r) => ({
-          conditionCode: r.conditionCode ?? null,
-          price: Number(r.price),
-        })),
+        rows.map((r) => {
+          const offer = offers.get(r.conditionCode ?? '');
+          const base = Number(r.price);
+          // The offer holds an AMOUNT, so the price Odoo shows is computed
+          // here from THIS tier's own list price — the same helper the app and
+          // the basket use, so the three cannot disagree about which way the
+          // price moved or by how much.
+          return {
+            conditionCode: r.conditionCode ?? null,
+            price: base,
+            offerPrice: offer
+              ? priceAfterOffer(base, Number(offer.amount), offer.audience)
+              : 0,
+            // Sent so the Odoo sheet can state the saving rather than leaving
+            // the reader to work it out from two numbers.
+            offerPercentage: offer
+              ? offerPercentage(base, Number(offer.amount))
+              : 0,
+            offerValidUntil: offer?.validUntil ?? null,
+          };
+        }),
       );
     }
+  }
+
+  /**
+   * Live offers for one material, aimed at the buyers of this tier, keyed by
+   * the condition each names ('' for an offer on the plain price).
+   *
+   * Matched on ROLE rather than tier because that is how an offer is targeted:
+   * a factory-tier price sheet is read by factories, so only offers reaching
+   * factories belong on it. An untargeted offer reaches everyone and therefore
+   * belongs on every sheet.
+   */
+  private async liveOffersByCondition(
+    productId: string,
+    tier: PricingTier,
+  ): Promise<Map<string, Offer>> {
+    const role = tier === PricingTier.FACTORY ? Role.FACTORY : Role.EXTERNAL_PARTNER;
+    const rows = await this.offerRepo
+      .createQueryBuilder('o')
+      .where('o.productId = :productId', { productId })
+      // This sheet is a BUYER's, so only a buyer offer belongs on it. Without
+      // the filter a seller offer with no roles named — which reads as "both
+      // roles of its audience" — matched the row below and was applied here as
+      // an INCREASE, quietly raising what a factory is charged.
+      .andWhere('o.audience = :audience', { audience: OfferAudience.BUYERS })
+      .andWhere('(o.targetRoles IS NULL OR :role = ANY(o.targetRoles))', { role })
+      .andWhere('o.isActive = true')
+      .andWhere('o.validFrom <= NOW()')
+      .andWhere('(o.validUntil IS NULL OR o.validUntil > NOW())')
+      // Biggest reduction wins a tie on the same grade. Ordered by the AMOUNT,
+      // not by a final price: the offer no longer stores one, and the column
+      // this used to read (`offerPrice`) is gone — which failed every push with
+      // "column o.offerprice does not exist", leaving the Odoo sheet frozen on
+      // the numbers it happened to hold when the model changed.
+      .orderBy('o.amount', 'DESC')
+      .getMany();
+
+    const map = new Map<string, Offer>();
+    for (const o of rows) {
+      const key = o.conditionCode ?? '';
+      if (!map.has(key)) map.set(key, o);
+    }
+    return map;
   }
 
   /** All currently-effective pricing rows of a product for a given tier. */
@@ -923,7 +996,8 @@ export class OdooSyncProcessor extends WorkerHost {
         // NOT NULL here, and refusing the whole adoption over a missing code
         // would keep a real warehouse invisible over a cosmetic field.
         code: info.code || `ODOO-${odooWarehouseId}`,
-        isActive: true,
+        // `state` defaults to ACTIVE and is then set from Odoo's own state below
+        // / on the next sync — the removed `isActive` flag was redundant with it.
         odooSyncStatus: OdooSyncStatus.SYNCED,
       }),
     );
@@ -1343,6 +1417,24 @@ export class OdooSyncProcessor extends WorkerHost {
         await this.mediaRepo.update(
           { id: In(payload.rejectedMediaIds), ownerId: profile.id },
           { status: statusMedia.REJECTED },
+        );
+      }
+      // ACCEPTING one travels the same way, and did not before: the reviewer
+      // marked a document acceptable in Odoo and the mirror went on holding it
+      // REJECTED. The driver could then still be asked to replace a file that
+      // had already been taken, and the backend's approval gate went on
+      // counting a rejection that no longer existed.
+      //
+      // Any outstanding request is closed with it — an accepted document is not
+      // something he still owes.
+      if (payload.approvedMediaIds?.length) {
+        await this.mediaRepo.update(
+          { id: In(payload.approvedMediaIds), ownerId: profile.id },
+          {
+            status: statusMedia.APPROVED,
+            reuploadRequestedAt: null,
+            reuploadReason: null,
+          },
         );
       }
       return;

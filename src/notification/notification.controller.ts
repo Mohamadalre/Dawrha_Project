@@ -59,6 +59,18 @@ export class NotificationController {
     return this.notificationService.getNotificationById(user.id, id);
   }
 
+
+  @Patch('read-all')
+  async markAllAsRead(@CurrentUser() user: Account) {
+    return this.notificationService.markAllAsRead(user.id);
+  }
+
+
+  @Delete('clear-all')
+  async clearAllNotifications(@CurrentUser() user: Account) {
+    return this.notificationService.clearAllNotifications(user.id);
+  }
+
   @Patch(':id/read')
   async markAsRead(
     @CurrentUser() user: Account,
@@ -67,10 +79,7 @@ export class NotificationController {
     return this.notificationService.markAsRead(user.id, id);
   }
 
-  @Patch('read-all')
-  async markAllAsRead(@CurrentUser() user: Account) {
-    return this.notificationService.markAllAsRead(user.id);
-  }
+
 
   @Delete(':id')
   async deleteNotification(
@@ -80,8 +89,5 @@ export class NotificationController {
     return this.notificationService.deleteNotification(user.id, id);
   }
 
-  @Delete('clear-all')
-  async clearAllNotifications(@CurrentUser() user: Account) {
-    return this.notificationService.clearAllNotifications(user.id);
-  }
+
 }

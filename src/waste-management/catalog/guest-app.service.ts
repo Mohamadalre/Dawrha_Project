@@ -308,7 +308,7 @@ export class GuestAppService {
         product_id: o.productId,
         product_name: o.product?.name ?? null,
         product_image: o.product?.imageURL ?? null,
-        offer_price: Number(o.offerPrice),
+        amount: Number(o.amount),
         discount_percentage: Number(o.discountPercentage),
         condition: o.conditionCode ?? null,
         description: o.description ?? null,
@@ -458,7 +458,7 @@ export class GuestAppService {
         unit_label: unitLabels.get(p.unitType) ?? p.unitType,
         prices: mapTierPrices(audience, prices.get(p.id) ?? [], p.id, conditionLabels),
         has_offer: !!offer,
-        offer_price: offer ? Number(offer.offerPrice) : null,
+        offer_amount: offer ? Number(offer.amount) : null,
         discount_percentage: offer ? Number(offer.discountPercentage) : null,
         currency: 'JOD',
         // A visitor can look at all of this; they cannot act on any of it.

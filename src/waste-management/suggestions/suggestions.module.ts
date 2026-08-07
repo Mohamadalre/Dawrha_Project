@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PermissionsModule } from '@src/permission/permissions.module';
 import { NotificationModule } from '@src/notification/notification.module';
+import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
 import { Account } from '@src/user/entities/account.entity';
 import { ProductSuggestion } from '../entities/product-suggestion.entity';
 import { WasteCategory } from '../entities/waste-category.entity';
@@ -18,6 +19,7 @@ import { SuggestionsService } from './suggestions.service';
     TypeOrmModule.forFeature([ProductSuggestion, Account, WasteCategory]),
     PermissionsModule,
     NotificationModule,
+    CloudinaryModule,
     WasteCommonModule,
   ],
   controllers: [SuggestionsController, AdminSuggestionsController],

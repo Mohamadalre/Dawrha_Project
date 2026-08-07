@@ -15,12 +15,13 @@ import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { CartService } from './cart.service';
-import { AddOfferToCartDto, AddToCartDto, UpdateCartItemDto } from './dto/cart.dto';
+import { AddToCartDto, UpdateCartItemDto } from './dto/cart.dto';
 
 /**
- * Cart APIs for every buyer role. Citizen carts enforce a daily unit cap;
- * company/factory/free-facility carts enforce only the minimum-order rule
- * (no daily cap) — handled inside CartService via per-role CART_LIMITS.
+ * Cart APIs for every buyer role. The cart is just a basket — it carries no
+ * quantity floor or daily unit cap. The commercial guardrails are VALUE-based
+ * and admin-managed (minimum order value + spending cap) and are enforced at
+ * CHECKOUT, the one place a basket becomes money.
  */
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller({ path: 'cart', version: '1' })
@@ -58,12 +59,10 @@ export class CartController {
     return this.cartService.removeItem(user, itemId);
   }
 
-  @Post('offers')
-  @Permissions('cart.manage')
-  async addOffer(@CurrentUser() user, @Body() dto: AddOfferToCartDto) {
-    const result = await this.cartService.addOffer(user, dto);
-    return { message: 'Offer added to cart', result };
-  }
+  // NOTE: there is no separate "add offer to cart" route any more. An offer is
+  // just a price on a MATERIAL, so adding the material (POST items) already
+  // applies whatever offer is live for the caller's role — a second route would
+  // be a second way to do the same thing, out of step the moment one changed.
 
   /** Clears the entire cart (removes all items). */
   @Delete()

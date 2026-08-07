@@ -25,6 +25,7 @@ describe('OdooSyncProcessor', () => {
   let collectorRepo: any;
   let shiftChangeRepo: any;
   let mediaRepo: any;
+  let offerRepo: any;
 
   beforeEach(() => {
     // The compensation tests deliberately trigger failures; silence the logger.
@@ -102,6 +103,7 @@ describe('OdooSyncProcessor', () => {
     const handoverRepo: any = mkRepo();
     const userDeviceRepo: any = { ...mkRepo(), update: jest.fn().mockResolvedValue({ affected: 1 }) };
     mediaRepo = { ...mkRepo(), update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    offerRepo = mkRepo();
 
     processor = new OdooSyncProcessor(
       odoo,
@@ -109,6 +111,7 @@ describe('OdooSyncProcessor', () => {
       categoryRepo,
       productRepo,
       pricingRepo,
+      offerRepo,
       accountRepo,
       warehouseRepo,
       inventoryRepo,

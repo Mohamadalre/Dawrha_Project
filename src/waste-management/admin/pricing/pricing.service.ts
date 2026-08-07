@@ -18,6 +18,7 @@ import {
   isPricedPerCondition,
 } from './pricing-shape';
 import { ProductConditionsService } from '../product-conditions.service';
+import { OfferSettlementService } from '@src/waste-management/common/providers/offer-settlement.service';
 import { UpdateTierPriceDto } from './dto/update-tier-price.dto';
 import { UpdatePricingTableDto } from './dto/update-pricing-table.dto';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
@@ -42,6 +43,15 @@ const CONDITION_TIERS = [PricingTier.FACTORY, PricingTier.FREE_FACILITY];
  */
 export interface ConditionLine {
   condition: string | null;
+  /**
+   * The grade this price is filed against, by id.
+   *
+   * The code beside it is the label Odoo and the basket read; THIS is the link.
+   * Both travel together from the one place that resolves them, so a price can
+   * never be attached to one grade and labelled as another — which on this
+   * table means money charged for something the buyer did not order.
+   */
+  conditionId: string | null;
   price: number;
 }
 
@@ -83,14 +93,44 @@ export class PricingService {
     private readonly cache: CatalogCacheService,
     private readonly conditions: ConditionsService,
     private readonly productConditions: ProductConditionsService,
+    private readonly offerSettlement: OfferSettlementService,
   ) {}
+
+  // ---------------------------------------------------------------------------
+  /**
+   * The material a pricing write is about.
+   *
+   * A WITHDRAWN MATERIAL MAY STILL BE PRICED, deliberately — and this note
+   * exists because the opposite was tried and was worse.
+   *
+   * Blocking it looks safe: an inactive material is off the shelf, so prices
+   * written on it reach nobody. But follow what an administrator must then do
+   * to correct a wrong price on a withdrawn material — reactivate it, which
+   * publishes the WRONG price to every buyer, and only then fix it. The block
+   * forces the bad number to go live before it can be repaired.
+   *
+   * Preparing prices while a material is withdrawn is the natural order:
+   * withdraw, correct, republish. Nothing is exposed in the meantime, because
+   * every catalogue query already filters on `isActive` — the material's own
+   * flag is what hides it, not a restriction on editing it.
+   *
+   * OFFERS are the opposite case and are still refused (see
+   * `AdminCatalogService.createOffer`). A price is a standing attribute a
+   * material carries whether or not it is on sale; an offer is a promotion, and
+   * promoting something nobody can buy is meaningless — it would also lie
+   * dormant and spring back at reactivation.
+   */
+  private async productOrThrow(productId: string): Promise<Product> {
+    const product = await this.productRepo.findOne({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Product not found');
+    return product;
+  }
 
   // ---------------------------------------------------------------------------
   // Full-list update (all four tiers)
   // ---------------------------------------------------------------------------
   async setPricing(adminId: string, productId: string, dto: SetPricingDto) {
-    const product = await this.productRepo.findOne({ where: { id: productId } });
-    if (!product) throw new NotFoundException('Product not found');
+    const product = await this.productOrThrow(productId);
 
     const effectiveFrom = dto.effective_from ? new Date(dto.effective_from) : new Date();
     // The shape of a price list is decided by the MATERIAL, not by the tier
@@ -109,10 +149,10 @@ export class PricingService {
     await this.insertCurrent(productId, PricingTier.INDIVIDUAL, dto.individual, DEFAULT_CURRENCY, effectiveFrom, null);
     await this.insertCurrent(productId, PricingTier.COMPANY, dto.company, DEFAULT_CURRENCY, effectiveFrom, null);
     for (const line of factoryLines) {
-      await this.insertCurrent(productId, PricingTier.FACTORY, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition);
+      await this.insertCurrent(productId, PricingTier.FACTORY, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition, line.conditionId);
     }
     for (const line of freeFacilityLines) {
-      await this.insertCurrent(productId, PricingTier.FREE_FACILITY, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition);
+      await this.insertCurrent(productId, PricingTier.FREE_FACILITY, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition, line.conditionId);
     }
 
     const updatedCarts = await this.repriceActiveCarts(productId, {
@@ -122,6 +162,11 @@ export class PricingService {
       [PricingTier.FREE_FACILITY]: toPriceMap(freeFacilityLines),
     });
 
+    // The price just moved, so every offer on this material has to be
+    // re-derived against it: the stored percentage is now wrong, and an
+    // amount that no longer fits would make the price NEGATIVE. Done BEFORE
+    // the push so Odoo receives the corrected picture, not the broken one.
+    await this.offerSettlement.resettle(productId, adminId);
     await this.odooSync.enqueueUpdatePricing({ productId });
     await this.audit.record({
       userId: adminId,
@@ -136,7 +181,12 @@ export class PricingService {
         effectiveFrom,
       },
     });
-    await this.cache.invalidate('products');
+    // 'offers' too, not only 'products': the offers listing shows each offer's
+    // price and percentage DERIVED from the material's base price, so a price
+    // change leaves those figures stale in the cached offers page unless it is
+    // dropped here as well. This was the bug where editing a price left the
+    // offers route serving the old numbers.
+    await this.cache.invalidate('products', 'offers');
 
     return {
       product_id: productId,
@@ -175,8 +225,7 @@ export class PricingService {
     productId: string,
     dto: UpdatePricingTableDto,
   ) {
-    const product = await this.productRepo.findOne({ where: { id: productId } });
-    if (!product) throw new NotFoundException('Product not found');
+    const product = await this.productOrThrow(productId);
 
     const touched: string[] = [];
     if (dto.individual === undefined && dto.company === undefined
@@ -214,7 +263,7 @@ export class PricingService {
       await this.archiveCurrent(productId, tier, PricingArchiveReason.UPDATED, adminId);
       for (const line of normalized) {
         await this.insertCurrent(
-          productId, tier, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition);
+          productId, tier, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition, line.conditionId);
       }
       linesByTier.set(tier, normalized);
       touched.push(tier);
@@ -236,8 +285,18 @@ export class PricingService {
 
     // Odoo prices its warehouse orders from these, and the catalogue caches
     // them, so both are told immediately rather than left to drift.
+    // The price just moved, so every offer on this material has to be
+    // re-derived against it: the stored percentage is now wrong, and an
+    // amount that no longer fits would make the price NEGATIVE. Done BEFORE
+    // the push so Odoo receives the corrected picture, not the broken one.
+    await this.offerSettlement.resettle(productId, adminId);
     await this.odooSync.enqueueUpdatePricing({ productId });
-    await this.cache.invalidate('products');
+    // 'offers' too, not only 'products': the offers listing shows each offer's
+    // price and percentage DERIVED from the material's base price, so a price
+    // change leaves those figures stale in the cached offers page unless it is
+    // dropped here as well. This was the bug where editing a price left the
+    // offers route serving the old numbers.
+    await this.cache.invalidate('products', 'offers');
     await this.audit.record({
       userId: adminId,
       action: 'UPDATE_PRICING_TABLE',
@@ -277,8 +336,7 @@ export class PricingService {
     tier: PricingTier,
     dto: UpdateTierPriceDto,
   ) {
-    const product = await this.productRepo.findOne({ where: { id: productId } });
-    if (!product) throw new NotFoundException('Product not found');
+    const product = await this.productOrThrow(productId);
 
     const graded = await this.productConditions.hasConditions(productId);
     const perCondition = isPricedPerCondition(tier, graded);
@@ -338,6 +396,11 @@ export class PricingService {
     );
 
     const updatedCarts = await this.repriceTier(productId, tier, dto.price, conditionCode);
+    // The price just moved, so every offer on this material has to be
+    // re-derived against it: the stored percentage is now wrong, and an
+    // amount that no longer fits would make the price NEGATIVE. Done BEFORE
+    // the push so Odoo receives the corrected picture, not the broken one.
+    await this.offerSettlement.resettle(productId, adminId);
     await this.odooSync.enqueueUpdatePricing({ productId });
     await this.audit.record({
       userId: adminId,
@@ -346,7 +409,12 @@ export class PricingService {
       entityId: productId,
       newValues: { tier, condition: conditionCode, price: dto.price, effectiveFrom },
     });
-    await this.cache.invalidate('products');
+    // 'offers' too, not only 'products': the offers listing shows each offer's
+    // price and percentage DERIVED from the material's base price, so a price
+    // change leaves those figures stale in the cached offers page unless it is
+    // dropped here as well. This was the bug where editing a price left the
+    // offers route serving the old numbers.
+    await this.cache.invalidate('products', 'offers');
 
     return {
       product_id: productId,
@@ -376,8 +444,7 @@ export class PricingService {
    * with no prices and leaving the warehouse to guess.
    */
   async deletePricing(adminId: string, productId: string) {
-    const product = await this.productRepo.findOne({ where: { id: productId } });
-    if (!product) throw new NotFoundException('Product not found');
+    const product = await this.productOrThrow(productId);
 
     let archived = 0;
     for (const tier of Object.values(PricingTier)) {
@@ -396,9 +463,19 @@ export class PricingService {
       entityId: productId,
       oldValues: { archived_rows: archived },
     });
-    await this.cache.invalidate('products');
+    // 'offers' too, not only 'products': the offers listing shows each offer's
+    // price and percentage DERIVED from the material's base price, so a price
+    // change leaves those figures stale in the cached offers page unless it is
+    // dropped here as well. This was the bug where editing a price left the
+    // offers route serving the old numbers.
+    await this.cache.invalidate('products', 'offers');
     // Clears the mirrored price rows in Odoo, which is what makes its price
     // sheet show the material as suspended.
+    // The price just moved, so every offer on this material has to be
+    // re-derived against it: the stored percentage is now wrong, and an
+    // amount that no longer fits would make the price NEGATIVE. Done BEFORE
+    // the push so Odoo receives the corrected picture, not the broken one.
+    await this.offerSettlement.resettle(productId, adminId);
     await this.odooSync.enqueueUpdatePricing({ productId });
 
     return {
@@ -418,8 +495,7 @@ export class PricingService {
    * for FACTORY/FREE_FACILITY (null / empty when unpriced).
    */
   async getCurrentPricing(productId: string) {
-    const product = await this.productRepo.findOne({ where: { id: productId } });
-    if (!product) throw new NotFoundException('Product not found');
+    const product = await this.productOrThrow(productId);
 
     const rows = await this.pricingRepo.find({ where: { productId } });
 
@@ -488,9 +564,17 @@ export class PricingService {
    * actually priced at, and rewriting it would make every past invoice
    * unexplainable to the buyer who paid it.
    */
-  async correctPricingRow(adminId: string, pricingId: string, price: number) {
+  async correctPricingRow(
+    adminId: string,
+    pricingId: string,
+    dto: { price?: number; currency?: string },
+  ) {
     const row = await this.pricingRepo.findOne({ where: { id: pricingId } });
     if (!row) throw new NotFoundException('Price row not found');
+
+    if (dto.price === undefined && dto.currency === undefined) {
+      throw new BadRequestException('Send a price or a currency to correct');
+    }
 
     if (!this.isLive(row.effectiveFrom, row.effectiveUntil)) {
       throw new BadRequestException(
@@ -498,25 +582,43 @@ export class PricingService {
       );
     }
 
-    const before = Number(row.price);
-    row.price = String(price);
+    const before = { price: Number(row.price), currency: row.currency };
+    if (dto.price !== undefined) row.price = String(dto.price);
+    if (dto.currency !== undefined) row.currency = dto.currency;
     await this.pricingRepo.save(row);
 
-    // Carts holding this material at the old figure are re-priced, or the
-    // buyer checks out at a number the catalogue no longer shows.
-    const updatedCarts = await this.repriceTier(
-      row.productId, row.tier, price, row.conditionCode ?? null,
-    );
+    // Carts are re-priced ONLY when the figure moved — a currency correction
+    // changes the label the same number is quoted in, not the number itself, so
+    // there is nothing to re-price and no offer to re-settle. When the price did
+    // move, carts holding this material at the old figure follow it or the buyer
+    // checks out at a number the catalogue no longer shows.
+    let updatedCarts = 0;
+    if (dto.price !== undefined) {
+      updatedCarts = await this.repriceTier(
+        row.productId, row.tier, dto.price, row.conditionCode ?? null,
+      );
+      await this.offerSettlement.resettle(row.productId, adminId);
+    }
+    // Odoo prices from these rows and the catalogue caches them, so either kind
+    // of correction — price or currency — is pushed and the caches dropped.
     await this.odooSync.enqueueUpdatePricing({ productId: row.productId });
     await this.audit.record({
       userId: adminId,
       action: 'CORRECT_PRICING_ROW',
       entityType: 'product_pricing',
       entityId: row.id,
-      oldValues: { price: before },
-      newValues: { price },
+      oldValues: before,
+      newValues: {
+        price: dto.price ?? before.price,
+        currency: dto.currency ?? before.currency,
+      },
     });
-    await this.cache.invalidate('products');
+    // 'offers' too, not only 'products': the offers listing shows each offer's
+    // price and percentage DERIVED from the material's base price, so a price
+    // change leaves those figures stale in the cached offers page unless it is
+    // dropped here as well. This was the bug where editing a price left the
+    // offers route serving the old numbers.
+    await this.cache.invalidate('products', 'offers');
 
     return {
       message: 'Price corrected successfully',
@@ -525,9 +627,64 @@ export class PricingService {
       tier: row.tier.toLowerCase(),
       condition_id: row.conditionId ?? null,
       condition: row.conditionCode ?? null,
-      price,
+      price: Number(row.price),
       currency: row.currency,
       updated_cart_items: updatedCarts,
+    };
+  }
+
+  /**
+   * Re-denominate a material's CURRENT price list — the live rows only.
+   *
+   * A currency change is a label change, not a price change: the figures stay
+   * exactly as they were, quoted now in a different currency. So this edits the
+   * live rows in place — it does NOT archive them, because nothing commercial
+   * moved — and it never touches the history table, so every past row still
+   * reports the currency the order that paid it was actually charged in.
+   *
+   * Omit `tier` to move every live tier together; name one to move just it.
+   */
+  async updateCurrentCurrency(
+    adminId: string,
+    productId: string,
+    currency: string,
+    tier?: PricingTier,
+  ) {
+    const product = await this.productOrThrow(productId);
+
+    const live = await this.liveRows(productId);
+    const target = tier ? live.filter((r) => r.tier === tier) : live;
+    if (!target.length) {
+      throw new BadRequestException(
+        tier
+          ? `This material has no live ${tier} price to re-denominate`
+          : 'This material has no live price to re-denominate',
+      );
+    }
+
+    const before = target[0].currency;
+    for (const r of target) r.currency = currency;
+    await this.pricingRepo.save(target);
+
+    // The figure did not move, so no cart is re-priced and no offer re-settled;
+    // but Odoo and the catalogue both display the currency, so both are told.
+    await this.odooSync.enqueueUpdatePricing({ productId });
+    await this.audit.record({
+      userId: adminId,
+      action: 'UPDATE_PRICING_CURRENCY',
+      entityType: 'product_pricing',
+      entityId: productId,
+      oldValues: { currency: before },
+      newValues: { currency, tier: tier ?? 'ALL', rows: target.length },
+    });
+    await this.cache.invalidate('products', 'offers');
+
+    return {
+      message: 'Pricing currency updated successfully',
+      product_id: productId,
+      tier: tier ? tier.toLowerCase() : 'all',
+      currency,
+      rows_affected: target.length,
     };
   }
 
@@ -548,8 +705,7 @@ export class PricingService {
     effectiveUntil: Date,
     tier?: PricingTier,
   ) {
-    const product = await this.productRepo.findOne({ where: { id: productId } });
-    if (!product) throw new NotFoundException('Product not found');
+    const product = await this.productOrThrow(productId);
 
     if (effectiveUntil.getTime() <= Date.now()) {
       throw new BadRequestException(
@@ -572,6 +728,11 @@ export class PricingService {
     }
     await this.pricingRepo.save(live);
 
+    // The price just moved, so every offer on this material has to be
+    // re-derived against it: the stored percentage is now wrong, and an
+    // amount that no longer fits would make the price NEGATIVE. Done BEFORE
+    // the push so Odoo receives the corrected picture, not the broken one.
+    await this.offerSettlement.resettle(productId, adminId);
     await this.odooSync.enqueueUpdatePricing({ productId });
     await this.audit.record({
       userId: adminId,
@@ -580,7 +741,12 @@ export class PricingService {
       entityId: productId,
       newValues: { tier: tier ?? 'ALL', effectiveUntil },
     });
-    await this.cache.invalidate('products');
+    // 'offers' too, not only 'products': the offers listing shows each offer's
+    // price and percentage DERIVED from the material's base price, so a price
+    // change leaves those figures stale in the cached offers page unless it is
+    // dropped here as well. This was the bug where editing a price left the
+    // offers route serving the old numbers.
+    await this.cache.invalidate('products', 'offers');
 
     return {
       message: 'Pricing expiry set successfully',
@@ -596,8 +762,7 @@ export class PricingService {
     productId: string,
     options: { as_of?: string; page?: number; limit?: number } = {},
   ) {
-    const product = await this.productRepo.findOne({ where: { id: productId } });
-    if (!product) throw new NotFoundException('Product not found');
+    const product = await this.productOrThrow(productId);
 
     const labels = await this.conditions.labelMapFor([productId]);
 
@@ -711,38 +876,67 @@ export class PricingService {
     const perCondition = isPricedPerCondition(tier, materialHasConditions);
 
     if (!perCondition) {
-      if (lines.length !== 1 || lines[0]?.condition) {
+      if (lines.length !== 1 || lines[0]?.condition || lines[0]?.condition_id) {
         throw new BadRequestException(
           describeExpectedShape(tier, materialHasConditions),
         );
       }
-      return [{ condition: null, price: lines[0].price }];
+      return [{ condition: null, conditionId: null, price: lines[0].price }];
     }
 
-    // Graded: every line must name a grade this material actually has. A code
-    // borrowed from another material would price a grade nobody can order.
+    // Graded: every line must name a grade this material actually has —
+    // preferably BY ID, since a code is unique only inside its own material
+    // and one borrowed from another would price a grade nobody can order.
     const allowed = await this.productConditions.activeCodes(productId);
     const seen = new Set<string>();
     const out: ConditionLine[] = [];
     for (const line of lines) {
-      const code = (line.condition ?? '').trim().toUpperCase();
-      if (!code) {
-        throw new BadRequestException(
-          describeExpectedShape(tier, materialHasConditions),
+      let code: string;
+      let conditionId: string | null;
+
+      if (line.condition_id) {
+        // The id names one row for good. Resolved against THIS material, so a
+        // grade belonging to another is refused here rather than priced.
+        const grade = await this.productConditions.resolveForProduct(
+          line.condition_id,
+          productId,
         );
+        if (line.condition && line.condition.trim().toUpperCase() !== grade.code) {
+          // Refused rather than settled by precedence: either could have been
+          // the intent, and quietly picking one is how a grade gets priced as
+          // another.
+          throw new BadRequestException(
+            `condition_id refers to "${grade.code}" but condition says "${line.condition}". Send one, or send both agreeing.`,
+          );
+        }
+        code = grade.code;
+        conditionId = grade.id;
+      } else {
+        code = (line.condition ?? '').trim().toUpperCase();
+        if (!code) {
+          throw new BadRequestException(
+            describeExpectedShape(tier, materialHasConditions),
+          );
+        }
+        if (!allowed.includes(code)) {
+          throw new BadRequestException(
+            `"${code}" is not a condition of this material — it has: ${allowed.join(', ')}`,
+          );
+        }
+        // Resolved to the row so the link is written even for a caller that
+        // still speaks in codes — a price left unlinked is one the grade can
+        // be deleted out from under.
+        const row = await this.productConditions.findByCodeForProduct(productId, code);
+        conditionId = row?.id ?? null;
       }
-      if (!allowed.includes(code)) {
-        throw new BadRequestException(
-          `"${code}" is not a condition of this material — it has: ${allowed.join(', ')}`,
-        );
-      }
+
       if (seen.has(code)) {
         throw new BadRequestException(
           `Duplicate condition "${code}" in the price list`,
         );
       }
       seen.add(code);
-      out.push({ condition: code, price: line.price });
+      out.push({ condition: code, conditionId, price: line.price });
     }
 
     // Every grade must be priced. A half-filled list leaves buyers unable to
@@ -876,7 +1070,13 @@ export class PricingService {
     const rows = await this.liveRows(productId);
     return rows
       .filter((r) => r.tier === tier)
-      .map((r) => ({ condition: r.conditionCode ?? null, price: Number(r.price) }));
+      .map((r) => ({
+        condition: r.conditionCode ?? null,
+        // Read back off the stored row, so a line carried forward keeps the
+        // link it was written with rather than silently losing it.
+        conditionId: r.conditionId ?? null,
+        price: Number(r.price),
+      }));
   }
 
   private isLive(from: Date, until?: Date | null): boolean {
