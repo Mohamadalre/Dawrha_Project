@@ -526,5 +526,9 @@
   "Warehouse sync queued": "تمت جدولة مزامنة المستودع",
   "Application re-opened — it is under review again": "تمت إعادة فتح الطلب — وهو قيد المراجعة من جديد",
   "This document has not been requested from you — you will be notified if a replacement is needed": "لم تُطلب منك هذه الوثيقة — سيصلك إشعار إذا لزم استبدالها",
-  "Your application is not awaiting any changes right now": "طلبك لا ينتظر أي تعديل في الوقت الحالي"
+  "Your application is not awaiting any changes right now": "طلبك لا ينتظر أي تعديل في الوقت الحالي",
+  "Wallet fetched successfully": "تم جلب المحفظة بنجاح",
+  "Offer timeline fetched successfully": "تم جلب الجدول الزمني للعرض بنجاح",
+  "currency must be a 3-letter ISO code, e.g. JOD": "يجب أن تكون العملة رمز ISO من ثلاثة أحرف، مثل JOD",
+  "Pricing currency updated successfully": "تم تحديث عملة التسعير بنجاح"
 }

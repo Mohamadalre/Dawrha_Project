@@ -406,6 +406,16 @@ describe('CatalogService', () => {
   describe('getProductAvailability', () => {
     const factory = { id: 'f1', role: Role.FACTORY };
 
+    // The availability view is GATED: a grade only appears if it is both in
+    // stock AND priced for the caller's tier. So a test that expects a result
+    // has to supply the tier price sheet, or every grade is dropped and the
+    // material is withheld.
+    const mockPrices = (rows: Array<{ conditionCode: string | null; price: string }>) => {
+      const pqb = makeQb();
+      pqb.getMany.mockResolvedValue(rows);
+      pricingRepo.createQueryBuilder.mockReturnValue(pqb);
+    };
+
     it('throws NotFound when the product does not exist or is inactive', async () => {
       productRepo.findOne.mockResolvedValue(null);
       assigned.getAssignedCategoryIds.mockResolvedValue(null);
@@ -415,21 +425,26 @@ describe('CatalogService', () => {
       );
     });
 
-    it('returns zero stock without querying inventory when the product is not synced to Odoo', async () => {
+    it('withholds a product not synced to Odoo (no stock lines can exist)', async () => {
       productRepo.findOne.mockResolvedValue({ id: 'p1', name: 'PET', unitType: 'KG', categoryId: 'c1', odooProductId: null });
       assigned.getAssignedCategoryIds.mockResolvedValue(null);
 
-      const res: any = await service.getProductAvailability(factory, 'p1');
-
-      expect(res.total_available).toBe(0);
-      expect(res.in_stock).toBe(false);
-      expect(res.warehouses).toEqual([]);
+      // No stock anywhere → the material is not returned as an empty shell.
+      await expect(service.getProductAvailability(factory, 'p1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
       expect(inventoryRepo.createQueryBuilder).not.toHaveBeenCalled();
     });
 
-    it('aggregates per-warehouse availability (quantity - reserved, clamped at 0)', async () => {
+    it('aggregates availability and drops a warehouse with nothing available', async () => {
       productRepo.findOne.mockResolvedValue({ id: 'p1', name: 'PET', unitType: 'KG', categoryId: 'c1', odooProductId: 7 });
       assigned.getAssignedCategoryIds.mockResolvedValue(null);
+      // Both grades priced, so the ONLY reason w2 disappears is that it has
+      // nothing available — isolating the stock gate from the price gate.
+      mockPrices([
+        { conditionCode: 'EXCELLENT', price: '10.000' },
+        { conditionCode: 'UNGRADED', price: '8.000' },
+      ]);
 
       const qb = makeQb();
       qb.getMany.mockResolvedValue([
@@ -445,7 +460,7 @@ describe('CatalogService', () => {
           warehouseId: 'w2',
           conditionCode: 'UNGRADED',
           quantity: '10.000',
-          reservedQuantity: '25.000', // over-reserved → clamps to 0
+          reservedQuantity: '25.000', // over-reserved → 0 available → dropped
           syncedAt: null,
           warehouse: { name: 'Zarqa', code: 'ZRQ', address: 'st 5' },
         },
@@ -456,15 +471,52 @@ describe('CatalogService', () => {
 
       expect(res.total_available).toBe(70);
       expect(res.in_stock).toBe(true);
-      expect(res.warehouses).toHaveLength(2);
+      expect(res.warehouses).toHaveLength(1);
       expect(res.warehouses[0]).toMatchObject({ warehouse_id: 'w1', available: 70 });
       expect(res.warehouses[0].conditions[0]).toMatchObject({
         condition: 'EXCELLENT',
         condition_label: 'ممتازة',
         quantity: 100,
         available: 70,
+        price: 10,
       });
-      expect(res.warehouses[1]).toMatchObject({ warehouse_id: 'w2', available: 0 });
+      // The over-reserved warehouse is gone, not shown as an empty entry.
+      expect(res.warehouses.find((w: any) => w.warehouse_id === 'w2')).toBeUndefined();
+    });
+
+    it('drops a grade that is in stock but has no live price for the tier', async () => {
+      productRepo.findOne.mockResolvedValue({ id: 'p1', name: 'PET', unitType: 'KG', categoryId: 'c1', odooProductId: 7 });
+      assigned.getAssignedCategoryIds.mockResolvedValue(null);
+      mockPrices([{ conditionCode: 'EXCELLENT', price: '10.000' }]); // GOOD unpriced
+
+      const qb = makeQb();
+      qb.getMany.mockResolvedValue([
+        { warehouseId: 'w1', conditionCode: 'EXCELLENT', quantity: '100', reservedQuantity: '0', syncedAt: null, warehouse: { name: 'A', code: 'A', address: null } },
+        { warehouseId: 'w1', conditionCode: 'GOOD', quantity: '50', reservedQuantity: '0', syncedAt: null, warehouse: { name: 'A', code: 'A', address: null } },
+      ]);
+      inventoryRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const res: any = await service.getProductAvailability(factory, 'p1');
+
+      const codes = res.warehouses[0].conditions.map((c: any) => c.condition);
+      expect(codes).toEqual(['EXCELLENT']); // GOOD dropped (no price)
+      expect(res.total_available).toBe(100);
+    });
+
+    it('withholds a material whose grades are all unpriced', async () => {
+      productRepo.findOne.mockResolvedValue({ id: 'p1', name: 'PET', unitType: 'KG', categoryId: 'c1', odooProductId: 7 });
+      assigned.getAssignedCategoryIds.mockResolvedValue(null);
+      mockPrices([]); // no price for any grade
+
+      const qb = makeQb();
+      qb.getMany.mockResolvedValue([
+        { warehouseId: 'w1', conditionCode: 'EXCELLENT', quantity: '100', reservedQuantity: '0', syncedAt: null, warehouse: { name: 'A', code: 'A', address: null } },
+      ]);
+      inventoryRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await expect(service.getProductAvailability(factory, 'p1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
 
     it('hides products outside an institution\'s assigned categories', async () => {
@@ -489,9 +541,14 @@ describe('CatalogService', () => {
       productRepo.findOne.mockResolvedValue({ id: 'p1', name: 'PET', unitType: 'KG', categoryId: 'c1', odooProductId: 7 });
       assigned.getAssignedCategoryIds.mockResolvedValue(null);
       buyerProfiles.provinceForBuyer.mockResolvedValue('pv1');
+      mockPrices([{ conditionCode: 'EXCELLENT', price: '10.000' }]);
 
       const qb = makeQb();
-      qb.getMany.mockResolvedValue([]);
+      // One priced, in-stock grade so a result is returned and the scope can be
+      // asserted; the query-building assertions below run regardless.
+      qb.getMany.mockResolvedValue([
+        { warehouseId: 'w1', conditionCode: 'EXCELLENT', quantity: '50', reservedQuantity: '0', syncedAt: null, warehouse: { name: 'A', code: 'A', address: null } },
+      ]);
       inventoryRepo.createQueryBuilder.mockReturnValue(qb);
 
       const res: any = await service.getProductAvailability(factory, 'p1');
@@ -509,9 +566,12 @@ describe('CatalogService', () => {
       productRepo.findOne.mockResolvedValue({ id: 'p1', name: 'PET', unitType: 'KG', categoryId: 'c1', odooProductId: 7 });
       assigned.getAssignedCategoryIds.mockResolvedValue(null);
       buyerProfiles.provinceForBuyer.mockResolvedValue('pv1');
+      mockPrices([{ conditionCode: 'EXCELLENT', price: '10.000' }]);
 
       const qb = makeQb();
-      qb.getMany.mockResolvedValue([]);
+      qb.getMany.mockResolvedValue([
+        { warehouseId: 'w1', conditionCode: 'EXCELLENT', quantity: '50', reservedQuantity: '0', syncedAt: null, warehouse: { name: 'A', code: 'A', address: null } },
+      ]);
       inventoryRepo.createQueryBuilder.mockReturnValue(qb);
 
       await service.getProductAvailability(factory, 'p1');
@@ -529,9 +589,12 @@ describe('CatalogService', () => {
       // Half-finished profile: narrowing to "nowhere" would report zero stock
       // for a catalogue that is perfectly well supplied.
       buyerProfiles.provinceForBuyer.mockResolvedValue(null);
+      mockPrices([{ conditionCode: 'EXCELLENT', price: '10.000' }]);
 
       const qb = makeQb();
-      qb.getMany.mockResolvedValue([]);
+      qb.getMany.mockResolvedValue([
+        { warehouseId: 'w1', conditionCode: 'EXCELLENT', quantity: '50', reservedQuantity: '0', syncedAt: null, warehouse: { name: 'A', code: 'A', address: null } },
+      ]);
       inventoryRepo.createQueryBuilder.mockReturnValue(qb);
 
       const res: any = await service.getProductAvailability(factory, 'p1');

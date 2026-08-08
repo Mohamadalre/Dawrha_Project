@@ -40,6 +40,7 @@ import { ProfileDataProvider } from './providers/profile-data.provider';
 import { AccountStatusNotifier } from '@src/notification/account-status.notifier';
 import { UserDevice } from '@src/auth/entities/user-device.entity';
 import { ApplicationsCacheService } from './providers/applications-cache.service';
+import { PointsWalletService } from '@src/points-wallet/points-wallet.service';
 
 /** The roles whose applications are reviewed here. Drivers are reviewed in Odoo. */
 const REVIEWABLE_ROLES = [Role.FACTORY, Role.INSTITUTIONS, Role.EXTERNAL_PARTNER];
@@ -104,6 +105,7 @@ export class AccountManagementService {
     private readonly statusNotifier: AccountStatusNotifier,
     private readonly applicationsCache: ApplicationsCacheService,
     private readonly dataSource: DataSource,
+    private readonly pointsWallet: PointsWalletService,
   ) {}
 
   // ===========================================================================
@@ -816,6 +818,11 @@ export class AccountManagementService {
     });
 
     await this.applicationsCache.invalidate(account.role);
+    // Activating an institution/factory/free-facility opens its points wallet —
+    // created empty, once, the moment it becomes able to trade.
+    if (dto.status === AccountStatus.ACTIVE) {
+      await this.pointsWallet.ensureForAccount(accountId, account.role);
+    }
     await this.statusNotifier.notifyStatusDecision(accountId, dto.status, dto.description);
 
     return {

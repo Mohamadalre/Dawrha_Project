@@ -20,6 +20,7 @@ import { InactiveHandler } from './handlers/inactive.handler';
 import { NeedChangeHandler } from './handlers/needChange.handler';
 //import { JwtOnboardingStrategy } from './strategies/jwt-onboarding.strategy';
 import { CommonModule } from '@src/common/common.module';
+import { PointsWalletModule } from '@src/points-wallet/points-wallet.module';
 import { AccountStatusGuard } from './guards/account-status.guard';
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { AccountStatusGuard } from './guards/account-status.guard';
     UserModule,
     PassportModule,
     CommonModule,
+    PointsWalletModule,
     JwtModule.register({}),
     BullModule.registerQueue({
       name: 'mail-queue'

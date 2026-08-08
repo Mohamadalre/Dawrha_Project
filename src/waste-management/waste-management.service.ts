@@ -62,14 +62,21 @@ export class WasteManagementService {
   }
 
   /**
-   * Gets a paginated list of waste categories name
+   * Gets a paginated list of ACTIVE waste categories — id and name only.
+   *
+   * Only active categories are returned: a category the admin has deactivated
+   * must disappear from the pickers that buyers/sellers choose from, and an
+   * active one the admin adds must appear here. The projection is deliberately
+   * id + name (the minimum a selector needs), nothing else.
    *
    * @param page - Page number (default 1)
    * @param limit - Number of items per page (default 10)
-   * @returns List of waste categories with id and name
+   * @returns List of active waste categories with id and name
    */
   async findAllName(page = 1, limit = 10) {
     return await this.repo.find({
+      where: { isActive: true },
+      order: { name: 'ASC' },
       skip: (page - 1) * limit,
       take: limit,
       select: {

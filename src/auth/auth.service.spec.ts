@@ -37,6 +37,7 @@ describe('AuthService.resendOtpCode', () => {
       redis, // REDIS_CLIENT
       mailService, // mailService
       noop, noop, noop, noop, noop, noop, noop, // 7 login handlers
+      { ensureForAccount: jest.fn() } as any, // pointsWallet
     );
   };
 
@@ -125,6 +126,7 @@ describe('AuthService — accounts created through Google', () => {
       mailService,
       activeHandler as any,
       noop, noop, noop, noop, noop, noop, // remaining 6 handlers
+      { ensureForAccount: jest.fn() } as any, // pointsWallet
     );
   };
 
@@ -313,6 +315,7 @@ describe('AuthService.loginWithGoogle — the mailbox is already proven', () => 
       handler('REJECTED'),
       handler('INACTIVE'),
       handler('NEED_CHANGES'),
+      { ensureForAccount: jest.fn().mockResolvedValue(null) } as any, // pointsWallet
     );
   });
 

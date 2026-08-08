@@ -52,6 +52,7 @@ import { winstonLogger } from '@src/core/logger-config/winston.config';
 import { VerifyResetOtpDto } from './dto/verifyReset-otp.dto';
 import { Language } from '@src/common/enums/language.enum';
 import { AllowedAccountType, AppType } from './utils/constants/AllowedAccountType';
+import { PointsWalletService } from '@src/points-wallet/points-wallet.service';
 
 
 
@@ -79,7 +80,8 @@ export class AuthService {
     private blockedHandler: BlockedHandler,
     private rejectedHandler: RejectedHandler,
     private inactiveHandler: InactiveHandler,
-    private needChangeHandler: NeedChangeHandler
+    private needChangeHandler: NeedChangeHandler,
+    private readonly pointsWallet: PointsWalletService,
   ) {
     this.handlers = {
       [AccountStatus.ACTIVE]: this.activeHandler,
@@ -205,6 +207,11 @@ export class AuthService {
     })
 
     const updatedAccount = await this.userService.findById(userId);
+    // A citizen is ACTIVE the moment the code is confirmed — open their points
+    // wallet now (idempotent; a no-op for roles that go to PENDING_PROFILE).
+    if (updatedAccount.accountStatus === AccountStatus.ACTIVE) {
+      await this.pointsWallet.ensureForAccount(updatedAccount.id, updatedAccount.role);
+    }
     const handler = this.handlers[updatedAccount.accountStatus];
     const details = await handler.handle(updatedAccount, { deviceId, fcmToken, deviceType });
     await this.redisService.setRedisKey({ redisKey: `blackListTokenTemp:${userId}`, redisValue: jti, date: 1200 });
@@ -624,6 +631,12 @@ export class AuthService {
       await this.accountRepository.save(account);
     }
 
+    // Open a points wallet for an active account (idempotent — no-op if one
+    // already exists, or if the role is not wallet-eligible).
+    if (account.accountStatus === AccountStatus.ACTIVE) {
+      await this.pointsWallet.ensureForAccount(account.id, account.role);
+    }
+
     const handler = this.handlers[account.accountStatus];
     const details = await handler.handle(account, { deviceId, fcmToken, deviceType, rememberMy });
 
@@ -669,6 +682,12 @@ export class AuthService {
 
     await this.accountRepository.save(accountCreated);
 
+    // A citizen/admin Google sign-up is active immediately; admins never get a
+    // wallet, so ensureForAccount filters by role and creates one only for the
+    // eligible active roles.
+    if (accountCreated.accountStatus === AccountStatus.ACTIVE) {
+      await this.pointsWallet.ensureForAccount(accountCreated.id, accountCreated.role);
+    }
 
     const handler = this.handlers[accountCreated.accountStatus];
     const details = await handler.handle(accountCreated, { deviceId, fcmToken, deviceType });

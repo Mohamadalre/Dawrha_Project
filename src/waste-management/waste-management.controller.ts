@@ -7,6 +7,8 @@ import { Roles } from '@src/auth/decorators/roles.decorator';
 import { Role } from '@src/user/enums/role.enum';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
+import { AccountsStatus } from '@src/auth/decorators/account-status.decorator';
+import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { imageMemoryStorage } from '@src/common/config/multer/image-memory.config';
 
@@ -42,6 +44,16 @@ export class WasteManagementController {
    * @param page - Page number (default 1)
    * @returns Success message with waste categories list
    */
+  // Reachable while still onboarding: a factory / free facility / institution
+  // picks the categories it deals in DURING profile completion (PENDING_PROFILE)
+  // and again when asked to revise it (NEED_CHANGES), not only once ACTIVE.
+  // Without this the global guard would lock the list to ACTIVE accounts and the
+  // onboarding step could never load it.
+  @AccountsStatus(
+    AccountStatus.ACTIVE,
+    AccountStatus.PENDING_PROFILE,
+    AccountStatus.NEED_CHANGES,
+  )
   @Roles(Role.ADMIN, Role.EXTERNAL_PARTNER, Role.FACTORY, Role.INSTITUTIONS)
   @Get('waste-categories')
   async findAll(@Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number) {

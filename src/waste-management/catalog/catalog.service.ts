@@ -830,7 +830,14 @@ export class CatalogService {
       product, rows, conditionLabels, priceByCondition, provinceId);
   }
 
-  /** Live per-condition prices of the caller's tier (graded tiers only). */
+  /**
+   * Live prices of the caller's tier for a material (graded tiers only), keyed
+   * by condition code — with the conditionless BASE price stored under the empty
+   * key so a material that carries no grades can still be priced and gated.
+   *
+   * Empty for a flat-tier caller; this route is factory / free-facility only, so
+   * in practice the map is always the graded price sheet.
+   */
   private async callerConditionPrices(
     productId: string,
     caller: Caller,
@@ -843,17 +850,31 @@ export class CatalogService {
       .createQueryBuilder('pp')
       .where('pp.productId = :productId', { productId })
       .andWhere('pp.tier = :tier', { tier })
-      .andWhere('pp.conditionCode IS NOT NULL')
       .andWhere('pp.effectiveFrom <= NOW()')
       .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())')
       .getMany();
-    return new Map(rows.map((r) => [r.conditionCode!, Number(r.price)]));
+    // `conditionCode ?? ''` keeps the base price reachable at the same lookup a
+    // conditionless stock row uses (`r.conditionCode ?? ''`).
+    return new Map(rows.map((r) => [r.conditionCode ?? '', Number(r.price)]));
   }
 
   /**
-   * Groups the per-condition stock rows by warehouse: each warehouse shows its
-   * grades (condition, quantity, availability and — for graded-tier callers —
-   * the price of that grade).
+   * Groups the per-condition stock rows by warehouse — GATED, so the availability
+   * a factory / free facility sees is only what it could actually buy:
+   *
+   *   • a grade with nothing available (quantity fully reserved, or zero) is
+   *     dropped — you cannot order from an empty shelf;
+   *   • a grade with NO live price for the caller's tier is dropped — an
+   *     unpriced grade has no figure to charge and must not be offered;
+   *   • a warehouse left with no sellable grade is dropped with it;
+   *   • and if nothing at all survives, the MATERIAL itself is withheld
+   *     (`ProductNotFoundException`) rather than returned as an empty,
+   *     unbuyable shell — a material with no price, or none in stock in the
+   *     buyer's governorate, must not appear.
+   *
+   * This mirrors the rule the product listing already applies (only priced, in-
+   * stock materials appear); the availability view was the one place a zero /
+   * unpriced material could still leak through.
    */
   private mapAvailability(
     product: Product,
@@ -869,6 +890,16 @@ export class CatalogService {
       const quantity = Number(r.quantity);
       const reserved = Number(r.reservedQuantity);
       const available = Math.max(quantity - reserved, 0);
+
+      // Gate 1: nothing to sell in this grade → skip it.
+      if (available <= 0) continue;
+
+      // Gate 2: no live price for this grade/base → skip it. A material whose
+      // grades are all unpriced ends up with no surviving rows and is withheld
+      // below.
+      const price = priceByCondition.get(r.conditionCode ?? '') ?? null;
+      if (price === null) continue;
+
       totalAvailable += available;
 
       let entry = byWarehouse.get(r.warehouseId);
@@ -903,8 +934,13 @@ export class CatalogService {
         quantity,
         reserved_quantity: reserved,
         available,
-        price: priceByCondition.get(r.conditionCode) ?? null,
+        price,
       });
+    }
+
+    // Gate 3: no sellable grade anywhere → the material is not returned at all.
+    if (byWarehouse.size === 0) {
+      throw new ProductNotFoundException();
     }
 
     return {

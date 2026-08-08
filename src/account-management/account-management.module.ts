@@ -7,6 +7,7 @@ import { UserModule } from '@src/user/user.module';
 import { AuthModule } from '@src/auth/auth.module';
 import { NotificationModule } from '@src/notification/notification.module';
 import { PermissionsModule } from '@src/permission/permissions.module';
+import { PointsWalletModule } from '@src/points-wallet/points-wallet.module';
 import { AccountManagementController } from './account-management.controller';
 import { SelfAccountController } from './self-account.controller';
 import { AccountManagementService } from './account-management.service';
@@ -20,6 +21,7 @@ import { ApplicationsCacheService } from './providers/applications-cache.service
     AuthModule,
     NotificationModule,
     PermissionsModule,
+    PointsWalletModule,
   ],
   controllers: [AccountManagementController, SelfAccountController],
   providers: [AccountManagementService, ProfileDataProvider, ApplicationsCacheService],

@@ -36,6 +36,7 @@ import { AccountManagementModule } from './account-management/account-management
 import { TruckModule } from './truck/truck.module';
 import { OdooModule } from './odoo/odoo.module';
 import { WarehouseModule } from './warehouse/warehouse.module';
+import { PointsWalletModule } from './points-wallet/points-wallet.module';
 import { OrderModule } from './order/order.module';
 import { OdooSyncModule } from './odoo-sync/odoo-sync.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
@@ -102,7 +103,8 @@ import { ContentModule } from './content/content.module';
     MaintenanceModule,
     ReportsModule,
     ShiftModule,
-    ContentModule
+    ContentModule,
+    PointsWalletModule
   ],
   controllers: [AppController],
   providers: [

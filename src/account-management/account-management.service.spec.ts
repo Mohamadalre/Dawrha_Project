@@ -46,6 +46,7 @@ describe('AccountManagementService — reviewing an application', () => {
   let applicationsCache: any;
   let profileRepo: any;
   let dataSource: any;
+  let pointsWallet: any;
 
   /** The account under review, mutated by the tests to set the scene. */
   let account: any;
@@ -152,6 +153,10 @@ describe('AccountManagementService — reviewing an application', () => {
       set: jest.fn().mockResolvedValue(undefined),
       invalidate: jest.fn().mockResolvedValue(undefined),
     };
+    pointsWallet = {
+      ensureForAccount: jest.fn().mockResolvedValue(null),
+      view: jest.fn().mockResolvedValue({ points: 0, currency: 'POINTS', wallet_id: null }),
+    };
     dataSource = {
       transaction: jest.fn(async (cb: any) =>
         cb({
@@ -170,6 +175,7 @@ describe('AccountManagementService — reviewing an application', () => {
       statusNotifier,
       applicationsCache,
       dataSource,
+      pointsWallet,
     );
   });
 

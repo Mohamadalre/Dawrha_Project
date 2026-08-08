@@ -526,5 +526,9 @@
   "Warehouse sync queued": "Warehouse sync queued",
   "Application re-opened — it is under review again": "Application re-opened — it is under review again",
   "This document has not been requested from you — you will be notified if a replacement is needed": "This document has not been requested from you — you will be notified if a replacement is needed",
-  "Your application is not awaiting any changes right now": "Your application is not awaiting any changes right now"
+  "Your application is not awaiting any changes right now": "Your application is not awaiting any changes right now",
+  "Wallet fetched successfully": "Wallet fetched successfully",
+  "Offer timeline fetched successfully": "Offer timeline fetched successfully",
+  "currency must be a 3-letter ISO code, e.g. JOD": "currency must be a 3-letter ISO code, e.g. JOD",
+  "Pricing currency updated successfully": "Pricing currency updated successfully"
 }
