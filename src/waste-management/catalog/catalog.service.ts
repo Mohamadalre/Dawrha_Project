@@ -297,7 +297,7 @@ export class CatalogService {
    * alone — they are not buying, so "priced for my tier" is not a question they
    * have, and applying it would hide categories they are meant to administer.
    */
-  private buyableProductExistsSql(caller: Caller | null): string {
+  private buyableProductExistsSql(caller: Caller | null, provinceId?: string | null): string {
     const priced = `AND EXISTS (
              SELECT 1 FROM product_pricing pp
               WHERE pp.product_id = pr.id
@@ -305,16 +305,38 @@ export class CatalogService {
                 AND pp.effective_from <= NOW()
                 AND (pp.effective_until IS NULL OR pp.effective_until > NOW())
            )`;
+    // For factories & free facilities the category also has to hold a material
+    // with STOCK in their governorate — otherwise it is empty for them.
+    const inStock = `AND EXISTS (
+             SELECT 1 FROM warehouse_inventory wi
+             INNER JOIN warehouses w ON w.id = wi.warehouse_id
+              WHERE wi.odoo_product_id = pr.odoo_product_id
+                AND w.state = 'ACTIVE'
+                ${provinceId ? 'AND w.province_id = :stockProvince' : ''}
+                AND (COALESCE(wi.quantity, 0) - COALESCE(wi.reserved_quantity, 0)) > 0
+           )`;
     return `SELECT 1 FROM products pr
               WHERE pr.category_id = c.id
                 AND pr.is_active = true
-                ${this.buyingTier(caller) ? priced : ''}`;
+                ${this.buyingTier(caller) ? priced : ''}
+                ${this.isStockGated(caller) ? inStock : ''}`;
   }
 
   /** The tier a caller buys at, or null when they do not buy at all. */
   private buyingTier(caller: Caller | null): PricingTier | null {
     if (!caller || caller.role === Role.ADMIN) return null;
     return tierForRole(caller.role);
+  }
+
+  /**
+   * Whether this caller's catalogue is filtered by warehouse STOCK in their
+   * governorate — true for factories and free facilities, who buy from stock.
+   * Their catalogue is therefore not cached (stock is live).
+   */
+  private isStockGated(caller: Caller | null): boolean {
+    if (!caller) return false;
+    const tier = tierForRole(caller.role);
+    return tier === PricingTier.FACTORY || tier === PricingTier.FREE_FACILITY;
   }
 
   private applyTierParam(qb: { setParameter: (k: string, v: unknown) => unknown }, caller: Caller | null) {
@@ -341,21 +363,32 @@ export class CatalogService {
     // categories holding nothing this caller can buy, so a factory and a citizen
     // no longer see the same categories. A shared 'all' entry would serve one
     // role the other's list — the exact bug already fixed on the product list.
+    // Stock-gated buyers (factory / free facility) are NOT cached — the list
+    // depends on live warehouse stock in their governorate.
+    const useCache = !this.isStockGated(caller);
     const cacheParts = `${this.scopeFor(caller)}:${query.page}:${query.limit}:${query.search ?? ''}:${query.sort}:${query.order}`;
-    const cached = await this.cache.get<CategoryListResult>('categories', cacheParts);
-    if (cached) return cached;
+    if (useCache) {
+      const cached = await this.cache.get<CategoryListResult>('categories', cacheParts);
+      if (cached) return cached;
+    }
+
+    const provinceId = this.isStockGated(caller)
+      ? await this.buyerProfiles.provinceForBuyer(caller!.id, caller!.role)
+      : null;
 
     const qb = this.categoryRepo
       .createQueryBuilder('c')
       .where('c.isActive = :active', { active: true })
       // An empty category is a dead end: the buyer taps it, gets nothing, and
       // learns only that the catalogue is unfinished. "Empty" means empty FOR
-      // THEM — a category whose materials are all priced for another tier has
-      // nothing in it they could buy, and the emptiness test is the same one the
-      // material list applies, so tapping a category always lands on the
+      // THEM — a category whose materials are all priced for another tier (or,
+      // for a factory / free facility, all out of stock in their governorate)
+      // has nothing in it they could buy, and the emptiness test is the same one
+      // the material list applies, so tapping a category always lands on the
       // materials that were counted for it.
-      .andWhere(`EXISTS (${this.buyableProductExistsSql(caller)})`);
+      .andWhere(`EXISTS (${this.buyableProductExistsSql(caller, provinceId)})`);
     this.applyTierParam(qb, caller);
+    if (provinceId) qb.setParameter('stockProvince', provinceId);
 
     if (query.search) {
       qb.andWhere('c.name ILIKE :search', { search: `%${query.search}%` })
@@ -365,7 +398,10 @@ export class CatalogService {
     const sortColumn = query.sort === 'created_at' ? 'c.createdAt' : 'c.name';
     if (query.search) {
       // Autocomplete-friendly: names STARTING with the typed text rank first.
-      qb.orderBy('CASE WHEN c.name ILIKE :prefixSearch THEN 0 ELSE 1 END', 'ASC')
+      // Aliased addSelect + orderBy(alias) — the raw CASE in orderBy 500s under
+      // the paginated getManyAndCount subquery (`"CASE WHEN c" alias not found`).
+      qb.addSelect('CASE WHEN c.name ILIKE :prefixSearch THEN 0 ELSE 1 END', 'name_rank')
+        .orderBy('name_rank', 'ASC')
         .addOrderBy(sortColumn, query.order.toUpperCase() as 'ASC' | 'DESC');
     } else {
       qb.orderBy(sortColumn, query.order.toUpperCase() as 'ASC' | 'DESC');
@@ -379,7 +415,7 @@ export class CatalogService {
       categories: rows.map((c) => this.mapCategory(c, counts.get(c.id) ?? 0)),
       pagination: buildPagination(total, query.page, query.limit),
     };
-    await this.cache.set('categories', cacheParts, result);
+    if (useCache) await this.cache.set('categories', cacheParts, result);
     return result;
   }
 
@@ -535,9 +571,14 @@ export class CatalogService {
   async getProductsByCategory(caller: Caller, categoryId: string, query: ProductQueryDto) {
     await this.assertCategoryAllowed(caller, categoryId);
 
+    // Stock-gated buyers (factory / free facility) are NOT cached — their list
+    // depends on live warehouse stock in their governorate.
+    const useCache = !this.isStockGated(caller);
     const cacheParts = `${this.scopeFor(caller)}:${categoryId}:${query.page}:${query.limit}:${query.sort}:${query.order}:${query.price_min ?? ''}:${query.price_max ?? ''}`;
-    const cached = await this.cache.get<ProductListResult>('products', cacheParts);
-    if (cached) return cached;
+    if (useCache) {
+      const cached = await this.cache.get<ProductListResult>('products', cacheParts);
+      if (cached) return cached;
+    }
 
     const category = await this.categoryRepo.findOne({ where: { id: categoryId } });
     if (!category) throw new CategoryNotFoundException();
@@ -549,7 +590,7 @@ export class CatalogService {
       products: items,
       pagination: buildPagination(total, query.page, query.limit),
     };
-    await this.cache.set('products', cacheParts, result);
+    if (useCache) await this.cache.set('products', cacheParts, result);
     return result;
   }
 
@@ -588,9 +629,14 @@ export class CatalogService {
    * category listing, and dropped by the same price/offer/product invalidations.
    */
   async getAllMaterials(caller: Caller, query: ProductQueryDto) {
+    // Stock-gated buyers (factory / free facility) are NOT cached — their list
+    // depends on live warehouse stock in their governorate.
+    const useCache = !this.isStockGated(caller);
     const cacheParts = `${this.scopeFor(caller)}:all:${query.page}:${query.limit}:${query.search ?? ''}:${query.price_min ?? ''}:${query.price_max ?? ''}:${query.sort}:${query.order}`;
-    const cached = await this.cache.get<ProductListResult>('products', cacheParts);
-    if (cached) return cached;
+    if (useCache) {
+      const cached = await this.cache.get<ProductListResult>('products', cacheParts);
+      if (cached) return cached;
+    }
 
     const { items, total } = await this.queryProducts(caller, query, {
       search: query.search,
@@ -599,7 +645,7 @@ export class CatalogService {
       products: items,
       pagination: buildPagination(total, query.page, query.limit),
     };
-    await this.cache.set('products', cacheParts, result);
+    if (useCache) await this.cache.set('products', cacheParts, result);
     return result;
   }
 
@@ -686,15 +732,20 @@ export class CatalogService {
       .andWhere(
         byId ? '(p.name ILIKE :q OR p.id = :term OR o.id = :term)' : 'p.name ILIKE :q',
         byId ? { q: `%${term}%`, term } : { q: `%${term}%` },
-      )
-      .setParameter('qPrefix', `${term}%`);
+      );
 
     if (query.category_id) {
       qb.andWhere('p.categoryId = :cid', { cid: query.category_id });
     }
 
-    // Autocomplete-friendly: offers on products starting with the text first.
-    qb.orderBy('CASE WHEN p.name ILIKE :qPrefix THEN 0 ELSE 1 END', 'ASC')
+    // Autocomplete-friendly: offers on products whose name STARTS WITH the text
+    // come first. The rank is added as a SELECTED, aliased column and ordered by
+    // that alias — passing the raw `CASE …` straight to `orderBy` made TypeORM
+    // read the whole expression as an `alias.column`, so with pagination joins
+    // it failed with `"CASE WHEN p" alias was not found` (a 500 on every search).
+    qb.addSelect('CASE WHEN p.name ILIKE :qPrefix THEN 0 ELSE 1 END', 'name_rank')
+      .setParameter('qPrefix', `${term}%`)
+      .orderBy('name_rank', 'ASC')
       .addOrderBy('o.discountPercentage', 'DESC')
       .skip((query.page - 1) * query.limit)
       .take(query.limit);
@@ -1008,6 +1059,28 @@ export class CatalogService {
       { callerTier: tierForRole(caller.role) },
     );
 
+    // Factories & free facilities buy from WAREHOUSE STOCK: a material with no
+    // available stock in THEIR governorate's active warehouses is unbuyable, so
+    // it must not appear. Available = quantity − reserved > 0. Citizens and
+    // institutions are not stock-gated (they are not buying from a warehouse in
+    // the same way). A material never synced to Odoo has no stock lines, so it
+    // is correctly excluded here too. This is why the graded-buyer catalogue is
+    // NOT cached (see getAllMaterials / getProductsByCategory) — stock is live.
+    if (this.isStockGated(caller)) {
+      const provinceId = await this.buyerProfiles.provinceForBuyer(caller.id, caller.role);
+      qb.andWhere(
+        `EXISTS (
+           SELECT 1 FROM warehouse_inventory wi
+           INNER JOIN warehouses w ON w.id = wi.warehouse_id
+           WHERE wi.odoo_product_id = p.odoo_product_id
+             AND w.state = 'ACTIVE'
+             ${provinceId ? 'AND w.province_id = :stockProvince' : ''}
+             AND (COALESCE(wi.quantity, 0) - COALESCE(wi.reserved_quantity, 0)) > 0
+         )`,
+        provinceId ? { stockProvince: provinceId } : {},
+      );
+    }
+
     if (allowed) {
       qb.andWhere('p.categoryId IN (:...allowed)', { allowed });
     }
@@ -1048,7 +1121,9 @@ export class CatalogService {
 
     if (filters.search) {
       // Autocomplete-friendly: prefix matches first, then the requested order.
-      qb.orderBy('CASE WHEN p.name ILIKE :prefixSearch THEN 0 ELSE 1 END', 'ASC');
+      // Aliased CASE (raw form 500s under the paginated join).
+      qb.addSelect('CASE WHEN p.name ILIKE :prefixSearch THEN 0 ELSE 1 END', 'name_rank')
+        .orderBy('name_rank', 'ASC');
       if (query.sort === 'name') {
         qb.addOrderBy('p.name', query.order.toUpperCase() as 'ASC' | 'DESC');
       } else {
@@ -1175,6 +1250,32 @@ export class CatalogService {
     // if its roles were cleared to null. See `activeOffersForProducts`.
     this.applyAudienceFilter(qb, callerRole);
 
+    // Role-specific OVERRIDES general: when a live offer targeted at the caller's
+    // role exists for the same material + grade, the general one is hidden so the
+    // buyer sees only the specific. Done in SQL (a correlated NOT EXISTS) so it
+    // holds across pagination — collapsing a page in memory would leak a general
+    // offer onto one page and its overriding specific onto another. Guests never
+    // see targeted offers, so the override cannot apply to them.
+    if (callerRole) {
+      qb.andWhere(
+        `NOT (
+           o.role_specific = false
+           AND EXISTS (
+             SELECT 1 FROM offers o2
+             WHERE o2.product_id = o.product_id
+               AND o2.condition_code IS NOT DISTINCT FROM o.condition_code
+               AND o2.audience = o.audience
+               AND o2.role_specific = true
+               AND o2.is_active = true
+               AND o2.valid_from <= NOW()
+               AND (o2.valid_until IS NULL OR o2.valid_until > NOW())
+               AND :callerRole = ANY(o2.target_roles)
+           )
+         )`,
+        { callerRole },
+      );
+    }
+
     if (activeOnly) {
       qb.andWhere('o.isActive = true')
         .andWhere('o.validFrom <= NOW()')
@@ -1267,7 +1368,7 @@ export class CatalogService {
     // same guard is on every other offer read path; this one had been missed.
     this.applyAudienceFilter(qb, callerRole);
 
-    const rows = await qb.getMany();
+    const rows = this.preferRoleSpecificOffers(await qb.getMany());
 
     for (const o of rows) {
       const list = map.get(o.productId) ?? [];
@@ -1275,6 +1376,25 @@ export class CatalogService {
       map.set(o.productId, list);
     }
     return map;
+  }
+
+  /**
+   * Collapse a set of offers so a role-SPECIFIC offer overrides the GENERAL one
+   * for the same material + grade.
+   *
+   * Every row handed in already reaches the caller's role. Within one material
+   * and grade, if a role-specific offer is present it hides the general one — the
+   * buyer is shown the specific, not the general — while a group with no specific
+   * keeps its general row untouched. This is the in-memory twin of the NOT EXISTS
+   * override in `baseOfferQuery`, for the applied (non-paginated) read path.
+   */
+  private preferRoleSpecificOffers(offers: Offer[]): Offer[] {
+    if (offers.length < 2) return offers;
+    const key = (o: Offer) => `${o.productId}:${o.conditionCode ?? ''}`;
+    const hasSpecific = new Set<string>();
+    for (const o of offers) if (o.roleSpecific) hasSpecific.add(key(o));
+    if (hasSpecific.size === 0) return offers;
+    return offers.filter((o) => o.roleSpecific || !hasSpecific.has(key(o)));
   }
 
   private mapCategory(c: WasteCategory, productCount?: number) {

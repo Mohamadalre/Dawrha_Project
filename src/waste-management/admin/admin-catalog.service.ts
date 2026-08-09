@@ -4,7 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, ILike, In, Not, Repository } from 'typeorm';
 import { WasteCategory } from '../entities/waste-category.entity';
 import { Product } from '../entities/product.entity';
 import { CartItem } from '../entities/cart-item.entity';
@@ -26,6 +26,7 @@ import { OfferBasis, amountFromPercentage } from '../enums/offer-basis.enum';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
 import { AuditService } from '@src/waste-management/common/providers/audit.service';
 import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
+import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { UnitsService } from '@src/waste-management/common/providers/units.service';
 import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
 import {
@@ -36,6 +37,8 @@ import {
   ProductInCartsException,
   ProductHasStockException,
   ProductNotFoundException,
+  ProductAlreadyExistsException,
+  ImageRequiredException,
   ConditionAlreadyExistsException,
   ConditionInUseException,
   ConditionNotFoundException,
@@ -91,6 +94,12 @@ interface OfferPlanRow {
    */
   basis: OfferBasis;
   basisPercentage: number | null;
+  /**
+   * True when the admin TARGETED the role(s) explicitly; false for a general
+   * (audience-wide) offer. Carried onto the row so a specific offer can override
+   * a general one for the same role. See {@link Offer.roleSpecific}.
+   */
+  roleSpecific: boolean;
 }
 
 /**
@@ -122,6 +131,7 @@ export class AdminCatalogService {
     private readonly cache: CatalogCacheService,
     private readonly units: UnitsService,
     private readonly conditionsService: ConditionsService,
+    private readonly cloudinary: CloudinaryService,
     // Offer creation writes SEVERAL rows for one request; they commit together
     // or not at all, so a graded offer can never land half-priced.
     private readonly dataSource: DataSource,
@@ -144,15 +154,44 @@ export class AdminCatalogService {
     };
   }
 
+  /** One category by id (admin view). */
+  async getCategoryById(id: string) {
+    const category = await this.categoryRepo.findOne({ where: { id } });
+    if (!category) throw new CategoryNotFoundException();
+    return this.mapAdminCategory(category);
+  }
+
+  /** One material by id (admin view), with its category and unit. */
+  async getProductById(id: string) {
+    const product = await this.productRepo.findOne({
+      where: { id },
+      relations: ['category', 'unit'],
+    });
+    if (!product) throw new ProductNotFoundException();
+    const priced = await this.livePricedProductIds([product.id]);
+    return this.mapAdminProduct(product, priced.has(product.id));
+  }
+
+  /**
+   * Create a category — the admin route, which also queues the Odoo sync and
+   * writes an audit entry. This is the single category-create endpoint again
+   * (POST /admin/waste/categories); the older /waste-management/waste-category
+   * route was removed in its favour.
+   */
   async createCategory(adminId: string, dto: CreateCategoryDto, imageUrl?: string) {
-    const exists = await this.categoryRepo.findOne({ where: { name: dto.name } });
+    // An image is mandatory: a category with no picture renders as a broken
+    // tile in every client, so it is rejected before we write anything.
+    if (!imageUrl) throw new ImageRequiredException();
+
+    // Case-insensitive so "Plastic" and "plastic" cannot both exist.
+    const exists = await this.categoryRepo.findOne({ where: { name: ILike(dto.name) } });
     if (exists) throw new CategoryAlreadyExistsException();
 
     const category = await this.categoryRepo.save(
       this.categoryRepo.create({
         name: dto.name,
         description: dto.description,
-        imageCategoryURL: imageUrl ?? '',
+        imageCategoryURL: imageUrl,
         isActive: dto.is_active ?? true,
         odooSyncStatus: OdooSyncStatus.PENDING,
       }),
@@ -171,7 +210,8 @@ export class AdminCatalogService {
 
     return {
       category_id: category.id,
-      message: 'Category created successfully',
+      name: category.name,
+      is_active: category.isActive,
       odoo_status: 'PENDING_SYNC',
     };
   }
@@ -181,12 +221,31 @@ export class AdminCatalogService {
     if (!category) throw new CategoryNotFoundException();
 
     const before = { ...category };
-    if (dto.name !== undefined) category.name = dto.name;
+
+    // Renaming onto an existing name (case-insensitive, excluding self) is a
+    // duplicate just like creating one.
+    if (dto.name !== undefined && dto.name !== category.name) {
+      const clash = await this.categoryRepo.findOne({
+        where: { name: ILike(dto.name), id: Not(id) },
+      });
+      if (clash) throw new CategoryAlreadyExistsException();
+      category.name = dto.name;
+    }
     if (dto.description !== undefined) category.description = dto.description;
-    if (imageUrl !== undefined) category.imageCategoryURL = imageUrl;
+
+    // Replacing the image: remember the old URL, swap in the new one, and delete
+    // the old asset from Cloudinary AFTER the row is saved — so a failed save
+    // never destroys the image the row still points at.
+    let oldImageUrl: string | null = null;
+    if (imageUrl !== undefined && imageUrl !== category.imageCategoryURL) {
+      oldImageUrl = category.imageCategoryURL || null;
+      category.imageCategoryURL = imageUrl;
+    }
     if (dto.is_active !== undefined) category.isActive = dto.is_active;
     category.odooSyncStatus = OdooSyncStatus.PENDING;
     await this.categoryRepo.save(category);
+
+    if (oldImageUrl) await this.cloudinary.deleteByUrl(oldImageUrl);
 
     await this.odooSync.enqueueSyncCategory({ categoryId: category.id });
     await this.audit.record({
@@ -244,10 +303,114 @@ export class AdminCatalogService {
       .take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
+    const priced = await this.livePricedProductIds(rows.map((p) => p.id));
     return {
-      products: rows.map((p) => this.mapAdminProduct(p)),
+      products: rows.map((p) => this.mapAdminProduct(p, priced.has(p.id))),
       pagination: buildPagination(total, query.page, query.limit),
     };
+  }
+
+  /**
+   * Every material with its category, its unit, its grades, and its CURRENT
+   * price for ALL FOUR buyer roles at once — the admin's one screen to see how
+   * a material is priced across the whole buyer base.
+   *
+   * Prices are the ones in force NOW (`effectiveFrom <= now < effectiveUntil`).
+   * Each role entry carries a `base` (the flat price, used by citizens and
+   * institutions and by any ungraded material) and a `by_condition` list (the
+   * per-grade prices factories and free facilities are charged). A role a
+   * material is not priced for shows `base: null` and an empty `by_condition` —
+   * that is real information ("not sold to this role"), not a gap.
+   *
+   * Page-bounded and free of N+1: one products query, one prices query, one
+   * conditions query, assembled in memory.
+   */
+  async materialsPricingOverview(query: AdminListQueryDto) {
+    const qb = this.productRepo
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.category', 'c')
+      .leftJoinAndSelect('p.unit', 'u');
+    this.applyStatus(qb, 'p', query.status);
+    if (query.category_id) qb.andWhere('p.categoryId = :cid', { cid: query.category_id });
+    if (query.search) qb.andWhere('p.name ILIKE :s', { s: `%${query.search}%` });
+    qb.orderBy('p.name', 'ASC')
+      .skip((query.page - 1) * query.limit)
+      .take(query.limit);
+
+    const [products, total] = await qb.getManyAndCount();
+    const ids = products.map((p) => p.id);
+    if (ids.length === 0) {
+      return { materials: [], pagination: buildPagination(0, query.page, query.limit) };
+    }
+
+    const [priceRows, conditionRows] = await Promise.all([
+      this.pricingRepo
+        .createQueryBuilder('pp')
+        .where('pp.productId IN (:...ids)', { ids })
+        .andWhere('pp.effectiveFrom <= NOW()')
+        .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())')
+        .getMany(),
+      this.conditionRepo.find({
+        where: { productId: In(ids), isActive: true },
+        order: { sortOrder: 'ASC' },
+      }),
+    ]);
+
+    const pricesByProduct = new Map<string, ProductPricing[]>();
+    for (const r of priceRows) {
+      (pricesByProduct.get(r.productId) ?? pricesByProduct.set(r.productId, []).get(r.productId)!).push(r);
+    }
+    const condsByProduct = new Map<string, MaterialCondition[]>();
+    for (const c of conditionRows) {
+      (condsByProduct.get(c.productId) ?? condsByProduct.set(c.productId, []).get(c.productId)!).push(c);
+    }
+
+    const materials = products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      is_active: p.isActive,
+      category: p.category ? { id: p.category.id, name: p.category.name } : null,
+      unit: p.unit
+        ? { id: p.unit.id, code: p.unit.code, name_en: p.unit.nameEn, name_ar: p.unit.nameAr }
+        : null,
+      conditions: (condsByProduct.get(p.id) ?? []).map((c) => ({
+        id: c.id,
+        code: c.code,
+        name_en: c.nameEn,
+        name_ar: c.nameAr,
+      })),
+      prices: this.shapeAllRolePrices(pricesByProduct.get(p.id) ?? []),
+    }));
+
+    return { materials, pagination: buildPagination(total, query.page, query.limit) };
+  }
+
+  /** The current price of one material for every role, from its pricing rows. */
+  private shapeAllRolePrices(rows: ProductPricing[]) {
+    const ROLE_TIERS: Array<{ role: Role; tier: PricingTier }> = [
+      { role: Role.CITIZEN, tier: PricingTier.INDIVIDUAL },
+      { role: Role.INSTITUTIONS, tier: PricingTier.COMPANY },
+      { role: Role.FACTORY, tier: PricingTier.FACTORY },
+      { role: Role.EXTERNAL_PARTNER, tier: PricingTier.FREE_FACILITY },
+    ];
+    return ROLE_TIERS.map(({ role, tier }) => {
+      const tierRows = rows.filter((r) => r.tier === tier);
+      const base = tierRows.find((r) => !r.conditionId);
+      const byCondition = tierRows
+        .filter((r) => r.conditionId)
+        .map((r) => ({
+          condition_id: r.conditionId,
+          code: r.conditionCode ?? '',
+          price: Number(r.price),
+        }));
+      return {
+        role,
+        tier,
+        base: base ? Number(base.price) : null,
+        currency: base?.currency ?? tierRows[0]?.currency ?? 'JOD',
+        by_condition: byCondition,
+      };
+    });
   }
 
   /**
@@ -273,8 +436,14 @@ export class AdminCatalogService {
   }
 
   async createProduct(adminId: string, dto: CreateProductDto, imageUrl?: string) {
+    if (!imageUrl) throw new ImageRequiredException();
+
     const category = await this.categoryRepo.findOne({ where: { id: dto.category_id } });
     if (!category) throw new CategoryNotFoundException();
+
+    // Case-insensitive duplicate-name guard, same rule as categories.
+    const exists = await this.productRepo.findOne({ where: { name: ILike(dto.name) } });
+    if (exists) throw new ProductAlreadyExistsException();
 
     const unit = await this.resolveUnit(dto.unit_id, true);
 
@@ -283,7 +452,7 @@ export class AdminCatalogService {
         name: dto.name,
         description: dto.description,
         categoryId: dto.category_id,
-        imageURL: imageUrl ?? null,
+        imageURL: imageUrl,
         // Both written together, always. `unitId` is the link; `unitType` is
         // the denormalised code Odoo and the cart read, and letting the two
         // drift apart would mean the material is measured in one unit and
@@ -313,10 +482,22 @@ export class AdminCatalogService {
     const product = await this.productRepo.findOne({ where: { id } });
     if (!product) throw new ProductNotFoundException();
 
-    if (dto.name !== undefined) product.name = dto.name;
+    if (dto.name !== undefined && dto.name !== product.name) {
+      const clash = await this.productRepo.findOne({
+        where: { name: ILike(dto.name), id: Not(id) },
+      });
+      if (clash) throw new ProductAlreadyExistsException();
+      product.name = dto.name;
+    }
     if (dto.description !== undefined) product.description = dto.description;
     if (dto.category_id !== undefined) product.categoryId = dto.category_id;
-    if (imageUrl !== undefined) product.imageURL = imageUrl;
+
+    // Same replace-then-clean-up-old rule as categories.
+    let oldImageUrl: string | null = null;
+    if (imageUrl !== undefined && imageUrl !== product.imageURL) {
+      oldImageUrl = product.imageURL || null;
+      product.imageURL = imageUrl;
+    }
     if (dto.unit_id !== undefined) {
       const unit = await this.resolveUnit(dto.unit_id, true);
       product.unitId = unit.id;
@@ -325,6 +506,8 @@ export class AdminCatalogService {
     if (dto.is_active !== undefined) product.isActive = dto.is_active;
     product.odooSyncStatus = OdooSyncStatus.PENDING;
     await this.productRepo.save(product);
+
+    if (oldImageUrl) await this.cloudinary.deleteByUrl(oldImageUrl);
 
     await this.odooSync.enqueueSyncProduct({ productId: id });
     await this.audit.record({
@@ -392,9 +575,24 @@ export class AdminCatalogService {
   // --- Measurement units ------------------------------------------------------
   // Units are admin-managed (no fixed enum). Products/cart items store the unit
   // `code`; deleting is only allowed while unused — otherwise deactivate.
-  async listUnits() {
-    const units = await this.unitRepo.find({ order: { code: 'ASC' } });
-    return { units: units.map((u) => this.mapUnit(u)) };
+  async listUnits(query: AdminListQueryDto) {
+    const qb = this.unitRepo.createQueryBuilder('u');
+    this.applyStatus(qb, 'u', query.status);
+    if (query.search) {
+      qb.andWhere(
+        '(u.code ILIKE :s OR u.nameEn ILIKE :s OR u.nameAr ILIKE :s)',
+        { s: `%${query.search}%` },
+      );
+    }
+    qb.orderBy('u.code', 'ASC')
+      .skip((query.page - 1) * query.limit)
+      .take(query.limit);
+
+    const [rows, total] = await qb.getManyAndCount();
+    return {
+      units: rows.map((u) => this.mapUnit(u)),
+      pagination: buildPagination(total, query.page, query.limit),
+    };
   }
 
   async createUnit(adminId: string, dto: CreateUnitDto) {
@@ -523,6 +721,16 @@ export class AdminCatalogService {
       .leftJoinAndSelect('o.product', 'p');
     this.applyStatus(qb, 'o', query.status);
     if (query.search) qb.andWhere('p.name ILIKE :s', { s: `%${query.search}%` });
+    // Offers for ONE material.
+    if (query.product_id) qb.andWhere('o.productId = :pid', { pid: query.product_id });
+    // Offers LIVE on a given date: window contains it. An open-ended offer
+    // (`validUntil` null) counts as live from its start.
+    if (query.on_date) {
+      qb.andWhere('o.validFrom <= :onDate', { onDate: query.on_date }).andWhere(
+        '(o.validUntil IS NULL OR o.validUntil > :onDate)',
+        { onDate: query.on_date },
+      );
+    }
 
     qb.orderBy('o.createdAt', 'DESC')
       .skip((query.page - 1) * query.limit)
@@ -579,7 +787,7 @@ export class AdminCatalogService {
     const plan = await this.planOfferRows(dto.product_id, dto);
 
     for (const row of plan) {
-      await this.assertNoDuplicateOffer(dto.product_id, row.conditionCode, row.roles);
+      await this.assertNoDuplicateOffer(dto.product_id, row.conditionCode, row.roles, row.roleSpecific);
     }
 
     const created = await this.dataSource.transaction(async (manager) => {
@@ -601,6 +809,7 @@ export class AdminCatalogService {
               conditionId: row.conditionId,
               conditionCode: row.conditionCode,
               targetRoles: row.roles,
+              roleSpecific: row.roleSpecific,
               description: dto.description,
               validFrom: dto.valid_from ? new Date(dto.valid_from) : new Date(),
               validUntil: dto.valid_until ? new Date(dto.valid_until) : undefined,
@@ -623,6 +832,9 @@ export class AdminCatalogService {
     });
 
     return {
+      // The material the offer is on, named — the client no longer has to hold
+      // the id it sent just to show "offer on <material>" back to the admin.
+      material: { id: product.id, name: product.name },
       offers: created.map((o) => this.mapAdminOffer(o)),
       message:
         created.length > 1
@@ -661,6 +873,10 @@ export class AdminCatalogService {
     const audience = dto.audience;
     const roles = await this.resolveAudienceRoles(audience, dto.target_roles);
     const isGraded = await this.conditionsService.hasConditions(productId);
+    // Naming role(s) makes this a SPECIFIC offer that may override a general one
+    // for those roles; naming none makes it GENERAL. Stamped on every row this
+    // request produces.
+    const roleSpecific = !!dto.target_roles?.length;
     const plan: OfferPlanRow[] = [];
 
     /**
@@ -693,8 +909,9 @@ export class AdminCatalogService {
           'An amount or a percentage is required — it is what is ADDED to what these sellers are already paid',
         );
       }
+      // One row per seller role — each amount/percentage from its own price.
       plan.push(
-        await this.buildOfferRow(productId, audience, roles, null, null, spec),
+        ...(await this.buildPerRoleRows(productId, audience, roles, null, null, spec, roleSpecific)),
       );
       return plan;
     }
@@ -709,8 +926,9 @@ export class AdminCatalogService {
       if (!given) {
         throw new BadRequestException('An amount or a percentage is required');
       }
+      // One row per buyer role — each amount/percentage from its own price.
       plan.push(
-        await this.buildOfferRow(productId, audience, roles, null, null, spec),
+        ...(await this.buildPerRoleRows(productId, audience, roles, null, null, spec, roleSpecific)),
       );
       return plan;
     }
@@ -739,11 +957,13 @@ export class AdminCatalogService {
           );
         }
         seen.add(grade.id);
+        // One row per buyer role for this grade — the fixed amount is the same,
+        // but each role's percentage is derived from its OWN price for the grade.
         plan.push(
-          await this.buildOfferRow(
+          ...(await this.buildPerRoleRows(
             productId, audience, roles, grade.id, grade.code,
-            { amount: entry.amount },
-          ),
+            { amount: entry.amount }, roleSpecific,
+          )),
         );
       }
       return plan;
@@ -755,10 +975,11 @@ export class AdminCatalogService {
       );
     }
     for (const grade of await this.conditionsService.activeForProduct(productId)) {
+      // One row per buyer role per grade — each from its own price for the grade.
       plan.push(
-        await this.buildOfferRow(
-          productId, audience, roles, grade.id, grade.code, spec,
-        ),
+        ...(await this.buildPerRoleRows(
+          productId, audience, roles, grade.id, grade.code, spec, roleSpecific,
+        )),
       );
     }
     return plan;
@@ -774,6 +995,40 @@ export class AdminCatalogService {
    * ignoring it would leave the admin believing a role was covered when it was
    * not.
    */
+  /**
+   * One offer row PER ROLE, each priced from that role's OWN price.
+   *
+   * A single offer aimed at several roles is several promises, not one. Citizens
+   * and institutions can be priced differently for the same material, so "10%
+   * off for sellers" is 10% of the CITIZEN price for a citizen and 10% of the
+   * INSTITUTION price for an institution — two different amounts. And even a flat
+   * "1.5 off" is a different PERCENTAGE for each role, because each starts from a
+   * different price.
+   *
+   * Collapsing the roles into one row with one amount forced a single figure to
+   * stand for both, derived from whichever role's price happened to be cheapest —
+   * so the other role silently got the wrong discount. Splitting here builds each
+   * role against its own price (and, for graded buyers, its own price for the
+   * grade), so every role's amount and percentage are true for that role alone.
+   */
+  private async buildPerRoleRows(
+    productId: string,
+    audience: OfferAudience,
+    roles: Role[],
+    conditionId: string | null,
+    conditionCode: string | null,
+    spec: { amount?: number; percentage?: number },
+    roleSpecific = false,
+  ): Promise<OfferPlanRow[]> {
+    const rows: OfferPlanRow[] = [];
+    for (const role of roles) {
+      rows.push(
+        await this.buildOfferRow(productId, audience, [role], conditionId, conditionCode, spec, roleSpecific),
+      );
+    }
+    return rows;
+  }
+
   private async resolveAudienceRoles(
     audience: OfferAudience,
     requested?: Role[],
@@ -807,6 +1062,7 @@ export class AdminCatalogService {
     conditionCode: string | null,
     /** Exactly one of these: a fixed amount, or a percentage to derive it from. */
     spec: { amount?: number; percentage?: number },
+    roleSpecific = false,
   ): Promise<OfferPlanRow> {
     let dearestBase: number | null = null;
     let cheapestBase: number | null = null;
@@ -899,6 +1155,7 @@ export class AdminCatalogService {
       // price edit knows whether to keep the amount or recompute it.
       basis: spec.percentage != null ? OfferBasis.PERCENTAGE : OfferBasis.AMOUNT,
       basisPercentage: spec.percentage ?? null,
+      roleSpecific,
       // Against the DEAREST base the row faces.
       //
       // The percentage is amount ÷ base, so the bigger the base the smaller the
@@ -1105,20 +1362,13 @@ export class AdminCatalogService {
       .leftJoinAndSelect('o.product', 'p')
       .where('o.productId = :productId', { productId });
 
-    if (query.on) {
-      // Live on that instant: started on/before it and not yet ended.
-      qb.andWhere('o.validFrom <= :on', { on: query.on }).andWhere(
-        '(o.validUntil IS NULL OR o.validUntil > :on)',
-        { on: query.on },
-      );
-    } else {
-      // Overlaps [from, to]: begins on/before `to` and ends after `from`.
-      if (query.to) qb.andWhere('o.validFrom <= :to', { to: query.to });
-      if (query.from) {
-        qb.andWhere('(o.validUntil IS NULL OR o.validUntil > :from)', {
-          from: query.from,
-        });
-      }
+    // A RANGE, always — offers whose window overlaps [from, to]: begins on/before
+    // `to` and ends after `from`. Either bound may be omitted (open-ended).
+    if (query.to) qb.andWhere('o.validFrom <= :to', { to: query.to });
+    if (query.from) {
+      qb.andWhere('(o.validUntil IS NULL OR o.validUntil > :from)', {
+        from: query.from,
+      });
     }
 
     qb.orderBy('o.validFrom', 'DESC')
@@ -1130,7 +1380,6 @@ export class AdminCatalogService {
     return {
       product: { id: product.id, name: product.name },
       filter: {
-        on: query.on ?? null,
         from: query.from ?? null,
         to: query.to ?? null,
       },
@@ -1247,6 +1496,7 @@ export class AdminCatalogService {
     productId: string,
     conditionCode: string | null,
     targetRoles: Role[] | undefined,
+    roleSpecific: boolean,
     excludeOfferId?: string,
   ): Promise<void> {
     const rows = await this.offerRepo.find({
@@ -1260,6 +1510,12 @@ export class AdminCatalogService {
       if ((existing.conditionCode ?? null) !== conditionCode) continue;
       // An expired offer is not competing with anything.
       if (existing.validUntil && new Date(existing.validUntil).getTime() <= now) continue;
+
+      // A GENERAL offer and a role-SPECIFIC one are allowed to coexist for the
+      // same role — the specific overrides the general for that role at read
+      // time. So a clash is only a clash at the SAME level: two generals that
+      // reach the role, or two specifics on the role. Different levels pass.
+      if (existing.roleSpecific !== roleSpecific) continue;
 
       const existingRoles = existing.targetRoles?.length ? existing.targetRoles : null;
       // Untargeted reaches everyone, so it overlaps with any audience.
@@ -1315,6 +1571,9 @@ export class AdminCatalogService {
         applies_to_all_of_type: AUDIENCE_ROLES[o.audience].every((r) =>
           !o.targetRoles?.length ? true : o.targetRoles.includes(r),
         ),
+        // GENERAL (audience-wide) vs role-SPECIFIC. A specific offer overrides a
+        // general one for its role, so the admin needs to see which this is.
+        scope: o.roleSpecific ? 'SPECIFIC' : 'GENERAL',
       },
 
       grade: o.conditionId
@@ -1366,17 +1625,16 @@ export class AdminCatalogService {
     };
   }
 
-  private mapAdminProduct(p: Product) {
+  private mapAdminProduct(p: Product, hasPrice?: boolean) {
     return {
       id: p.id,
       name: p.name,
       description: p.description ?? null,
       image: p.imageURL ?? null,
       category: p.category ? { id: p.category.id, name: p.category.name } : null,
-      // The unit as a LINK, next to the code older clients still read. Only
-      // the identity and the name — the flags that decide sorting tolerance
-      // and the weight rule belong to the units screen, not to a material
-      // listing that never acts on them.
+      // The unit as a LINK, plus its name. The identity is here; the redundant
+      // `unit_id`/`unit_type` fields are gone — the unit object already carries
+      // the id and the code, so repeating them only invited them to drift.
       unit: p.unit
         ? {
             id: p.unit.id,
@@ -1385,14 +1643,33 @@ export class AdminCatalogService {
             name_ar: p.unit.nameAr,
           }
         : null,
-      unit_id: p.unitId ?? null,
-      unit_type: p.unitType,
+      // Whether the material has a LIVE price for any role right now. Unpriced
+      // materials still appear in this admin listing (they are the ones that
+      // need pricing) — this flag is what tells them apart from priced ones.
+      has_price: hasPrice ?? false,
       is_active: p.isActive,
       odoo_product_id: p.odooProductId ?? null,
       odoo_sync_status: p.odooSyncStatus,
       created_at: p.createdAt,
       updated_at: p.updatedAt,
     };
+  }
+
+  /**
+   * Of the given materials, which have at least one LIVE price row right now
+   * (started, not yet ended) — one query, used to stamp `has_price` on a whole
+   * page of the admin materials list without an N+1.
+   */
+  private async livePricedProductIds(ids: string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    const rows = await this.pricingRepo
+      .createQueryBuilder('pp')
+      .select('DISTINCT pp.productId', 'productId')
+      .where('pp.productId IN (:...ids)', { ids })
+      .andWhere('pp.effectiveFrom <= NOW()')
+      .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())')
+      .getRawMany<{ productId: string }>();
+    return new Set(rows.map((r) => r.productId));
   }
   // --- helpers --------------------------------------------------------------
   private applyStatus(qb: any, alias: string, status: 'active' | 'inactive' | 'all') {

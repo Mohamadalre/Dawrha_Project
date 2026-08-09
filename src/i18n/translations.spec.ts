@@ -84,6 +84,43 @@ function collectMessages(): Map<string, string[]> {
   return found;
 }
 
+/**
+ * Thrown-exception messages — `new XxxException('...')` anywhere, and `super('...')`
+ * inside an exception class. These reach the user through the exception filter,
+ * which keys them exactly like success messages, so an untranslated one shows an
+ * Arabic app an English error. Same skip rules as `collectMessages`.
+ */
+function collectThrownMessages(): Map<string, string[]> {
+  const found = new Map<string, string[]>();
+  const excPatterns = [
+    new RegExp("new [A-Za-z]*Exception\\(\\s*'((?:[^'\\\\]|\\\\.)*)'", 'g'),
+    new RegExp('new [A-Za-z]*Exception\\(\\s*"((?:[^"\\\\]|\\\\.)*)"', 'g'),
+  ];
+  const superPatterns = [
+    new RegExp("super\\(\\s*'((?:[^'\\\\]|\\\\.)*)'", 'g'),
+    new RegExp('super\\(\\s*"((?:[^"\\\\]|\\\\.)*)"', 'g'),
+  ];
+
+  for (const file of sourceFiles(SRC)) {
+    const text = fs.readFileSync(file, 'utf8');
+    const isExc = /exception/i.test(file);
+    const patterns = isExc ? [...excPatterns, ...superPatterns] : excPatterns;
+    for (const re of patterns) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text))) {
+        const msg = m[1].replace(/\\'/g, "'").replace(/\\"/g, '"');
+        if (!msg || msg.length < 3) continue;
+        if (/^[A-Z0-9_]+$/.test(msg)) continue;
+        if (msg.includes('${')) continue;
+        const rel = path.relative(SRC, file).replace(/\\/g, '/');
+        found.set(msg, [...(found.get(msg) ?? []), rel]);
+      }
+    }
+  }
+  return found;
+}
+
 describe('Response message translations', () => {
   const messages = collectMessages();
   const arKeys = flatKeys(AR);
@@ -105,6 +142,29 @@ describe('Response message translations', () => {
 
   it('has an English entry for every message', () => {
     const missing = [...messages.entries()]
+      .filter(([msg]) => !enKeys.has(msg))
+      .map(([msg, files]) => `${msg}   <- ${files[0]}`);
+
+    expect(missing).toEqual([]);
+  });
+
+  // ── thrown exceptions are messages too ──────────────────────────────────
+  const thrown = collectThrownMessages();
+
+  it('finds the thrown-exception messages to check', () => {
+    expect(thrown.size).toBeGreaterThan(100);
+  });
+
+  it('has an Arabic entry for every thrown-exception message', () => {
+    const missing = [...thrown.entries()]
+      .filter(([msg]) => !arKeys.has(msg))
+      .map(([msg, files]) => `${msg}   <- ${files[0]}`);
+
+    expect(missing).toEqual([]);
+  });
+
+  it('has an English entry for every thrown-exception message', () => {
+    const missing = [...thrown.entries()]
       .filter(([msg]) => !enKeys.has(msg))
       .map(([msg, files]) => `${msg}   <- ${files[0]}`);
 

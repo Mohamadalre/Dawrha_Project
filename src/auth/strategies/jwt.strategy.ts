@@ -29,10 +29,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!account) {
       throw new UnauthorizedException('Account not found');
     }
+    // A deleted (archived) account is gone as far as every route is concerned:
+    // the row is only kept so its email/phone stay claimed, so a token it still
+    // holds must stop working at once — reported as "not found", never as a
+    // hint that the account exists.
+    if (account.archivedAt) {
+      throw new UnauthorizedException('Account not found');
+    }
+
     const key = `blackListToken:${account.id}`;
     const isBlackListed = await this.redisService.getRedisByKey(key);
- 
-    if(isBlackListed === payload.jti) 
+
+    if(isBlackListed === payload.jti)
       throw new UnauthorizedException('Token is invalidated, please login again');
     if (account.accountStatus == AccountStatus.INACTIVE || !account.isEmailVerified) {
       throw new UnauthorizedException('Account is disabled or not found');

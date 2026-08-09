@@ -180,9 +180,15 @@ export class GuestAppService {
       .setParameter('tiers', [...AUDIENCE_TIERS[audience]]);
 
     if (query.search) {
+      // Prefix matches rank first. The CASE goes through an ALIASED addSelect and
+      // the orderBy references the alias — passing the raw CASE straight to
+      // orderBy makes TypeORM read it as `alias.column`, and with the paginated
+      // getManyAndCount subquery that failed with `"CASE WHEN c" alias was not
+      // found` (a 500 on every guest search).
       qb.andWhere('c.name ILIKE :search', { search: `%${query.search}%` })
+        .addSelect('CASE WHEN c.name ILIKE :prefix THEN 0 ELSE 1 END', 'name_rank')
         .setParameter('prefix', `${query.search}%`)
-        .orderBy('CASE WHEN c.name ILIKE :prefix THEN 0 ELSE 1 END', 'ASC')
+        .orderBy('name_rank', 'ASC')
         .addOrderBy('c.name', 'ASC');
     } else {
       qb.orderBy('c.name', 'ASC');
@@ -228,9 +234,12 @@ export class GuestAppService {
       qb.andWhere('p.categoryId = :categoryId', { categoryId: query.category_id });
     }
     if (query.search) {
+      // Aliased CASE (see `categories`) — the raw form 500s under the paginated
+      // join with `"CASE WHEN p" alias was not found`.
       qb.andWhere('p.name ILIKE :search', { search: `%${query.search}%` })
+        .addSelect('CASE WHEN p.name ILIKE :prefix THEN 0 ELSE 1 END', 'name_rank')
         .setParameter('prefix', `${query.search}%`)
-        .orderBy('CASE WHEN p.name ILIKE :prefix THEN 0 ELSE 1 END', 'ASC')
+        .orderBy('name_rank', 'ASC')
         .addOrderBy('p.name', 'ASC');
     } else {
       qb.orderBy('p.name', 'ASC');

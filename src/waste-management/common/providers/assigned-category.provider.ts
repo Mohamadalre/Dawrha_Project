@@ -26,20 +26,23 @@ export class AssignedCategoryProvider {
   ) {}
 
   /**
-   * @returns an array of assigned category IDs, or `null` when the role is not
-   *          category-restricted (CITIZEN / ADMIN / others).
+   * Catalogue RESTRICTION — now disabled for every role.
+   *
+   * `null` means "no restriction: show the whole active catalogue". No buyer is
+   * confined to the categories they picked any more: an institution, a factory
+   * and a free facility all see every active category and material, exactly like
+   * a citizen. Their own picks are still available — as a SEPARATE, opt-in view
+   * (`getSelectedCategoryIds` → the "my categories" route), not as blinders on
+   * the whole catalogue.
+   *
+   * Kept as a method (rather than deleted) because the catalogue read paths call
+   * it in several places; returning `null` there is the clean "no filter".
    */
   async getAssignedCategoryIds(
-    accountId: string,
-    role: Role,
+    _accountId: string,
+    _role: Role,
   ): Promise<string[] | null> {
-    switch (role) {
-      case Role.INSTITUTIONS:
-        return this.selectionQuery(this.institutionRepo, 'institution', 'institutionProfile', accountId);
-      default:
-        // CITIZEN / FACTORY / EXTERNAL_PARTNER / ADMIN — no category restriction.
-        return null;
-    }
+    return null;
   }
 
   /**

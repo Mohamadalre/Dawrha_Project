@@ -140,7 +140,7 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
     service = new AdminCatalogService(
       {} as any, productRepo, {} as any, {} as any, {} as any, {} as any,
       pricingRepo, offerRepo, odooSync as any, noop as any, noop as any,
-      {} as any, conditions, dataSource as any,
+      {} as any, conditions, {} as any, dataSource as any,
     );
   };
 
@@ -152,18 +152,23 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
   // ══════════════════════════════════════════════════════════════════
   // The audience decides the DIRECTION
   // ══════════════════════════════════════════════════════════════════
-  it('stores a seller offer as an amount ADDED to their price', async () => {
-    // Citizens list at 100 and institutions at 90; +10 is a 10% rise on the
-    // smaller of the two, which is what every targeted seller is guaranteed.
+  it('stores a seller offer as an amount ADDED, ONE ROW PER ROLE', async () => {
+    // Citizens list at 100 and institutions at 90. Naming no role means BOTH,
+    // and the offer is split into one row per role — each priced from its OWN
+    // price — rather than one shared row derived from whichever is cheapest.
     const res: any = await create({ audience: OfferAudience.SELLERS, amount: 10 });
 
-    expect(res.offers).toHaveLength(1);
-    expect(saved[0].audience).toBe(OfferAudience.SELLERS);
-    expect(Number(saved[0].amount)).toBe(10);
-    // Naming no role means BOTH, and it is stored EXPANDED rather than left
-    // empty. A query asking "which offers reach institutions?" then answers
-    // from the column instead of having to know the audience rule.
-    expect(saved[0].targetRoles).toEqual([Role.CITIZEN, Role.INSTITUTIONS]);
+    expect(res.offers).toHaveLength(2);
+    const byRole = Object.fromEntries(saved.map((o) => [o.targetRoles[0], o]));
+    // Same +10 to each, but a different derived percentage from each price:
+    // 10/100 = 10% for the citizen, 10/90 = 11.11% for the institution.
+    expect(Number(byRole[Role.CITIZEN].amount)).toBe(10);
+    expect(Number(byRole[Role.CITIZEN].discountPercentage)).toBeCloseTo(10, 1);
+    expect(Number(byRole[Role.INSTITUTIONS].amount)).toBe(10);
+    expect(Number(byRole[Role.INSTITUTIONS].discountPercentage)).toBeCloseTo(11.11, 1);
+    // Each row carries exactly its own role.
+    expect(saved.map((o) => o.targetRoles)).toEqual([[Role.CITIZEN], [Role.INSTITUTIONS]]);
+    expect(saved.every((o) => o.audience === OfferAudience.SELLERS)).toBe(true);
   });
 
   it('lets a seller amount exceed the price — it is a rise, not a cut', async () => {
@@ -233,9 +238,9 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
 
     const res: any = await create({ audience: OfferAudience.BUYERS, amount: 10 });
 
-    expect(res.offers).toHaveLength(1);
-    expect(saved[0].conditionCode).toBeNull();
-    expect(saved[0].conditionId).toBeNull();
+    // One row per buyer role (factory + free-facility), each flat (no grade).
+    expect(res.offers).toHaveLength(2);
+    expect(saved.every((o) => o.conditionCode === null && o.conditionId === null)).toBe(true);
   });
 
   it('accepts SEVERAL grades of the same material, each with its own amount', async () => {
@@ -247,18 +252,23 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
       ],
     });
 
-    expect(res.offers).toHaveLength(2);
-    expect(saved.map((o) => o.conditionCode).sort()).toEqual(['EXCELLENT', 'GOOD']);
-    expect(saved.map((o) => Number(o.amount))).toEqual([20, 10]);
+    // Two grades × two buyer roles (factory + free-facility) = four rows.
+    expect(res.offers).toHaveLength(4);
+    expect(saved.map((o) => o.conditionCode).sort()).toEqual(['EXCELLENT', 'EXCELLENT', 'GOOD', 'GOOD']);
+    // The named amount is the same for both roles of a grade; 20 for EXCELLENT,
+    // 10 for GOOD.
+    expect(saved.filter((o) => o.conditionCode === 'EXCELLENT').every((o) => Number(o.amount) === 20)).toBe(true);
+    expect(saved.filter((o) => o.conditionCode === 'GOOD').every((o) => Number(o.amount) === 10)).toBe(true);
   });
 
   it('applies ONE amount to EVERY grade when none is named', async () => {
     // Naming no grade is not an error and not "the flat price" — a graded
-    // material has no flat buyer price. It means all of them.
+    // material has no flat buyer price. It means all of them, for every role.
     const res: any = await create({ audience: OfferAudience.BUYERS, amount: 10 });
 
-    expect(res.offers).toHaveLength(2);
-    expect(saved.map((o) => o.conditionCode).sort()).toEqual(['EXCELLENT', 'GOOD']);
+    // Two grades × two buyer roles = four rows.
+    expect(res.offers).toHaveLength(4);
+    expect(saved.map((o) => o.conditionCode).sort()).toEqual(['EXCELLENT', 'EXCELLENT', 'GOOD', 'GOOD']);
   });
 
   it('refuses the same grade listed twice', async () => {
@@ -451,14 +461,47 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
   // One live offer per (material, grade, audience)
   // ══════════════════════════════════════════════════════════════════
   it('refuses a second live offer on the same grade and audience', async () => {
+    // Both are role-specific on FACTORY, so they clash at the SAME level.
     offerRepo.find.mockResolvedValue([
-      { id: 'existing', conditionCode: 'EXCELLENT', targetRoles: [Role.FACTORY] },
+      { id: 'existing', conditionCode: 'EXCELLENT', targetRoles: [Role.FACTORY], roleSpecific: true },
     ]);
 
     await expect(
       create({
         audience: OfferAudience.BUYERS,
         target_roles: [Role.FACTORY],
+        conditions: [{ condition_id: 'cond-excellent', amount: 10 }],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('LETS a role-specific offer coexist with a GENERAL one on the same grade', async () => {
+    // A general (audience-wide) offer already covers factories on EXCELLENT.
+    // Adding one TARGETED at factories is allowed — it overrides the general for
+    // factories at read time, so this is not a duplicate.
+    offerRepo.find.mockResolvedValue([
+      { id: 'general', conditionCode: 'EXCELLENT', targetRoles: [Role.FACTORY], roleSpecific: false },
+    ]);
+
+    await expect(
+      create({
+        audience: OfferAudience.BUYERS,
+        target_roles: [Role.FACTORY],
+        conditions: [{ condition_id: 'cond-excellent', amount: 10 }],
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it('refuses a second GENERAL offer that reaches the same role and grade', async () => {
+    // Two generals still clash — the override only excuses a general/specific
+    // pair, never two of the same level.
+    offerRepo.find.mockResolvedValue([
+      { id: 'general', conditionCode: 'EXCELLENT', targetRoles: [Role.FACTORY], roleSpecific: false },
+    ]);
+
+    await expect(
+      create({
+        audience: OfferAudience.BUYERS,
         conditions: [{ condition_id: 'cond-excellent', amount: 10 }],
       }),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -501,7 +544,7 @@ describe('offer validity and amount edits', () => {
     service = new AdminCatalogService(
       {} as any, productRepo, {} as any, {} as any, {} as any, {} as any,
       pricingRepo, offerRepo, odooSync as any, { record: jest.fn() } as any,
-      cache as any, {} as any, {} as any, {} as any,
+      cache as any, {} as any, {} as any, {} as any, {} as any,
     );
   });
 

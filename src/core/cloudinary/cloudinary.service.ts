@@ -197,6 +197,63 @@ export class CloudinaryService {
   }
 
   /**
+   * Recovers a Cloudinary public_id from a secure URL.
+   *
+   * Our entities store only the delivery URL, never the public_id, so to delete
+   * an image we are replacing we have to read the id back out of the URL. A
+   * secure URL looks like:
+   *   https://res.cloudinary.com/<cloud>/image/upload/[<transforms>/]v<n>/<public_id>.<ext>
+   * The public_id is everything after the version segment, minus the extension —
+   * and it keeps its folder path (`catalog/image/<id>/<ts>`), which `destroy`
+   * needs in full.
+   *
+   * Returns null when the URL is empty or not a Cloudinary upload URL, so callers
+   * can treat "nothing to delete" and "not ours to delete" the same safe way.
+   */
+  publicIdFromUrl(url?: string | null): string | null {
+    if (!url) return null;
+    const marker = '/upload/';
+    const at = url.indexOf(marker);
+    if (at === -1) return null;
+
+    let rest = url.slice(at + marker.length);
+    // Drop the query string / fragment if any.
+    rest = rest.split('?')[0].split('#')[0];
+
+    const segments = rest.split('/');
+    // Drop the version segment (v1699999999) if present.
+    if (segments.length && /^v\d+$/.test(segments[0])) segments.shift();
+    if (segments.length === 0) return null;
+
+    let publicId = segments.join('/');
+    // Strip a trailing file extension from the LAST segment only.
+    const dot = publicId.lastIndexOf('.');
+    const slash = publicId.lastIndexOf('/');
+    if (dot > slash) publicId = publicId.slice(0, dot);
+
+    return publicId || null;
+  }
+
+  /**
+   * Best-effort delete by URL — derives the public_id and removes the asset,
+   * swallowing any failure.
+   *
+   * Used when an image is being REPLACED: the new upload has already succeeded
+   * and been saved, so the old asset is now an orphan. Cleaning it up must never
+   * fail the request that replaced it — a leaked Cloudinary asset is a far
+   * smaller problem than a 500 on an otherwise-successful edit.
+   */
+  async deleteByUrl(url?: string | null): Promise<void> {
+    const publicId = this.publicIdFromUrl(url);
+    if (!publicId) return;
+    try {
+      await this.deleteFile(publicId);
+    } catch (error: any) {
+      this.logger.error(`Best-effort delete failed for ${publicId}: ${error?.message}`);
+    }
+  }
+
+  /**
    * Deletes multiple files from Cloudinary
    *
    * Useful for cleanup operations or bulk deletions

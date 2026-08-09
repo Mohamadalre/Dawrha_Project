@@ -46,6 +46,24 @@ export class AdminListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   category_id?: string;
+
+  /**
+   * Offers list only: limit to offers on ONE material (its id). Turns the
+   * general offers list into "the offers for this material".
+   */
+  @IsOptional()
+  @IsUUID()
+  product_id?: string;
+
+  /**
+   * Offers list only: keep offers that are LIVE on this date — i.e. their
+   * window contains it (`validFrom <= date < validUntil`, an open-ended offer
+   * counting as live from its start). Answers "which offers were running on
+   * 2026-08-15?".
+   */
+  @IsOptional()
+  @IsDateString()
+  on_date?: string;
 }
 
 export class CreateCategoryDto {
@@ -529,11 +547,12 @@ export class UpdateOfferAmountDto {
  * a single instant is the more specific question.
  */
 export class OfferTimelineQueryDto extends PaginationQueryDto {
-  /** A single instant: return offers whose validity window contains it. */
-  @IsOptional()
-  @IsDateString()
-  on?: string;
-
+  /**
+   * The timeline is a RANGE, always — offers whose validity window overlaps
+   * [from, to]. The single-instant `on` option was removed: a point in time is
+   * just the degenerate range `from === to`, and keeping both invited callers to
+   * send `on` together with `from`/`to` and wonder which one won.
+   */
   /** Range start: return offers whose window overlaps [from, to]. */
   @IsOptional()
   @IsDateString()

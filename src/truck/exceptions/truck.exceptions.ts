@@ -212,8 +212,12 @@ export class ShiftNotInYourWarehouseException extends BadRequestException {
 
 export class DriverHasNoTruckException extends BadRequestException {
   constructor() {
+    // Generic on purpose: the same guard fires for picking up a truck AND for
+    // requesting a shift change, so the message must fit BOTH — the old wording
+    // ("before requesting a shift change") was shown on pickup too, which read
+    // as a wrong message for that action.
     super({
-      message: 'You must be assigned to a truck before requesting a shift change',
+      message: 'You must be assigned to a truck first',
       errorCode: 'DRIVER_HAS_NO_TRUCK',
     });
   }

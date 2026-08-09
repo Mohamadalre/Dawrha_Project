@@ -29,7 +29,8 @@ import { CartModule } from './waste-management/cart/cart.module';
 import { FavouritesModule } from './waste-management/favourites/favourites.module';
 import { SuggestionsModule } from './waste-management/suggestions/suggestions.module';
 import { WasteAdminModule } from './waste-management/admin/waste-admin.module';
-import { CategoryRequestModule } from './waste-management/category-requests/category-request.module';
+import { MyCategoriesModule } from './waste-management/my-categories/my-categories.module';
+import { StagesModule } from './stages/stages.module';
 import { InstitutionModule } from './institution/institution.module';
 import { CloudinaryModule } from './core/cloudinary/cloudinary.module';
 import { AccountManagementModule } from './account-management/account-management.module';
@@ -91,7 +92,8 @@ import { ContentModule } from './content/content.module';
     FavouritesModule,
     SuggestionsModule,
     WasteAdminModule,
-    CategoryRequestModule,
+    MyCategoriesModule,
+    StagesModule,
     InstitutionModule,
     CloudinaryModule,
     AccountManagementModule,

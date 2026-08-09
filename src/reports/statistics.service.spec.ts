@@ -14,6 +14,7 @@ describe('StatisticsService', () => {
   let productRepo: any;
   let offerRepo: any;
   let suggestionRepo: any;
+  let odooSync: any;
 
   beforeEach(() => {
     accountRepo = { count: jest.fn(), createQueryBuilder: jest.fn() };
@@ -24,6 +25,7 @@ describe('StatisticsService', () => {
     productRepo = { count: jest.fn() };
     offerRepo = { count: jest.fn() };
     suggestionRepo = { count: jest.fn() };
+    odooSync = { enqueueSyncFleet: jest.fn().mockResolvedValue(undefined) };
 
     service = new StatisticsService(
       accountRepo,
@@ -34,6 +36,7 @@ describe('StatisticsService', () => {
       productRepo,
       offerRepo,
       suggestionRepo,
+      odooSync,
     );
   });
 

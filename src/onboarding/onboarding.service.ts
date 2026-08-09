@@ -153,27 +153,6 @@ export class OnboardingService {
   }
 
   /**
-   * Copy the mobile given at the information step onto the ACCOUNT.
-   *
-   * The number lived only on the profile — `institutionPhone`, `factoryPhone`,
-   * `externalPartnerPhone` — one column per role, three places to look. So
-   * `accounts.phone` sat empty for every applicant who signed up with an email,
-   * and every screen that reads the account rather than the profile (the
-   * reviewer's listing, the account details, anything generic) showed a
-   * facility with no phone number at all while the number was right there one
-   * join away.
-   *
-   * Written only when the account has none: a person who set a phone on their
-   * own account is not overruled by a form about their premises.
-   */
-  protected async mirrorPhoneOntoAccount(accountId: string, phone?: string) {
-    if (!phone) return;
-    const account = await this.acccountRepo.findOne({ where: { id: accountId } });
-    if (!account || account.phone) return;
-    await this.acccountRepo.update(accountId, { phone });
-  }
-
-  /**
    * Validates waste category IDs and returns the entities
    *
    * @param ids - Array of waste category IDs
@@ -193,7 +172,6 @@ export class OnboardingService {
 
     if (wasteTypes.length !== uniqueIds.length) {
       // NAMES the ids that were not found.
-      //
       // "Some waste categories are invalid" told an applicant sending six ids
       // that one of them was wrong and left them to find out which by
       // bisection. The ids are in the request they just sent, so saying which

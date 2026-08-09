@@ -73,6 +73,13 @@ export class AdminCatalogController {
     return { message: 'Categories fetched successfully', result };
   }
 
+  @Get('categories/:categoryId')
+  @Permissions('admin.waste.manage')
+  async getCategory(@Param('categoryId', ParseUUIDPipe) categoryId: string) {
+    const result = await this.adminCatalog.getCategoryById(categoryId);
+    return { message: 'Category fetched successfully', result };
+  }
+
   @Post('categories')
   @Permissions('admin.waste.create')
   @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
@@ -82,7 +89,8 @@ export class AdminCatalogController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const imageUrl = await this.uploadedImageUrl(file, user.id, 'category');
-    return this.adminCatalog.createCategory(user.id, dto, imageUrl);
+    const result = await this.adminCatalog.createCategory(user.id, dto, imageUrl);
+    return { message: 'Category created successfully', result };
   }
 
   @Put('categories/:categoryId')
@@ -113,6 +121,26 @@ export class AdminCatalogController {
   async listProducts(@Query() query: AdminListQueryDto) {
     const result = await this.adminCatalog.listProducts(query);
     return { message: 'Products fetched successfully', result };
+  }
+
+  /**
+   * Every material with its category, unit, grades and CURRENT price for ALL
+   * FOUR buyer roles at once (citizen / institution / factory / free facility).
+   * Supports the same search / status / category filters and pagination.
+   */
+  @Get('products/pricing-overview')
+  @Permissions('admin.waste.manage')
+  async materialsPricingOverview(@Query() query: AdminListQueryDto) {
+    const result = await this.adminCatalog.materialsPricingOverview(query);
+    return { message: 'Materials pricing fetched successfully', result };
+  }
+
+  /** One material by id (declared AFTER the static products/* routes above). */
+  @Get('products/:productId')
+  @Permissions('admin.waste.manage')
+  async getProduct(@Param('productId', ParseUUIDPipe) productId: string) {
+    const result = await this.adminCatalog.getProductById(productId);
+    return { message: 'Product fetched successfully', result };
   }
 
   @Post('products')
@@ -250,8 +278,8 @@ export class AdminCatalogController {
   // Measurement units (dynamic — no fixed enum)
   @Get('units')
   @Permissions('admin.waste.manage')
-  async listUnits() {
-    const result = await this.adminCatalog.listUnits();
+  async listUnits(@Query() query: AdminListQueryDto) {
+    const result = await this.adminCatalog.listUnits(query);
     return { message: 'Units fetched successfully', result };
   }
 

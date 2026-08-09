@@ -11,12 +11,15 @@ import { MeasurementUnit } from '../entities/measurement-unit.entity';
 import { MaterialCondition } from '../entities/material-condition.entity';
 import { Offer } from '../entities/offer.entity';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
+import { Account } from '@src/user/entities/account.entity';
 import { WasteCommonModule } from '../common/waste-common.module';
 import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
+import { NotificationModule } from '@src/notification/notification.module';
 import { AdminCatalogController } from './admin-catalog.controller';
 import { AdminCatalogService } from './admin-catalog.service';
 import { PricingController } from './pricing/pricing.controller';
 import { PricingService } from './pricing/pricing.service';
+import { PricingExpiryCron } from './pricing/pricing-expiry.cron';
 import { ProductConditionsService } from './product-conditions.service';
 import { ProductConditionsController } from './product-conditions.controller';
 import { ConditionByIdController } from './condition-by-id.controller';
@@ -32,11 +35,14 @@ import { StockTransferController } from './stock-transfer.controller';
   imports: [
     TypeOrmModule.forFeature([WasteCategory, Product, ProductPricing, ProductPricingHistory, CartItem, MeasurementUnit, MaterialCondition, Offer,
       // Deleting a material has to know whether any is still on a shelf.
-      WarehouseInventory]),
+      WarehouseInventory,
+      // The expiry sweep notifies every admin that a material's pricing lapsed.
+      Account]),
     PermissionsModule,
     OdooSyncModule,
     WasteCommonModule,
     CloudinaryModule,
+    NotificationModule,
   ],
   controllers: [
     AdminCatalogController,
@@ -49,6 +55,7 @@ import { StockTransferController } from './stock-transfer.controller';
   providers: [
     AdminCatalogService,
     PricingService,
+    PricingExpiryCron,
     ProductConditionsService,
     StockTransferService,
   ],

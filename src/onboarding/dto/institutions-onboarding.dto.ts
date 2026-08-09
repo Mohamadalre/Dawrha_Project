@@ -51,8 +51,14 @@ export class InformationInstitutionDto {
 
 
 export class WasteInstitutionDto {
+    // UUIDs only. A free-typed value (a category NAME, a truncated id) used to
+    // pass `@IsString` and hit the `IN (...)` query, where Postgres rejected it
+    // as "invalid input syntax for type uuid" — a 500 for what is a plain input
+    // mistake. checkWasteType still de-duplicates repeats and names any id that
+    // does not exist.
     @IsArray()
-    @IsString({ each: true })
+    @ArrayNotEmpty()
+    @IsUUID('all', { each: true, message: 'Each waste category id must be a valid id' })
     wasteCategoryId: string[];
 
 

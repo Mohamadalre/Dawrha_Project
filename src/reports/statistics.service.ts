@@ -12,6 +12,8 @@ import { WasteCategory } from '@src/waste-management/entities/waste-category.ent
 import { Product } from '@src/waste-management/entities/product.entity';
 import { Offer } from '@src/waste-management/entities/offer.entity';
 import { ProductSuggestion } from '@src/waste-management/entities/product-suggestion.entity';
+import { TruckType } from '@src/truck/enums/truck-type.enum';
+import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 
 /**
  * Admin-only reporting/statistics. Pure aggregation over existing tables — owns
@@ -36,6 +38,7 @@ export class StatisticsService {
     private readonly offerRepo: Repository<Offer>,
     @InjectRepository(ProductSuggestion)
     private readonly suggestionRepo: Repository<ProductSuggestion>,
+    private readonly odooSync: OdooSyncService,
   ) {}
 
   /** Single payload combining every section — for the admin dashboard. */
@@ -98,7 +101,23 @@ export class StatisticsService {
   // ---------------------------------------------------------------------------
   // Trucks
   // ---------------------------------------------------------------------------
+  /**
+   * Fleet counts. Odoo is the fleet MASTER (trucks are authored there and
+   * mirrored here), so a refresh from Odoo is queued on every read — the counts
+   * returned are the current mirror, and the pull keeps the next read fresh.
+   * Best-effort: a queue/Odoo hiccup must never fail the stats.
+   *
+   * Split by TYPE — collection vs delivery — because they are two fleets doing
+   * two different jobs (picking material up from sellers vs. carrying sold goods
+   * to buyers) and "how many trucks" is meaningless without saying of which.
+   */
   async getTruckStats() {
+    try {
+      await this.odooSync.enqueueSyncFleet();
+    } catch {
+      /* stats must not fail because a refresh could not be queued */
+    }
+
     const total = await this.truckRepo.count();
 
     const assignedRow = await this.assignmentRepo
@@ -116,11 +135,27 @@ export class StatisticsService {
     const byStatus: Record<string, number> = {};
     for (const row of statusRows) byStatus[row.status] = Number(row.count);
 
+    const typeRows = await this.truckRepo
+      .createQueryBuilder('t')
+      .select('t.truckType', 'type')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('t.truckType')
+      .getRawMany();
+    const byType: Record<string, number> = { [TruckType.COLLECTION]: 0, [TruckType.DELIVERY]: 0 };
+    for (const row of typeRows) byType[row.type] = Number(row.count);
+
     return {
       total,
       assigned_to_drivers: assigned,
       unassigned: total - assigned,
       by_status: byStatus,
+      by_type: {
+        collection: byType[TruckType.COLLECTION] ?? 0,
+        delivery: byType[TruckType.DELIVERY] ?? 0,
+      },
+      // Stated so a reader knows the number is a mirror kept in step with Odoo,
+      // not a figure this service owns.
+      source: 'odoo_mirror',
     };
   }
 
@@ -137,11 +172,29 @@ export class StatisticsService {
     // the number of drivers currently holding a truck.
     const assigned = await this.assignmentRepo.count();
 
+    // Collection vs delivery drivers, decided by the TYPE of the truck each is
+    // on: a driver is a "collection driver" while assigned to a collection
+    // truck and a "delivery driver" while on a delivery truck. An unassigned
+    // driver has no type yet, so the two figures need not add up to `total`.
+    const typeRows = await this.assignmentRepo
+      .createQueryBuilder('a')
+      .innerJoin('a.truck', 't')
+      .select('t.truckType', 'type')
+      .addSelect('COUNT(DISTINCT a.driver_id)', 'count')
+      .groupBy('t.truckType')
+      .getRawMany();
+    const byType: Record<string, number> = { [TruckType.COLLECTION]: 0, [TruckType.DELIVERY]: 0 };
+    for (const row of typeRows) byType[row.type] = Number(row.count);
+
     return {
       total,
       active,
       assigned_to_truck: assigned,
       without_truck: Math.max(total - assigned, 0),
+      by_type: {
+        collection_drivers: byType[TruckType.COLLECTION] ?? 0,
+        delivery_drivers: byType[TruckType.DELIVERY] ?? 0,
+      },
     };
   }
 

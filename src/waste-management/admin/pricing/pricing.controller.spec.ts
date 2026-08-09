@@ -14,6 +14,8 @@ import { CatalogCacheService } from '@src/waste-management/common/providers/cata
 import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
 import { ProductConditionsService } from '@src/waste-management/admin/product-conditions.service';
 import { OfferSettlementService } from '@src/waste-management/common/providers/offer-settlement.service';
+import { Account } from '@src/user/entities/account.entity';
+import { NotificationService } from '@src/notification/notification.service';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { TransformInterceptor } from '@src/common/interceptors/transform.interceptor';
@@ -98,6 +100,9 @@ describe('PricingController (integration)', () => {
             })),
           },
         },
+        // The expiry sweep notifies every admin; irrelevant to these route tests.
+        { provide: getRepositoryToken(Account), useValue: { find: jest.fn().mockResolvedValue([]) } },
+        { provide: NotificationService, useValue: { createNotification: jest.fn(), enqueueNotification: jest.fn() } },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -132,14 +137,20 @@ describe('PricingController (integration)', () => {
       .expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(res.body.data.pricing).toEqual({
-      individual: 0.3,
-      company: 0.27,
-      // Sent as a CODE and returned with the grade's ID resolved beside it —
-      // a caller written before the link existed keeps working, and its price
-      // is still filed against a real grade rather than left unlinked.
-      factory: [{ condition: 'EXCELLENT', conditionId: 'cond-EXCELLENT', price: 0.25 }],
-      free_facility: [{ condition: 'EXCELLENT', conditionId: 'cond-EXCELLENT', price: 0.26 }],
+    // Each role comes back with its pricing-row id. Sent as a CODE and returned
+    // with the grade's ID resolved beside it — a caller written before the link
+    // existed keeps working, and its price is filed against a real grade.
+    expect(res.body.data.pricing.individual).toMatchObject({ price: 0.3 });
+    expect(res.body.data.pricing.company).toMatchObject({ price: 0.27 });
+    expect(res.body.data.pricing.factory[0]).toMatchObject({
+      condition: 'EXCELLENT',
+      condition_id: 'cond-EXCELLENT',
+      price: 0.25,
+    });
+    expect(res.body.data.pricing.free_facility[0]).toMatchObject({
+      condition: 'EXCELLENT',
+      condition_id: 'cond-EXCELLENT',
+      price: 0.26,
     });
     expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: PRODUCT_ID });
   });
@@ -174,7 +185,7 @@ describe('PricingController (integration)', () => {
       .expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(res.body.data.pricing.individual).toBe(0.3);
+    expect(res.body.data.pricing.individual).toMatchObject({ price: 0.3 });
     expect(res.body.data.pricing.company).toBeNull();
   });
 

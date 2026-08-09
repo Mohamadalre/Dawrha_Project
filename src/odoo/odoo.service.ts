@@ -83,8 +83,12 @@ export class OdooService {
 
   private readonly url: string;
   private readonly db: string;
-  private readonly username: string;
-  private readonly password: string;
+  // Mutable: the admin can change the Odoo login/password from the backend, and
+  // the running connection has to pick the new values up immediately (see
+  // updateAdminCredentials) — they are also persisted to .env so a restart keeps
+  // working.
+  private username: string;
+  private password: string;
   private readonly groupId: number;
 
   constructor(
@@ -327,6 +331,146 @@ export class OdooService {
         context: { active_test: false },
       },
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // The Odoo admin account (the res.users the backend connects AS)
+  // ---------------------------------------------------------------------------
+
+  /** Reads the CONNECTED admin's res.users record. */
+  async getConnectedAdminUser(): Promise<{
+    id: number;
+    name: string;
+    login: string;
+    email: string | null;
+    phone: string | null;
+  } | null> {
+    const auth = await this.authenticate();
+    const users = await this.callKw<any[]>(
+      'res.users',
+      'read',
+      [[auth.uid], ['name', 'login', 'email', 'phone']],
+    );
+    const u = users?.[0];
+    if (!u) return null;
+    return {
+      id: u.id ?? auth.uid,
+      name: u.name,
+      login: u.login,
+      // Odoo returns `false` for an empty field — normalise to null.
+      email: u.email || null,
+      phone: u.phone || null,
+    };
+  }
+
+  /**
+   * Updates the CONNECTED admin's res.users record from the backend.
+   *
+   * DISPLAY fields only — `name`, `email`, `phone`. `login` and `password` are
+   * deliberately NOT writable here: they are the very credentials the backend
+   * authenticates to Odoo with (ODOO_USERNAME / ODOO_PASSWORD), so changing them
+   * from a request would lock the backend out of Odoo on the next call. Returns
+   * the refreshed record.
+   */
+  async updateConnectedAdminUser(values: {
+    name?: string;
+    email?: string | null;
+    phone?: string | null;
+  }): Promise<any> {
+    const auth = await this.authenticate();
+    const payload: Record<string, unknown> = {};
+    if (values.name !== undefined) payload.name = values.name;
+    if (values.email !== undefined) payload.email = values.email ?? false;
+    if (values.phone !== undefined) payload.phone = values.phone ?? false;
+    if (Object.keys(payload).length > 0) {
+      await this.callKw('res.users', 'write', [[auth.uid], payload]);
+    }
+    return this.getConnectedAdminUser();
+  }
+
+  /**
+   * Changes the CONNECTED admin's Odoo login and/or password — the credentials
+   * the backend itself authenticates with — and keeps the connection alive.
+   *
+   * The order is chosen so the backend can never lock itself out silently:
+   *   1. write the new login/password to Odoo using the current (still valid)
+   *      session;
+   *   2. switch the in-memory credentials to the new values;
+   *   3. drop the cached session and RE-AUTHENTICATE with the new credentials —
+   *      proving they work before anything is persisted;
+   *   4. only then write them to `.env`, so a restart uses them too.
+   *
+   * If the re-authentication fails, the change is reported as failed (and the
+   * old in-memory values are restored); if the Odoo write itself fails, nothing
+   * changed at all.
+   */
+  async updateAdminCredentials(input: { login?: string; password?: string }): Promise<void> {
+    const payload: Record<string, unknown> = {};
+    if (input.login !== undefined) payload.login = input.login;
+    if (input.password !== undefined) payload.password = input.password;
+    if (Object.keys(payload).length === 0) return;
+
+    const auth = await this.authenticate();
+    const oldUsername = this.username;
+    const oldPassword = this.password;
+
+    // 1) Write to Odoo with the current session.
+    await this.callKw('res.users', 'write', [[auth.uid], payload]);
+
+    // 2) Adopt the new credentials in memory.
+    if (input.login !== undefined) this.username = input.login;
+    if (input.password !== undefined) this.password = input.password;
+
+    // 3) Force a fresh session and prove the new credentials authenticate.
+    await this.clearSession();
+    try {
+      await this.authenticate();
+    } catch (e) {
+      // Odoo already changed, but the new values do not authenticate — restore
+      // the in-memory values and surface the failure loudly.
+      this.username = oldUsername;
+      this.password = oldPassword;
+      await this.clearSession();
+      this.logger.error('Odoo credentials changed but re-authentication failed', e as Error);
+      throw new InternalServerErrorException(
+        'Odoo credentials were changed but the new ones could not authenticate',
+      );
+    }
+
+    // 4) Persist to .env so a restart keeps the new credentials.
+    this.persistEnvCredentials({
+      ...(input.login !== undefined ? { ODOO_USERNAME: input.login } : {}),
+      ...(input.password !== undefined ? { ODOO_PASSWORD: input.password } : {}),
+    });
+  }
+
+  /**
+   * Writes the given keys into the project's `.env` (updating an existing line
+   * or appending). Best-effort: the running instance already holds the new
+   * credentials in memory, so a failure to persist only affects a future
+   * restart, and must not fail the request.
+   */
+  private persistEnvCredentials(updates: Record<string, string>): void {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const fs = require('fs');
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const path = require('path');
+      const envPath = path.resolve(process.cwd(), '.env');
+      let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+      for (const [key, value] of Object.entries(updates)) {
+        const line = `${key}=${value}`;
+        const re = new RegExp(`^${key}=.*$`, 'm');
+        content = re.test(content)
+          ? content.replace(re, line)
+          : content + (content.endsWith('\n') || content === '' ? '' : '\n') + line + '\n';
+      }
+      fs.writeFileSync(envPath, content, 'utf8');
+    } catch (e) {
+      this.logger.warn(
+        `Could not persist Odoo credentials to .env: ${e instanceof Error ? e.message : e}`,
+      );
+    }
   }
 
   /** Reads the manager (res.users) assigned to a recycle.warehouse. */

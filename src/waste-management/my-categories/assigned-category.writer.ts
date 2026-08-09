@@ -13,8 +13,12 @@ import { WasteCategory } from '@src/waste-management/entities/waste-category.ent
 /**
  * Links waste categories to a commercial account's material record (the same
  * pivot rows created during onboarding's info-material step). After this runs,
- * AssignedCategoryProvider automatically includes the new categories, so the
- * account starts seeing their categories / products / offers.
+ * the account's "my categories" view includes the new categories.
+ *
+ * Moved here from the old category-request feature (now removed): the request
+ * flow existed only because buyers were once restricted to their picked
+ * categories. They are not any more — everyone sees the whole catalogue — so a
+ * buyer adds a category to their own list DIRECTLY, no admin approval.
  */
 @Injectable()
 export class AssignedCategoryWriter {

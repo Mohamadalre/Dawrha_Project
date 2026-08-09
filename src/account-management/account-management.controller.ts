@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   DefaultValuePipe,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -14,10 +15,12 @@ import {
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
+import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { Role } from '@src/user/enums/role.enum';
 import { AccountManagementService } from './account-management.service';
 import {
   AccountListQueryDto,
+  AccountsByRoleQueryDto,
   BlockedAccountStatusDto,
   CancelReuploadRequestsDto,
   RequestReuploadDto,
@@ -109,6 +112,37 @@ export class AccountManagementController {
       Role.EXTERNAL_PARTNER, query,
     );
     return { message: 'Free facilities fetched successfully', result };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Accounts — generic (any role) list + delete (soft archive)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Accounts of ANY role, filtered by `role` and/or `status`, paginated.
+   * Archived accounts are hidden unless `include_archived=true`.
+   */
+  @Get('accounts')
+  @Permissions('admin.accounts.view')
+  async listAccounts(@Query() query: AccountsByRoleQueryDto) {
+    const result = await this.accountManagementService.listAccounts(query);
+    return { message: 'Accounts fetched successfully', result };
+  }
+
+  /**
+   * Delete an account — a SOFT ARCHIVE: the email/phone stay claimed, the data
+   * is kept for audit, login answers "account not found", and any token it
+   * holds stops working at once. Refused for admins, already-deleted accounts,
+   * and the caller's own account.
+   */
+  @Delete('accounts/:accountId')
+  @Permissions('admin.accounts.manage')
+  async deleteAccount(
+    @CurrentUser() user,
+    @Param('accountId', ParseUUIDPipe) accountId: string,
+  ) {
+    const result = await this.accountManagementService.archiveAccount(accountId, user.id);
+    return { message: 'Account deleted successfully', result };
   }
 
   // ---------------------------------------------------------------------------

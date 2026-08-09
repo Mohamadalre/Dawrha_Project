@@ -92,30 +92,15 @@ describe('AdminCatalogService', () => {
       cache,
       units,
       conditionsService,
+      { deleteByUrl: jest.fn(), deleteFile: jest.fn(), publicIdFromUrl: jest.fn(() => null) } as any,
       // Offer creation writes several rows in one transaction; nothing in this
       // suite creates one, so a stub that simply runs the callback is enough.
       { transaction: jest.fn(async (cb: any) => cb({ getRepository: () => offerRepo })) } as any,
     );
   });
 
-  describe('createCategory', () => {
-    it('rejects a duplicate name', async () => {
-      categoryRepo.findOne.mockResolvedValue({ id: 'x' });
-      await expect(service.createCategory('a1', { name: 'Plastic' } as any)).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
-    });
-
-    it('creates, enqueues Odoo sync, audits and invalidates cache', async () => {
-      categoryRepo.findOne.mockResolvedValue(null);
-      const res = await service.createCategory('a1', { name: 'Plastic' } as any);
-
-      expect(odooSync.enqueueSyncCategory).toHaveBeenCalledWith({ categoryId: 'c1' });
-      expect(audit.record).toHaveBeenCalled();
-      expect(cache.invalidate).toHaveBeenCalledWith('categories');
-      expect(res.category_id).toBe('c1');
-    });
-  });
+  // createCategory was moved to WasteManagementService (the single add-category
+  // route, POST /waste-management/waste-category); its test lives there.
 
   describe('deleteCategory', () => {
     it('refuses when the category still has products', async () => {
@@ -138,7 +123,7 @@ describe('AdminCatalogService', () => {
     it('rejects an unknown category with 404', async () => {
       categoryRepo.findOne.mockResolvedValue(null);
       await expect(
-        service.createProduct('a1', { name: 'X', category_id: 'c1', unit_id: 'u-kg' } as any),
+        service.createProduct('a1', { name: 'X', category_id: 'c1', unit_id: 'u-kg' } as any, 'https://img/x.jpg'),
       ).rejects.toMatchObject({ status: 404 });
     });
 
@@ -148,7 +133,7 @@ describe('AdminCatalogService', () => {
         name: 'X',
         category_id: 'c1',
         unit_id: 'u-kg',
-      } as any);
+      } as any, 'https://img/x.jpg');
       expect(odooSync.enqueueSyncProduct).toHaveBeenCalledWith({ productId: 'p1' });
       expect(cache.invalidate).toHaveBeenCalledWith('products', 'categories', 'offers');
       expect(res.product_id).toBe('p1');
@@ -168,7 +153,7 @@ describe('AdminCatalogService', () => {
         name: 'X',
         category_id: 'c1',
         unit_id: 'u-kg',
-      } as any);
+      } as any, 'https://img/x.jpg');
 
       const saved = productRepo.create.mock.calls[0][0];
       expect(saved.unitId).toBe('u-kg');
@@ -185,7 +170,7 @@ describe('AdminCatalogService', () => {
         category_id: 'c1',
         unit_id: 'u-kg',
         unit_type: 'PIECE',
-      } as any);
+      } as any, 'https://img/x.jpg');
 
       expect(productRepo.create.mock.calls[0][0].unitType).toBe('KG');
     });
@@ -193,7 +178,22 @@ describe('AdminCatalogService', () => {
     it('refuses a material with no unit at all', async () => {
       categoryRepo.findOne.mockResolvedValue({ id: 'c1' });
       await expect(
-        service.createProduct('a1', { name: 'X', category_id: 'c1' } as any),
+        service.createProduct('a1', { name: 'X', category_id: 'c1' } as any, 'https://img/x.jpg'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('refuses a material with no image', async () => {
+      categoryRepo.findOne.mockResolvedValue({ id: 'c1' });
+      await expect(
+        service.createProduct('a1', { name: 'X', category_id: 'c1', unit_id: 'u-kg' } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('refuses a material whose name already exists', async () => {
+      categoryRepo.findOne.mockResolvedValue({ id: 'c1' });
+      productRepo.findOne.mockResolvedValue({ id: 'dup', name: 'X' });
+      await expect(
+        service.createProduct('a1', { name: 'X', category_id: 'c1', unit_id: 'u-kg' } as any, 'https://img/x.jpg'),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });

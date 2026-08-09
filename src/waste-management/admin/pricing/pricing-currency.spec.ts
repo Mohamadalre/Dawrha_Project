@@ -44,6 +44,8 @@ describe('PricingService — currency edits', () => {
     service = new PricingService(
       productRepo, pricingRepo, historyRepo, cartItemRepo, odooSync, audit, cache,
       {} as any, {} as any, offerSettlement,
+      { find: jest.fn().mockResolvedValue([]) } as any,
+      { createNotification: jest.fn(), enqueueNotification: jest.fn() } as any,
     );
   });
 

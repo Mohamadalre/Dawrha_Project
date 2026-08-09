@@ -96,10 +96,10 @@ export class FactoryOnboardingService extends OnboardingService {
     })
     const profile = await this.factoryRepo.save(information);
 
-    // The same number on the ACCOUNT. It lived only on the profile, under a
-    // different column name per role, so every screen reading the account
-    // showed a facility with no phone while the number sat one join away.
-    await this.mirrorPhoneOntoAccount(account.id, dto.phoneNumber);
+    // The factory's number stays on the profile only (`factoryPhone`) and is
+    // deliberately NOT copied onto `accounts.phone`: an account that signed up
+    // without a personal number keeps an empty account phone until its owner
+    // sets one from the profile edit.
 
 
     // Upload logo if file provided

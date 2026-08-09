@@ -2,7 +2,7 @@ import { Transform } from "class-transformer";
 import { normalizeSyrianPhoneNumber } from "@src/common/utils/phone-normalization.provider";
 import { CollectionFrequeny } from "@src/user/enums/collectionFrequeny.enum";
 import { DeliverySchedule } from "@src/user/enums/delivery-schedule.enum";
-import { IsNotEmpty, IsString, IsOptional, Matches, IsArray, ArrayNotEmpty, IsEnum, IsBoolean } from "class-validator";
+import { IsNotEmpty, IsString, IsOptional, Matches, IsArray, ArrayNotEmpty, IsEnum, IsBoolean, IsUUID } from "class-validator";
 
 export class InformationExternalPartnerDto {
     @IsNotEmpty()
@@ -34,9 +34,11 @@ export class InformationExternalPartnerDto {
 
 
 export class WasteExternalPartnerDto {
+    // UUIDs only — a non-uuid id would otherwise reach the `IN (...)` query and
+    // surface as a Postgres 500 rather than a clear validation message.
     @IsArray()
     @ArrayNotEmpty()
-    @IsString({ each: true })
+    @IsUUID('all', { each: true, message: 'Each waste category id must be a valid id' })
     wasteCategoryId: string[];
 
 

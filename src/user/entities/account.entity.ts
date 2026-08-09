@@ -103,6 +103,20 @@ export class Account {
   @OneToOne(() => ExternalPartnerProfile, (profile) => profile.account, { cascade: true, nullable: true })
   externalPartnerProfile: ExternalPartnerProfile;
 
+  /**
+   * Soft-archive marker. Null = a live account. When set, "delete" has been
+   * performed: the row survives (its email/phone stay claimed so the same
+   * person cannot silently re-register on them), its data is kept for audit,
+   * but login treats it as not found and any token it still holds is refused on
+   * every route.
+   */
+  @Column({ name: 'archived_at', type: 'timestamptz', nullable: true })
+  archivedAt?: Date | null;
+
+  /** The admin who archived it. */
+  @Column({ name: 'archived_by', type: 'uuid', nullable: true })
+  archivedBy?: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

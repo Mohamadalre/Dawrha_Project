@@ -108,6 +108,90 @@ export class AccountManagementService {
     private readonly pointsWallet: PointsWalletService,
   ) {}
 
+  // ---------------------------------------------------------------------------
+  // Accounts — generic listing (any role) + soft-archive "delete"
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Accounts filtered by role and/or status, newest first, paginated. Archived
+   * ("deleted") accounts are hidden unless `include_archived` is set — the admin
+   * can still audit them, but the default window is the live population.
+   */
+  async listAccounts(query: {
+    role?: Role;
+    status?: AccountStatus;
+    page: number;
+    limit: number;
+    include_archived?: boolean;
+  }) {
+    const page = Math.max(1, Math.floor(query.page) || 1);
+    const limit = Math.min(Math.max(1, Math.floor(query.limit) || 10), 100);
+
+    const where: Record<string, unknown> = {};
+    if (query.role) where.role = query.role;
+    if (query.status) where.accountStatus = query.status;
+    if (!query.include_archived) where.archivedAt = IsNull();
+
+    const [rows, total] = await this.accountRepo.findAndCount({
+      where,
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      accounts: rows.map((a) => ({
+        ...reviewerAccountView(a),
+        is_archived: !!a.archivedAt,
+        archived_at: a.archivedAt ?? null,
+        created_at: a.createdAt,
+      })),
+      pagination: {
+        total,
+        page,
+        limit,
+        total_pages: limit > 0 ? Math.ceil(total / limit) : 0,
+        has_next: page * limit < total,
+        has_prev: page > 1,
+      },
+    };
+  }
+
+  /**
+   * "Delete" an account — a SOFT ARCHIVE. The row stays (so its email and phone
+   * remain claimed and nobody can silently re-register on them, and its data is
+   * kept for audit), but `archivedAt` is stamped: login answers "account not
+   * found" and any token it still holds is refused on the next request (see
+   * JwtStrategy). Reversible only by an admin clearing the flag.
+   *
+   * Refused for an admin account, for an already-archived one, and for the
+   * caller's own account — none of which is a "delete this applicant" action.
+   */
+  async archiveAccount(accountId: string, adminId: string) {
+    const account = await this.accountRepo.findOne({ where: { id: accountId } });
+    if (!account) throw new AdminAccountNotFoundException();
+    if (account.archivedAt) {
+      throw new BadRequestException('Account is already deleted');
+    }
+    if (account.role === Role.ADMIN) {
+      throw new BadRequestException('An admin account cannot be deleted');
+    }
+    if (account.id === adminId) {
+      throw new BadRequestException('You cannot delete your own account');
+    }
+
+    account.archivedAt = new Date();
+    account.archivedBy = adminId;
+    await this.accountRepo.save(account);
+
+    // Drop the reviewer's cached listings for this role so the account leaves
+    // them at once. Existing tokens need no explicit revoke — JwtStrategy
+    // refuses an archived account on its very next request.
+    await this.applicationsCache.invalidate(account.role);
+
+    return { id: accountId, archived_at: account.archivedAt };
+  }
+
   // ===========================================================================
   // Reading
   // ===========================================================================

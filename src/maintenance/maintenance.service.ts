@@ -94,18 +94,33 @@ export class MaintenanceService {
       });
 
       let deleted = 0;
+      let failed = 0;
       for (const account of candidates) {
-        const cart = await this.cartRepo.findOne({ where: { accountId: account.id } });
-        const itemCount = cart
-          ? await this.cartItemRepo.count({ where: { cartId: cart.id } })
-          : 0;
-        if (itemCount === 0) {
-          if (cart) await this.cartRepo.delete(cart.id);
-          await this.accountRepo.delete(account.id);
-          deleted++;
+        // Isolated per account: an unexpected failure on ONE (e.g. a
+        // foreign-key from a table without a cascade) must not abort the whole
+        // sweep and strand every remaining ghost. It is logged and skipped.
+        try {
+          const cart = await this.cartRepo.findOne({ where: { accountId: account.id } });
+          const itemCount = cart
+            ? await this.cartItemRepo.count({ where: { cartId: cart.id } })
+            : 0;
+          if (itemCount === 0) {
+            if (cart) await this.cartRepo.delete(cart.id);
+            await this.accountRepo.delete(account.id);
+            deleted++;
+          }
+        } catch (err) {
+          failed++;
+          winstonLogger.error(
+            `cleanupGhostAccounts: could not delete account ${account.id}: ${(err as Error).message}`,
+            LOG_META,
+          );
         }
       }
-      winstonLogger.info(`Deleted ${deleted} ghost account(s)`, LOG_META);
+      winstonLogger.info(
+        `Deleted ${deleted} ghost account(s)${failed ? `, ${failed} skipped after errors` : ''}`,
+        LOG_META,
+      );
     } catch (error) {
       winstonLogger.error(`cleanupGhostAccounts failed: ${(error as Error).message}`, {
         ...LOG_META,

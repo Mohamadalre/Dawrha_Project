@@ -252,29 +252,34 @@ export class SuggestionsService {
   }
 
   private shape(row: ProductSuggestion) {
+    // Absent scalars are returned as '' (never null) and the proposer always
+    // carries their account id AND email, so the reviewer can act on — or reach
+    // — whoever raised it. An Odoo-side proposal has no app account, so those
+    // two are empty by nature.
     return {
       id: row.id,
       product_name: row.productName,
-      description: row.description ?? null,
+      description: row.description ?? '',
       category: row.category
         ? { id: row.category.id, name: row.category.name }
-        : null,
+        : { id: '', name: '' },
       // A category the proposer says does not exist yet. Distinct from
-      // `category` being null, which only means none was chosen — this says one
+      // `category` being empty, which only means none was chosen — this says one
       // was ASKED FOR, and it is the reviewer's second decision on the proposal.
-      suggested_category_name: row.suggestedCategoryName ?? null,
+      suggested_category_name: row.suggestedCategoryName ?? '',
       images: row.imageUrls ?? [],
       source: row.source,
       suggested_by:
         row.source === SuggestionSource.ODOO
-          ? { name: row.suggestedByName ?? 'Odoo administrator', account_id: null, role: 'ODOO' }
+          ? { name: row.suggestedByName ?? 'Odoo administrator', account_id: '', email: '', role: 'ODOO' }
           : {
-              name: row.account?.name ?? null,
-              account_id: row.accountId ?? null,
-              role: row.account?.role ?? null,
+              name: row.account?.name ?? '',
+              account_id: row.accountId ?? '',
+              email: row.account?.email ?? '',
+              role: row.account?.role ?? '',
             },
-      admin_reply: row.adminReply ?? null,
-      replied_at: row.repliedAt ?? null,
+      admin_reply: row.adminReply ?? '',
+      replied_at: row.repliedAt ?? '',
       created_at: row.createdAt,
     };
   }

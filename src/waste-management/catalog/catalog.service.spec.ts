@@ -329,17 +329,36 @@ describe('CatalogService', () => {
   it('caches the category list PER TIER, never under one shared key', async () => {
     // The list now differs by tier. A shared 'all' entry would serve one role
     // the other's categories — the same bug already fixed on the product list.
+    // Uses a CITIZEN: factories / free facilities are stock-gated and therefore
+    // deliberately NOT cached (their list depends on live governorate stock),
+    // so the per-tier caching is asserted on a tier that actually caches.
     cache.get.mockResolvedValue(null);
     assigned.getAssignedCategoryIds.mockResolvedValue(null);
+
+    await service.getCategories(
+      { id: 'u1', role: Role.CITIZEN },
+      { page: 1, limit: 10, sort: 'name', order: 'asc' } as any,
+    );
+
+    const key = String(cache.set.mock.calls[0][1]);
+    expect(key).toContain('tier:INDIVIDUAL');
+    expect(key.startsWith('all:')).toBe(false);
+  });
+
+  it('does NOT cache the category list for a stock-gated buyer (factory)', async () => {
+    // Factories/free facilities depend on live governorate stock, so their
+    // catalogue is never served from cache.
+    cache.get.mockResolvedValue(null);
+    assigned.getAssignedCategoryIds.mockResolvedValue(null);
+    buyerProfiles.provinceForBuyer.mockResolvedValue('pv1');
 
     await service.getCategories(
       { id: 'f1', role: Role.FACTORY },
       { page: 1, limit: 10, sort: 'name', order: 'asc' } as any,
     );
 
-    const key = String(cache.set.mock.calls[0][1]);
-    expect(key).toContain('tier:FACTORY');
-    expect(key.startsWith('all:')).toBe(false);
+    expect(cache.get).not.toHaveBeenCalled();
+    expect(cache.set).not.toHaveBeenCalled();
   });
 
   it('getProductsByCategory forbids a category not assigned to an institution', async () => {

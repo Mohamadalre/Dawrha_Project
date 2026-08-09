@@ -10,6 +10,10 @@ import { AccountStatus } from '@src/user/enums/account-status.enum';
  * decorator — 210 of 240 routes. That was survivable only because the statuses
  * it would have admitted never held a token. These tests pin the inversion, so
  * that issuing those tokens cannot silently reopen what was closed.
+ *
+ * Status now comes from the DATABASE, never the token. Two paths are covered:
+ * the fast path (`request.user.accountStatus`, set by a prior guard) and the
+ * global-stage path (token id → DB lookup).
  */
 describe('AccountStatusGuard', () => {
   let guard: AccountStatusGuard;
@@ -33,7 +37,7 @@ describe('AccountStatusGuard', () => {
   afterEach(() => jest.restoreAllMocks());
 
   // ── the inversion ───────────────────────────────────────────────────────
-  it('refuses a non-active status on a route that declares nothing', () => {
+  it('refuses a non-active status on a route that declares nothing', async () => {
     declare(undefined);
 
     for (const status of [
@@ -43,58 +47,135 @@ describe('AccountStatusGuard', () => {
       AccountStatus.PENDING_PROFILE,
       AccountStatus.INACTIVE,
     ]) {
-      expect(() => guard.canActivate(ctx({ accountStatus: status }))).toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        guard.canActivate(ctx({ accountStatus: status })),
+      ).rejects.toThrow(ForbiddenException);
     }
   });
 
-  it('admits ACTIVE on a route that declares nothing', () => {
+  it('admits ACTIVE on a route that declares nothing', async () => {
     declare(undefined);
-    expect(guard.canActivate(ctx({ accountStatus: AccountStatus.ACTIVE }))).toBe(true);
+    await expect(
+      guard.canActivate(ctx({ accountStatus: AccountStatus.ACTIVE })),
+    ).resolves.toBe(true);
   });
 
   // ── BLOCKED is refused before any whitelist is consulted ────────────────
-  it('refuses BLOCKED even where a decorator names it', () => {
+  it('refuses BLOCKED even where a decorator names it', async () => {
     // No future decorator may readmit a blocked account by mistake.
     declare([AccountStatus.BLOCKED, AccountStatus.ACTIVE]);
 
-    expect(() => guard.canActivate(ctx({ accountStatus: AccountStatus.BLOCKED }))).toThrow(
-      /blocked/i,
-    );
+    await expect(
+      guard.canActivate(ctx({ accountStatus: AccountStatus.BLOCKED })),
+    ).rejects.toThrow(/blocked/i);
   });
 
   // ── an explicit declaration is exhaustive ───────────────────────────────
-  it('admits exactly the statuses a route names', () => {
+  it('admits exactly the statuses a route names', async () => {
     declare([AccountStatus.PENDING_APPROVAL, AccountStatus.NEED_CHANGES]);
 
-    expect(guard.canActivate(ctx({ accountStatus: AccountStatus.PENDING_APPROVAL }))).toBe(true);
-    expect(guard.canActivate(ctx({ accountStatus: AccountStatus.NEED_CHANGES }))).toBe(true);
-    expect(() => guard.canActivate(ctx({ accountStatus: AccountStatus.REJECTED }))).toThrow();
+    await expect(
+      guard.canActivate(ctx({ accountStatus: AccountStatus.PENDING_APPROVAL })),
+    ).resolves.toBe(true);
+    await expect(
+      guard.canActivate(ctx({ accountStatus: AccountStatus.NEED_CHANGES })),
+    ).resolves.toBe(true);
+    await expect(
+      guard.canActivate(ctx({ accountStatus: AccountStatus.REJECTED })),
+    ).rejects.toThrow();
   });
 
-  it('keeps ACTIVE out of a route that deliberately excludes it', () => {
+  it('keeps ACTIVE out of a route that deliberately excludes it', async () => {
     // An onboarding step marked PENDING_PROFILE excludes ACTIVE on purpose: an
     // approved account has no business re-running its own registration. An
     // early "ACTIVE always passes" shortcut would have quietly opened all 30
     // routes that carry a declaration.
     declare([AccountStatus.PENDING_PROFILE]);
 
-    expect(() => guard.canActivate(ctx({ accountStatus: AccountStatus.ACTIVE }))).toThrow(
+    await expect(
+      guard.canActivate(ctx({ accountStatus: AccountStatus.ACTIVE })),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  // ── anonymous requests are somebody else's decision ─────────────────────
+  it('does not judge an unauthenticated request', async () => {
+    declare(undefined);
+    // Whether a caller may be anonymous at all is JwtAuthGuard's call; this
+    // guard only classifies a status it has been given.
+    await expect(guard.canActivate(ctx(undefined))).resolves.toBe(true);
+  });
+
+  it('refuses an authenticated request whose status cannot be determined', async () => {
+    declare([AccountStatus.PENDING_APPROVAL]);
+    await expect(guard.canActivate(ctx({ id: 'x' }))).rejects.toThrow(
       ForbiddenException,
     );
   });
 
-  // ── anonymous requests are somebody else's decision ─────────────────────
-  it('does not judge an unauthenticated request', () => {
-    declare(undefined);
-    // Whether a caller may be anonymous at all is JwtAuthGuard's call; this
-    // guard only classifies a status it has been given.
-    expect(guard.canActivate(ctx(undefined))).toBe(true);
-  });
+  // ── the DB-lookup path (global stage, before JwtAuthGuard runs) ──────────
+  describe('status resolved from the database by token id', () => {
+    const ctxToken = (token?: string) =>
+      ({
+        switchToHttp: () => ({
+          getRequest: () => ({
+            headers: token ? { authorization: `Bearer ${token}` } : {},
+          }),
+        }),
+        getHandler: () => undefined,
+        getClass: () => undefined,
+      }) as any;
 
-  it('refuses a token that carries no status at all', () => {
-    declare([AccountStatus.PENDING_APPROVAL]);
-    expect(() => guard.canActivate(ctx({ id: 'x' }))).toThrow(ForbiddenException);
+    const build = (dbStatus: AccountStatus | null) => {
+      const jwtService = { verify: jest.fn().mockReturnValue({ id: 'a1' }) } as any;
+      const configService = { get: jest.fn().mockReturnValue('secret') } as any;
+      const accountRepo = {
+        findOne: jest.fn().mockResolvedValue(
+          dbStatus ? { id: 'a1', accountStatus: dbStatus } : null,
+        ),
+      };
+      const dataSource = { getRepository: jest.fn().mockReturnValue(accountRepo) } as any;
+      return {
+        guard: new AccountStatusGuard(reflector, jwtService, configService, dataSource),
+        accountRepo,
+        jwtService,
+      };
+    };
+
+    it('reads the LIVE status from the DB, not the token', async () => {
+      // The route wants PENDING_APPROVAL; the DB says PENDING_APPROVAL even
+      // though the token (minted at PENDING_PROFILE) carries no status at all.
+      declare([AccountStatus.PENDING_APPROVAL]);
+      const { guard: g, accountRepo } = build(AccountStatus.PENDING_APPROVAL);
+
+      await expect(g.canActivate(ctxToken('tkn'))).resolves.toBe(true);
+      expect(accountRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'a1' } }),
+      );
+    });
+
+    it('refuses when the DB status is not allowed, regardless of the token', async () => {
+      declare([AccountStatus.PENDING_APPROVAL]);
+      const { guard: g } = build(AccountStatus.PENDING_PROFILE);
+
+      await expect(g.canActivate(ctxToken('tkn'))).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('treats an unverifiable token as anonymous (JwtAuthGuard answers it)', async () => {
+      declare(undefined);
+      const { guard: g, jwtService } = build(AccountStatus.ACTIVE);
+      jwtService.verify.mockImplementation(() => {
+        throw new Error('bad signature');
+      });
+
+      await expect(g.canActivate(ctxToken('tkn'))).resolves.toBe(true);
+    });
+
+    it('is anonymous when there is no bearer token', async () => {
+      declare(undefined);
+      const { guard: g } = build(AccountStatus.ACTIVE);
+      await expect(g.canActivate(ctxToken(undefined))).resolves.toBe(true);
+    });
   });
 });

@@ -7,6 +7,8 @@ import {
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { DataSource } from 'typeorm';
+import { Account } from '@src/user/entities/account.entity';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { ACCOUNTSTATUS_KEY } from '../decorators/account-status.decorator';
 
@@ -40,45 +42,67 @@ export class AccountStatusGuard implements CanActivate {
     private reflector: Reflector,
     private readonly jwtService?: JwtService,
     private readonly configService?: ConfigService,
+    // The DataSource (not a per-feature repository): this guard is applied both
+    // globally and — in a handful of controllers — via @UseGuards, so it is
+    // instantiated in several module injectors. DataSource is registered
+    // globally by TypeOrmModule, so it resolves in all of them; a
+    // @InjectRepository(Account) would force every such module to import
+    // forFeature([Account]) and break the moment one forgot.
+    private readonly dataSource?: DataSource,
   ) {}
 
   /**
-   * The status this request carries, from `request.user` when an earlier guard
-   * has already run, otherwise from the token itself.
+   * The account's LIVE status, read from the database — never from the token.
    *
-   * Reading the token here is what makes the guard safe to register globally.
-   * `JwtAuthGuard` is applied per-controller in 39 places, and Nest runs GLOBAL
-   * guards BEFORE controller-bound ones — so a global guard that only trusted
-   * `request.user` would read `undefined` on every route and wave everything
-   * through, which is the failure it exists to prevent.
+   * The token carries only the account id (its status claim was removed): a
+   * token minted while the account was PENDING_PROFILE would otherwise keep
+   * reporting PENDING_PROFILE for its whole lifetime, so an applicant who
+   * submitted their request (now PENDING_APPROVAL) — or was approved (ACTIVE) —
+   * stayed locked to the old status until the token expired. The id is the only
+   * status-bearing claim now, and the status is looked up fresh each request.
    *
-   * The token is VERIFIED, never merely decoded: `accountStatus` is a claim
-   * inside it, so decoding without checking the signature would let anyone mint
-   * `{"accountStatus":"ACTIVE"}` and walk past this guard entirely.
+   * Two sources, in order:
+   *  - `request.user` when an earlier guard already ran — `JwtStrategy` sets
+   *    `accountStatus` there from the DB, so it is already live;
+   *  - otherwise the token id → a DB lookup. Reading the DB here is what keeps
+   *    the guard safe to register globally: Nest runs GLOBAL guards BEFORE
+   *    controller-bound ones, so a global guard that trusted only `request.user`
+   *    would read `undefined` on every route and wave everything through.
    *
-   * A token that fails verification yields no status; the request then falls
-   * through to `JwtAuthGuard`, whose job it is to reject it with a 401.
+   * The token is VERIFIED, never merely decoded — a forged id would otherwise
+   * pick whatever account it named. A token that fails verification yields no
+   * status; the request then falls through to `JwtAuthGuard` for its 401.
    */
-  private statusOf(request: any): AccountStatus | undefined {
+  private async statusOf(request: any): Promise<AccountStatus | undefined> {
     if (request.user?.accountStatus) return request.user.accountStatus;
-    if (!this.jwtService || !this.configService) return undefined;
+    if (!this.jwtService || !this.configService || !this.dataSource) {
+      return undefined;
+    }
 
     const [type, token] = (request.headers?.authorization || '').split(' ');
     if (type !== 'Bearer' || !token) return undefined;
+    let payload: any;
     try {
-      const payload = this.jwtService.verify(token, {
+      payload = this.jwtService.verify(token, {
         secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
       });
-      return payload?.accountStatus as AccountStatus | undefined;
     } catch {
       return undefined; // invalid/expired — JwtAuthGuard answers that
     }
+
+    const id = payload?.id || payload?.sub;
+    if (!id) return undefined;
+    const account = await this.dataSource.getRepository(Account).findOne({
+      where: { id },
+      select: { id: true, accountStatus: true },
+    });
+    return account?.accountStatus;
   }
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
 
-    const status = this.statusOf(request);
+    const status = await this.statusOf(request);
 
     if (!status) {
       // An AUTHENTICATED request with no status is malformed, and malformed is

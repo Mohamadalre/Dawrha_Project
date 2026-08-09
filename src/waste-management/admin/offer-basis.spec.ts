@@ -95,7 +95,7 @@ describe('offer basis — amount vs percentage', () => {
         {} as any, { findOne: jest.fn().mockResolvedValue({ id: GRADED, isActive: true }) } as any,
         {} as any, {} as any, {} as any, {} as any, pricingRepo as any,
         offerRepo as any, { enqueueUpdatePricing: jest.fn() } as any,
-        noop as any, noop as any, {} as any, conditions as any, dataSource as any,
+        noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any,
       );
     });
 
@@ -141,14 +141,18 @@ describe('offer basis — amount vs percentage', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('derives from the CHEAPEST tier the row faces', async () => {
-      // A percentage of each tier is a different number and one row holds one
-      // amount; the smaller cannot drive the cheaper tier below zero.
+    it('derives each role\'s amount from that ROLE\'S OWN price', async () => {
+      // The offer is split per role, so there is no "cheapest tier the row
+      // faces" any more — each role gets a percentage of its own price. Factory
+      // lists at 80, free-facility at 40: 50% is 40 for one and 20 for the other.
       priceSheet[key(PricingTier.FREE_FACILITY, null)] = 40;
 
       await create({ audience: OfferAudience.BUYERS, percentage: 50 });
 
-      expect(Number(saved[0].amount)).toBe(20); // 50% of 40, not of 80
+      expect(saved).toHaveLength(2);
+      const byRole = Object.fromEntries(saved.map((o) => [o.targetRoles[0], Number(o.amount)]));
+      expect(byRole[Role.FACTORY]).toBe(40); // 50% of 80
+      expect(byRole[Role.EXTERNAL_PARTNER]).toBe(20); // 50% of 40
     });
   });
 
@@ -238,7 +242,7 @@ describe('offer basis — amount vs percentage', () => {
         {} as any, { findOne: jest.fn().mockResolvedValue({ id: GRADED, isActive: true }) } as any,
         {} as any, {} as any, {} as any, {} as any, pricingRepo as any,
         offerRepo as any, { enqueueUpdatePricing: jest.fn() } as any,
-        noop as any, noop as any, {} as any, conditions as any, dataSource as any,
+        noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any,
       );
     });
 
@@ -248,7 +252,9 @@ describe('offer basis — amount vs percentage', () => {
     it('a PERCENTAGE becomes a different amount for each grade', async () => {
       await create({ audience: OfferAudience.BUYERS, percentage: 25 });
 
-      expect(saved).toHaveLength(2);
+      // Two grades × two buyer roles (factory + free-facility) = four rows. Both
+      // roles share this material's per-grade prices, so the amounts pair up.
+      expect(saved).toHaveLength(4);
       const byGrade = Object.fromEntries(
         saved.map((o) => [o.conditionCode, Number(o.amount)]),
       );
@@ -264,7 +270,8 @@ describe('offer basis — amount vs percentage', () => {
     it('a single AMOUNT is checked against each grade separately', async () => {
       await create({ audience: OfferAudience.BUYERS, amount: 12 });
 
-      expect(saved).toHaveLength(2);
+      // Two grades × two buyer roles = four rows.
+      expect(saved).toHaveLength(4);
       // The same 12 off each grade — legal here because 12 < 60 < 70. The
       // point is each row is validated against its own price, not a shared one.
       expect(saved.every((o) => Number(o.amount) === 12)).toBe(true);
@@ -290,8 +297,9 @@ describe('offer basis — amount vs percentage', () => {
       // per-grade branch — it is one row, and a large percentage is a rise.
       await create({ audience: OfferAudience.SELLERS, percentage: 200 });
 
-      expect(saved).toHaveLength(1);
-      expect(saved[0].conditionCode).toBeNull();
+      // One row per seller role (citizen + institution), each flat (no grade).
+      expect(saved).toHaveLength(2);
+      expect(saved.every((o) => o.conditionCode === null)).toBe(true);
     });
   });
 
@@ -440,7 +448,7 @@ describe('offer edges — withdrawn materials and the buyer ceiling', () => {
       {} as any, { findOne: jest.fn(async () => productRow) } as any,
       {} as any, {} as any, {} as any, {} as any, pricingRepo as any,
       offerRepo as any, { enqueueUpdatePricing: jest.fn() } as any,
-      noop as any, noop as any, {} as any, conditions as any, dataSource as any,
+      noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any,
     );
   });
 
@@ -530,7 +538,7 @@ describe('a withdrawn material', () => {
     const service = new AdminCatalogService(
       {} as any, productRepo as any, {} as any, {} as any, {} as any, {} as any,
       {} as any, {} as any, {} as any, noop as any, noop as any, {} as any,
-      {} as any, {} as any,
+      {} as any, {} as any, {} as any,
     );
 
     await expect(

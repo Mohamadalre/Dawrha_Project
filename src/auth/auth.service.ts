@@ -115,6 +115,15 @@ export class AuthService {
   async register({ fullName, email, phoneNumber, password }: RegisterDto, role: Role) {
 
     const existAccount = await this.accountRepository.findOne({ where: { email: email } });
+    // A DELETED (archived) account keeps its email claimed on purpose: the same
+    // person cannot silently re-register on it, and — just as important — this
+    // branch must be FIRST so the unverified-account path below can never
+    // re-mail an OTP and quietly revive a deleted account. Re-registration is
+    // refused, not resurrected. (Mirrors Odoo, where the identity is released
+    // only by a hard delete, never by archiving.)
+    if (existAccount?.archivedAt) {
+      throw new ConflictException('This email belongs to a deleted account and cannot be reused');
+    }
     // Checked BEFORE the unverified-account branch: a Google account is verified
     // by definition, but ordering the guard first means no future change to that
     // branch can quietly start mailing an OTP to an account that has no password
@@ -124,7 +133,7 @@ export class AuthService {
     }
     if (existAccount && !existAccount.isEmailVerified) {
       await this.mailService.generateAndSendOtp(existAccount.email);
-      const token = await this.generateTemporaryTokens(existAccount.id, existAccount.role, existAccount.accountStatus);
+      const token = await this.generateTemporaryTokens(existAccount.id, existAccount.role);
       return { message: 'Your account is not confirmed , please make sure that the verification code has reached your email', result: token }
     }
     if (existAccount && existAccount.isEmailVerified) throw new EmailAlreadyExistsException();
@@ -145,7 +154,7 @@ export class AuthService {
     const saveAccount = await this.accountRepository.save(account);
     await this.mailService.generateAndSendOtp(saveAccount.email);
 
-    const token = await this.generateTemporaryTokens(saveAccount.id, saveAccount.role, saveAccount.accountStatus);
+    const token = await this.generateTemporaryTokens(saveAccount.id, saveAccount.role);
     return { message: 'An account has been created,please ensure that a verification code has been sent to your email .', result: token }
   }
 
@@ -160,6 +169,11 @@ export class AuthService {
     const allowed = AllowedAccountType[role];
     if (!account) {
       throw new InvalidCredentialsException();
+    }
+    // A deleted (archived) account behaves as if it does not exist — the row is
+    // only kept to hold its email/phone. The applicant is told exactly that.
+    if (account.archivedAt) {
+      throw new NotFoundException('Account not found');
     }
 
     if (!allowed || !allowed.includes(account.role)) {
@@ -438,8 +452,12 @@ export class AuthService {
    * @param fcmToken optional push notification token
    * @returns accessToken and raw refreshToken
    */
-  async generateTokens(accountId: string, role: Role, accountStatus: AccountStatus, deviceId: string, deviceType?: DeviceType, fcmToken?: string, rememberMy: boolean = false) {
-    const payload = { id: accountId, role: role, accountStatus, jti: randomBytes(16).toString('base64url') };
+  async generateTokens(accountId: string, role: Role, deviceId: string, deviceType?: DeviceType, fcmToken?: string, rememberMy: boolean = false) {
+    // No `accountStatus` claim: status is authoritative in the DB and is read
+    // from there on every request (see AccountStatusGuard). A token that carried
+    // the status would keep reporting the value it held at login long after the
+    // account moved on — the bug this removal fixes.
+    const payload = { id: accountId, role: role, jti: randomBytes(16).toString('base64url') };
 
     const [accessToken, refreshTokenRaw] = await Promise.all([
       this.jwtService.signAsync(payload, {
@@ -508,7 +526,7 @@ export class AuthService {
       if (account.accountStatus !== AccountStatus.INACTIVE) throw new InvalidTokenException();
 
 
-      return await this.generateTemporaryTokens(account.id, account.role, account.accountStatus);
+      return await this.generateTemporaryTokens(account.id, account.role);
     } catch {
       throw new InvalidTokenException();
     }
@@ -522,8 +540,10 @@ export class AuthService {
    * @param accountStatus current account status
    * @returns object containing a temporary token
    */
-  async generateTemporaryTokens(accountId: string, role: Role, accountStatus: AccountStatus) {
-    const payload = { id: accountId, role: role, accountStatus: accountStatus, jti: randomBytes(16).toString('base64url') };
+  async generateTemporaryTokens(accountId: string, role: Role) {
+    // Status is never carried in a token (see generateTokens); the temporary
+    // token identifies the account and nothing more.
+    const payload = { id: accountId, role: role, jti: randomBytes(16).toString('base64url') };
     const TemporaryToken = await this.jwtService.signAsync(payload,
       {
         secret: this.configService.get<string>('JWT_TEMPORARY_SECRET'),
@@ -567,7 +587,7 @@ export class AuthService {
       if (!isRefreshTokenValid) {
         throw new UnauthorizedException('Access denied');
       }
-      return this.generateTokens(account.id, account.role, account.accountStatus, deviceId);
+      return this.generateTokens(account.id, account.role, deviceId);
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (error) {
       throw new UnauthorizedException("access denied, invalid token")

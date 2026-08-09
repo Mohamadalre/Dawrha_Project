@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsEnum,
   IsIn,
   IsInt,
@@ -11,6 +12,40 @@ import {
   Min,
 } from 'class-validator';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
+import { Role } from '@src/user/enums/role.enum';
+
+/**
+ * Generic accounts window: filter by role and/or status, hide archived by
+ * default. The role-specific review listings stay on their own routes; this is
+ * the "show me the accounts of role X" screen with a delete action beside it.
+ */
+export class AccountsByRoleQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit = 10;
+
+  @IsOptional()
+  @IsEnum(Role)
+  role?: Role;
+
+  @IsOptional()
+  @IsEnum(AccountStatus)
+  status?: AccountStatus;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  include_archived?: boolean;
+}
 
 /**
  * Decisions an admin may take directly on an ACCOUNT.

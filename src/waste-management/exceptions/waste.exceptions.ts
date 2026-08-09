@@ -53,6 +53,23 @@ export class ProductNotFoundException extends NotFoundException {
   }
 }
 
+export class ProductAlreadyExistsException extends BadRequestException {
+  constructor() {
+    super({ message: 'Product already exists', errorCode: 'PRODUCT_ALREADY_EXISTS' });
+  }
+}
+
+/**
+ * A catalogue entry that carries an image (category / material / suggestion)
+ * cannot be created without one — the clients render a broken tile otherwise, so
+ * the image is a hard field, not a nice-to-have.
+ */
+export class ImageRequiredException extends BadRequestException {
+  constructor() {
+    super({ message: 'An image is required', errorCode: 'IMAGE_REQUIRED' });
+  }
+}
+
 export class ProductInCartsException extends BadRequestException {
   constructor() {
     super({

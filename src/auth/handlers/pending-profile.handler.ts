@@ -21,7 +21,6 @@ export class PendingProfileHandler implements LoginHandler {
         const token = await this.authService.generateTokens(
             account.id,
             account.role,
-            account.accountStatus,
             dto.deviceId,
             dto.deviceType,
             dto.fcmToken

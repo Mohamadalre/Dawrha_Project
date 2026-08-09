@@ -3,7 +3,7 @@ import { normalizeSyrianPhoneNumber } from "@src/common/utils/phone-normalizatio
 import { CollectionFrequeny } from "@src/user/enums/collectionFrequeny.enum";
 import { DeliverySchedule } from "@src/user/enums/delivery-schedule.enum";
 import { Transform } from 'class-transformer';
-import { IsNotEmpty, IsString, IsOptional, Matches, IsArray, ArrayNotEmpty, IsEnum, IsBoolean } from "class-validator";
+import { IsNotEmpty, IsString, IsOptional, Matches, IsArray, ArrayNotEmpty, IsEnum, IsBoolean, IsUUID } from "class-validator";
 
 
 export class InformationFactoryDto {
@@ -36,9 +36,14 @@ export class InformationFactoryDto {
 
 
 export class WasteFactoryDto {
+    // Must be UUIDs. Without this a free-typed id (or a name) reached the
+    // `IN (...)` query and Postgres answered "invalid input syntax for type
+    // uuid" as a 500 — the applicant saw a database error instead of a clear
+    // "this category id is not valid". checkWasteType still de-duplicates and
+    // reports ids that do not exist.
     @IsArray()
     @ArrayNotEmpty()
-    @IsString({ each: true })
+    @IsUUID('all', { each: true, message: 'Each waste category id must be a valid id' })
     wasteCategoryId: string[];
 
 

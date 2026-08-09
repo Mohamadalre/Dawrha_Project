@@ -91,6 +91,14 @@ export class InstitutionOnboardingService extends OnboardingService {
         'Either institutionTypeId or otherInstitutionType is required',
       );
     }
+    // EITHER a chosen type id OR a free-typed name, never both — the two name
+    // the same fact, so storing both is a contradiction the edit path would
+    // then have to guess its way out of. Refuse it at the door.
+    if (dto.institutionTypeId && dto.otherInstitutionType) {
+      throw new BadRequestException(
+        'Provide either an institution type id or a custom type, not both',
+      );
+    }
 
     let information = this.institutionRepo.create({
       institutionName: dto.institutionName,
@@ -102,20 +110,21 @@ export class InstitutionOnboardingService extends OnboardingService {
     })
 
     if (dto.institutionTypeId) {
-      const isntitutionType = await this.institutionTypeRepo.findOne({ where: { id: dto.institutionTypeId } })
-      if (!isntitutionType) throw new BadRequestException('Institution type is invalid');
-      information.institutionType = isntitutionType
-    }
-
-    if (dto.otherInstitutionType) {
+      const institutionType = await this.institutionTypeRepo.findOne({ where: { id: dto.institutionTypeId } })
+      if (!institutionType) throw new BadRequestException('Institution type is invalid');
+      information.institutionType = institutionType
+    } else {
+      // Only reached when otherInstitutionType is set (the both-null and
+      // both-set cases were already rejected above).
       information.otherInstitutionType = dto.otherInstitutionType;
     }
     const profile = await this.institutionRepo.save(information);
 
-    // The same number on the ACCOUNT. It lived only on the profile, under a
-    // different column name per role, so every screen reading the account
-    // showed a facility with no phone while the number sat one join away.
-    await this.mirrorPhoneOntoAccount(account.id, dto.phoneNumber);
+    // The phone entered here is the INSTITUTION's number and stays on the
+    // profile only (`institutionPhone`). It is deliberately NOT copied onto
+    // `accounts.phone`: an account that registered without a personal number
+    // keeps an empty account phone until the owner sets one from the profile
+    // edit — a form about the premises does not fill in the person's own field.
 
     // Upload logo if file provided
     if (file) {
@@ -156,7 +165,7 @@ export class InstitutionOnboardingService extends OnboardingService {
     const wasteTypesEntities = await this.checkWasteType(dto.wasteCategoryId);
 
     const wasteTypes = wasteTypesEntities.map((wt) => {
-      const pivot = new InstitutionWasteCategory();
+      const pivot = new InstitutionWasteCategory(); 
       pivot.wasteType = wt;
       return pivot;
     });

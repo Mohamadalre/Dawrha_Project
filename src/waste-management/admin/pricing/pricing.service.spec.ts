@@ -82,6 +82,8 @@ describe('PricingService', () => {
       // percentage goes stale, and an amount that no longer fits would make
       // the price negative.
       { resettle: jest.fn().mockResolvedValue({ repriced: 0, suspended: 0 }) } as any,
+      { find: jest.fn().mockResolvedValue([]) } as any,
+      { createNotification: jest.fn(), enqueueNotification: jest.fn() } as any,
     );
   });
 
@@ -98,16 +100,20 @@ describe('PricingService', () => {
 
       // 2 flat rows (individual/company) + 1 factory condition + 1 free-facility condition
       expect(pricingRepo.save).toHaveBeenCalledTimes(4);
-      expect(result.pricing).toEqual({
-        individual: 0.3,
-        company: 0.27,
-        // The grade's ID travels back with the line. A price is FILED against
-        // the grade, not merely labelled with its code — and this table is the
-        // one the invoice is read from, so a line linked to the wrong grade is
-        // money charged for something the buyer did not order.
-        factory: [{ condition: 'EXCELLENT', conditionId: 'cond-excellent', price: 0.25 }],
-        free_facility: [{ condition: 'EXCELLENT', conditionId: 'cond-excellent', price: 0.26 }],
-      });
+      // Each role comes back with its pricing-row id — the id the admin needs to
+      // later correct or expire that exact row.
+      expect(result.pricing.individual).toMatchObject({ pricing_id: 'pp', price: 0.3 });
+      expect(result.pricing.company).toMatchObject({ pricing_id: 'pp', price: 0.27 });
+      // The grade's ID travels back with the line. A price is FILED against the
+      // grade, not merely labelled with its code — and this table is the one the
+      // invoice is read from, so a line linked to the wrong grade is money
+      // charged for something the buyer did not order.
+      expect(result.pricing.factory).toEqual([
+        { pricing_id: 'pp', condition: 'EXCELLENT', condition_id: 'cond-excellent', price: 0.25, currency: 'JOD' },
+      ]);
+      expect(result.pricing.free_facility).toEqual([
+        { pricing_id: 'pp', condition: 'EXCELLENT', condition_id: 'cond-excellent', price: 0.26, currency: 'JOD' },
+      ]);
     });
 
     it('accepts the grade BY ID on the bulk price list', async () => {
@@ -120,7 +126,7 @@ describe('PricingService', () => {
         free_facility: [{ condition_id: 'cond-excellent', price: 0.26 }],
       } as any);
 
-      expect(res.pricing.factory[0].conditionId).toBe('cond-excellent');
+      expect(res.pricing.factory[0].condition_id).toBe('cond-excellent');
       expect(res.pricing.factory[0].condition).toBe('EXCELLENT');
     });
 
@@ -146,7 +152,7 @@ describe('PricingService', () => {
         free_facility: [{ condition: 'EXCELLENT', price: 0.26 }],
       } as any);
 
-      expect(res.pricing.factory[0].conditionId).toBe('cond-excellent');
+      expect(res.pricing.factory[0].condition_id).toBe('cond-excellent');
     });
 
     it('archives the previous live rows before replacing them', async () => {
@@ -271,13 +277,16 @@ describe('PricingService', () => {
   describe('getCurrentPricing', () => {
     it('returns the live price per tier (null when unpriced)', async () => {
       pricingRepo.find.mockResolvedValueOnce([
-        { tier: PricingTier.INDIVIDUAL, price: '0.30', conditionCode: null },
-        { tier: PricingTier.FACTORY, price: '0.25', conditionCode: 'GOOD' },
+        { id: 'pp-ind', tier: PricingTier.INDIVIDUAL, price: '0.30', conditionCode: null },
+        { id: 'pp-fac', tier: PricingTier.FACTORY, price: '0.25', conditionCode: 'GOOD' },
       ]);
 
       const result: any = await service.getCurrentPricing('p1');
 
-      expect(result.pricing.individual).toBe(0.3);
+      // The flat tiers come back as a row (with the pricing-row id), not a bare
+      // number — the same id the graded tiers already expose.
+      expect(result.pricing.individual).toMatchObject({ price: 0.3 });
+      expect(result.pricing.individual.pricing_id).toBeDefined();
       expect(result.pricing.factory).toHaveLength(1);
       expect(result.pricing.factory[0]).toMatchObject({
         condition: 'GOOD',

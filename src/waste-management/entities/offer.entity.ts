@@ -172,6 +172,23 @@ export class Offer {
   @Column({ default: true })
   isActive: boolean;
 
+  /**
+   * Whether the admin TARGETED this row at a role, or it came from a GENERAL
+   * (audience-wide) offer.
+   *
+   * A role-specific offer is allowed to sit alongside a general one that also
+   * reaches the role, and it OVERRIDES the general for that role: the buyer is
+   * shown the specific offer, not the general. This flag is what lets the two
+   * coexist — the duplicate check only blocks a clash at the SAME level (two
+   * generals, or two specifics), and the buyer read collapses each material +
+   * grade to the specific row when one exists.
+   *
+   * `false` = general (no `target_roles` on create); `true` = the admin named
+   * the role(s) explicitly.
+   */
+  @Column({ name: 'role_specific', default: false })
+  roleSpecific: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 

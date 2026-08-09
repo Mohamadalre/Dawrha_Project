@@ -76,7 +76,7 @@ describe('offer edit — amount vs percentage', () => {
     service = new AdminCatalogService(
       {} as any, productRepo as any, {} as any, {} as any, {} as any, {} as any,
       pricingRepo as any, offerRepo as any, odooSync as any,
-      noop as any, noop as any, {} as any, {} as any, {} as any,
+      noop as any, noop as any, {} as any, {} as any, {} as any, {} as any,
     );
   });
 
@@ -176,21 +176,22 @@ describe('offer timeline — a material’s offers over time', () => {
     service = new AdminCatalogService(
       {} as any, productRepo as any, {} as any, {} as any, {} as any, {} as any,
       {} as any, offerRepo as any, {} as any,
-      {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
     );
   };
 
-  it('with `on`, filters to offers whose window contains that instant', async () => {
+  it('expresses a single instant as the degenerate range from === to', async () => {
+    // `on` was removed; a point in time is just from and to set to the same
+    // instant, and it filters through the same overlap clauses.
     build([row({})]);
     const res = await service.offerTimeline(PRODUCT, {
-      on: '2026-01-15T00:00:00Z', page: 1, limit: 10,
+      from: '2026-01-15T00:00:00Z', to: '2026-01-15T00:00:00Z', page: 1, limit: 10,
     } as any);
 
-    // validFrom <= on  AND  (validUntil IS NULL OR validUntil > on)
     const clauses = capturedWhere.map((w) => w.clause).join(' | ');
-    expect(clauses).toMatch(/validFrom <= :on/);
-    expect(clauses).toMatch(/validUntil IS NULL OR o\.validUntil > :on/);
-    expect(res.filter.on).toBe('2026-01-15T00:00:00Z');
+    expect(clauses).toMatch(/validFrom <= :to/);
+    expect(clauses).toMatch(/validUntil IS NULL OR o\.validUntil > :from/);
+    expect(res.filter).toEqual({ from: '2026-01-15T00:00:00Z', to: '2026-01-15T00:00:00Z' });
     expect(res.offers).toHaveLength(1);
     expect(res.product).toEqual({ id: PRODUCT, name: 'PET' });
   });
@@ -215,7 +216,7 @@ describe('offer timeline — a material’s offers over time', () => {
     // No date andWhere at all — just the base productId `where`.
     expect(capturedWhere).toHaveLength(0);
     expect(res.offers).toHaveLength(2);
-    expect(res.filter).toEqual({ on: null, from: null, to: null });
+    expect(res.filter).toEqual({ from: null, to: null });
   });
 
   it('exposes the basis on each timeline row', async () => {

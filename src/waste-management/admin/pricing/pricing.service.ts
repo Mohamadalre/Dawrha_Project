@@ -22,6 +22,10 @@ import { OfferSettlementService } from '@src/waste-management/common/providers/o
 import { UpdateTierPriceDto } from './dto/update-tier-price.dto';
 import { UpdatePricingTableDto } from './dto/update-pricing-table.dto';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
+import { Account } from '@src/user/entities/account.entity';
+import { Role } from '@src/user/enums/role.enum';
+import { NotificationService } from '@src/notification/notification.service';
+import { NotificationType } from '@src/notification/enums/notification-type.enum';
 
 const DEFAULT_CURRENCY = 'JOD';
 
@@ -94,6 +98,9 @@ export class PricingService {
     private readonly conditions: ConditionsService,
     private readonly productConditions: ProductConditionsService,
     private readonly offerSettlement: OfferSettlementService,
+    @InjectRepository(Account)
+    private readonly accountRepo: Repository<Account>,
+    private readonly notifications: NotificationService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -146,13 +153,16 @@ export class PricingService {
     for (const tier of Object.values(PricingTier)) {
       await this.archiveCurrent(productId, tier, PricingArchiveReason.UPDATED, adminId);
     }
-    await this.insertCurrent(productId, PricingTier.INDIVIDUAL, dto.individual, DEFAULT_CURRENCY, effectiveFrom, null);
-    await this.insertCurrent(productId, PricingTier.COMPANY, dto.company, DEFAULT_CURRENCY, effectiveFrom, null);
+    // Kept as we insert so the response can carry each new row's id per role.
+    const individualRow = await this.insertCurrent(productId, PricingTier.INDIVIDUAL, dto.individual, DEFAULT_CURRENCY, effectiveFrom, null);
+    const companyRow = await this.insertCurrent(productId, PricingTier.COMPANY, dto.company, DEFAULT_CURRENCY, effectiveFrom, null);
+    const factoryRows: ProductPricing[] = [];
     for (const line of factoryLines) {
-      await this.insertCurrent(productId, PricingTier.FACTORY, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition, line.conditionId);
+      factoryRows.push(await this.insertCurrent(productId, PricingTier.FACTORY, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition, line.conditionId));
     }
+    const freeFacilityRows: ProductPricing[] = [];
     for (const line of freeFacilityLines) {
-      await this.insertCurrent(productId, PricingTier.FREE_FACILITY, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition, line.conditionId);
+      freeFacilityRows.push(await this.insertCurrent(productId, PricingTier.FREE_FACILITY, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition, line.conditionId));
     }
 
     const updatedCarts = await this.repriceActiveCarts(productId, {
@@ -188,13 +198,30 @@ export class PricingService {
     // offers route serving the old numbers.
     await this.cache.invalidate('products', 'offers');
 
+    // The response carries the pricing-row id of EVERY role (citizen /
+    // institution / each factory grade / each free-facility grade) — the id the
+    // admin needs to later correct or expire that exact row. Same shape the GET
+    // current-pricing route returns, built from the rows just inserted.
+    const flatRow = (row: ProductPricing) => ({
+      pricing_id: row.id,
+      price: Number(row.price),
+      currency: row.currency,
+    });
+    const gradedRow = (row: ProductPricing) => ({
+      pricing_id: row.id,
+      condition_id: row.conditionId ?? null,
+      condition: row.conditionCode ?? null,
+      price: Number(row.price),
+      currency: row.currency,
+    });
+
     return {
       product_id: productId,
       pricing: {
-        individual: dto.individual,
-        company: dto.company,
-        factory: factoryLines,
-        free_facility: freeFacilityLines,
+        individual: flatRow(individualRow),
+        company: flatRow(companyRow),
+        factory: factoryRows.map(gradedRow),
+        free_facility: freeFacilityRows.map(gradedRow),
       },
       effective_from: effectiveFrom,
       updated_cart_items: updatedCarts,
@@ -391,7 +418,7 @@ export class PricingService {
     const currency = dto.currency ?? DEFAULT_CURRENCY;
 
     await this.archiveCurrent(productId, tier, PricingArchiveReason.UPDATED, adminId, conditionCode);
-    await this.insertCurrent(
+    const inserted = await this.insertCurrent(
       productId, tier, dto.price, currency, effectiveFrom, conditionCode, conditionId,
     );
 
@@ -418,6 +445,7 @@ export class PricingService {
 
     return {
       product_id: productId,
+      pricing_id: inserted.id,
       tier: tier.toLowerCase(),
       condition: conditionCode,
       price: dto.price,
@@ -503,9 +531,21 @@ export class PricingService {
     // two materials may both have a "GOOD" and they are different grades.
     const labels = await this.conditions.labelMapFor([productId]);
 
-    const flatPrice = (tier: PricingTier): number | null => {
+    // The flat tiers (citizen / institution) as a ROW, not a bare number, so the
+    // caller gets the pricing-row id it needs to edit or correct that exact row —
+    // the same id the graded tiers already expose. `null` when the role is
+    // unpriced, which is real information, not a gap.
+    const flatTier = (tier: PricingTier) => {
       const row = rows.find((r) => r.tier === tier && !r.conditionCode);
-      return row ? Number(row.price) : null;
+      return row
+        ? {
+            pricing_id: row.id,
+            price: Number(row.price),
+            currency: row.currency,
+            effective_from: row.effectiveFrom,
+            effective_until: row.effectiveUntil ?? null,
+          }
+        : null;
     };
 
     /**
@@ -542,8 +582,8 @@ export class PricingService {
     return {
       product_id: productId,
       pricing: {
-        individual: flatPrice(PricingTier.INDIVIDUAL),
-        company: flatPrice(PricingTier.COMPANY),
+        individual: flatTier(PricingTier.INDIVIDUAL),
+        company: flatTier(PricingTier.COMPANY),
         factory: tierPrices(PricingTier.FACTORY),
         free_facility: tierPrices(PricingTier.FREE_FACILITY),
       },
@@ -755,6 +795,107 @@ export class PricingService {
       effective_until: effectiveUntil,
       rows_affected: live.length,
     };
+  }
+
+  /**
+   * Sweep of price rows whose admin-set expiry has ARRIVED.
+   *
+   * An expiry set by {@link expireCurrentPricing} only marks the row with a
+   * future `effectiveUntil`; the row stays in the live table until that instant
+   * passes. This sweep is what acts when it does: it finds every current row
+   * whose end has come and gone, ARCHIVES it out of `product_pricing` (reason
+   * EXPIRED — it must NOT linger in the live table), and NOTIFIES the admins so
+   * they know the material has just fallen out of every buyer catalogue and
+   * needs re-pricing.
+   *
+   * Grouped per material so Odoo is pushed once and one notification is sent for
+   * the whole material, not one per grade. Idempotent: rows are removed as they
+   * are swept, so a second run finds nothing.
+   *
+   * Called by the expiry cron (worker process). Returns a small summary for
+   * logging / tests.
+   */
+  async sweepExpiredPricing(adminId = 'system'): Promise<{
+    products: number;
+    rows: number;
+  }> {
+    const now = new Date();
+    // Live rows (they are all live — the table holds only current prices) whose
+    // end date has already passed.
+    const expired = await this.pricingRepo
+      .createQueryBuilder('pp')
+      .where('pp.effectiveUntil IS NOT NULL')
+      .andWhere('pp.effectiveUntil <= :now', { now })
+      .getMany();
+
+    if (expired.length === 0) return { products: 0, rows: 0 };
+
+    // Group the expired rows by material.
+    const byProduct = new Map<string, ProductPricing[]>();
+    for (const row of expired) {
+      (byProduct.get(row.productId) ??
+        byProduct.set(row.productId, []).get(row.productId)!).push(row);
+    }
+
+    let rowCount = 0;
+    for (const [productId, rows] of byProduct) {
+      // Archive then remove — the row leaves the live table for the history.
+      const archivedAt = new Date();
+      await this.historyRepo.save(
+        rows.map((r) =>
+          this.historyRepo.create({
+            productId: r.productId,
+            tier: r.tier,
+            conditionCode: r.conditionCode ?? null,
+            price: r.price,
+            currency: r.currency,
+            effectiveFrom: r.effectiveFrom,
+            archivedAt,
+            archivedReason: PricingArchiveReason.EXPIRED,
+            archivedBy: adminId,
+          }),
+        ),
+      );
+      await this.pricingRepo.remove(rows);
+      rowCount += rows.length;
+
+      // The material may now be unpriced for some/all roles; offers derived from
+      // those prices must be re-settled, and Odoo told the prices are gone.
+      await this.offerSettlement.resettle(productId, adminId).catch(() => undefined);
+      await this.odooSync.enqueueUpdatePricing({ productId }).catch(() => undefined);
+
+      const product = await this.productRepo.findOne({ where: { id: productId } });
+      await this.notifyAdminsPricingExpired(product?.id ?? productId, product?.name ?? productId);
+    }
+
+    await this.cache.invalidate('products', 'offers');
+    return { products: byProduct.size, rows: rowCount };
+  }
+
+  /**
+   * Tell every admin a material's pricing has expired and it has dropped out of
+   * the buyer catalogues until it is re-priced. Best-effort — a notification
+   * failure must never abort the sweep that already archived the rows.
+   */
+  private async notifyAdminsPricingExpired(productId: string, productName: string): Promise<void> {
+    try {
+      const admins = await this.accountRepo.find({ where: { role: Role.ADMIN } });
+      for (const admin of admins) {
+        const n = await this.notifications.createNotification({
+          userId: admin.id,
+          title: 'Material pricing expired',
+          body: `Pricing for "${productName}" has expired — it is hidden from buyers until you re-price it.`,
+          titleKey: 'Material pricing expired',
+          bodyKey: 'Pricing for a material has expired and it is hidden from buyers until re-priced',
+          args: { name: productName },
+          type: NotificationType.GENERAL,
+          metadata: { productId },
+        });
+        await this.notifications.enqueueNotification(n.id);
+      }
+    } catch {
+      // swallowed on purpose — see doc comment
+    }
   }
 
   /** Previous (archived) prices grouped per tier, newest first. */
@@ -1130,8 +1271,8 @@ export class PricingService {
     effectiveFrom: Date,
     conditionCode: string | null,
     conditionId: string | null = null,
-  ): Promise<void> {
-    await this.pricingRepo.save(
+  ): Promise<ProductPricing> {
+    return this.pricingRepo.save(
       this.pricingRepo.create({
         productId,
         tier,

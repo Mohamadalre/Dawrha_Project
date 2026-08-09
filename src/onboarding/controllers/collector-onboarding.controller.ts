@@ -66,8 +66,8 @@ export class CollectorOnboardingController {
   @Roles(Role.COLLECTOR)
   @AccountsStatus(AccountStatus.PENDING_APPROVAL)
   async updateInformationCollector(@Body() dto: UpdateInformationCollectorDto, @Req() req) {
-    const result = await this.submissionService.updateInformation(
-      req.user.id, Role.COLLECTOR, dto);
+    const result = await this.submissionService.updateCollectorInformation(
+      req.user.id, dto);
     return { message: 'Information updated successfully', result };
   }
 

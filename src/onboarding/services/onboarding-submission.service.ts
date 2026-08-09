@@ -22,43 +22,6 @@ import { ApplicationsCacheService } from '@src/account-management/providers/appl
 import { ONBOARDING_STEPS } from '../config/onboarding.config';
 
 /**
- * DTO field → profile column, per role. The DTO speaks the applicant's
- * language ("phoneNumber") while each entity uses its own naming
- * ("institutionPhone", "factoryPhone"), so the translation lives in ONE table
- * instead of being re-derived in every branch. Relations (institution type,
- * shift) are handled separately because they need looking up and validating.
- */
-const INFO_FIELD_MAP: Record<string, Record<string, string>> = {
-  [Role.INSTITUTIONS]: {
-    institutionName: 'institutionName',
-    otherInstitutionType: 'otherInstitutionType',
-    licenseNumber: 'licenseNumber',
-    taxNumber: 'taxNumber',
-    // A mobile now, and the only number — see the entity. The `landlinePhone`
-    // key is gone rather than aliased: leaving it would let an edit write a
-    // landline into the column a driver calls.
-    phoneNumber: 'institutionPhone',
-  },
-  [Role.FACTORY]: {
-    factoryName: 'factoryName',
-    commercialRecord: 'commercialRecord',
-    industrialRecord: 'industrialRecord',
-    taxNumber: 'taxNumber',
-    phoneNumber: 'factoryPhone',
-  },
-  [Role.EXTERNAL_PARTNER]: {
-    externalPartnerName: 'externalPartnerName',
-    // A mobile now, not a landline — see the entity. The old key is gone
-    // rather than aliased: leaving it would let an edit write a landline into
-    // the column a driver calls.
-    phoneNumber: 'externalPartnerPhone',
-  },
-  [Role.COLLECTOR]: {
-    NationalID: 'NationalID',
-  },
-};
-
-/**
  * States in which an applicant may LOOK at what they submitted. Before that the
  * profile is still being filled in (PENDING_PROFILE), and once ACTIVE the
  * application is history — the account screens take over.
@@ -189,9 +152,22 @@ export class OnboardingSubmissionService {
 
   /** Editing is allowed ONLY while the application is awaiting a decision. */
   private assertEditable(account: Account): void {
-    if (account.accountStatus !== AccountStatus.PENDING_APPROVAL) {
+    // Editable while the applicant is still BUILDING the profile
+    // (PENDING_PROFILE) and after they have SUBMITTED it and are waiting on the
+    // admin (PENDING_APPROVAL). Both are the applicant's own to change: someone
+    // who saved their institution details, moved on to the location step, then
+    // wants to go back and correct a field is acting on a draft they own —
+    // there is no reason to force a submission first. The "must have created the
+    // step already" condition is enforced downstream: getProfile throws if the
+    // profile row is missing, and updateMaterials throws if materials were never
+    // submitted, so editing a step that does not exist yet still fails cleanly.
+    const editable = [
+      AccountStatus.PENDING_PROFILE,
+      AccountStatus.PENDING_APPROVAL,
+    ];
+    if (!editable.includes(account.accountStatus)) {
       throw new ForbiddenException(
-        'You can only edit your application while it is pending approval',
+        'You can only edit your application while you are building it or while it is pending approval',
       );
     }
   }
@@ -317,44 +293,105 @@ export class OnboardingSubmissionService {
 
   // ---------------------------------------------------------------------------
   // 2) Edit the "information" step (pending approval only)
+  //
+  // ONE METHOD PER ROLE — deliberately not a shared, map-driven update. The
+  // fields differ completely (an institution has a type and a license, a
+  // factory has two registers, a partner has neither) and the institution
+  // carries a rule the others do not (type id XOR free-typed type). Folding all
+  // of that into a single generic method is exactly where a factory edit could
+  // touch an institution-only concern; keeping them apart makes each one only
+  // as complex as its own role.
+  //
+  // Each saves through the SAME 409 guard, so a UNIQUE collision (phone,
+  // license, register) is answered as a clean conflict rather than a raw 500.
   // ---------------------------------------------------------------------------
-  async updateInformation(accountId: string, role: Role, dto: Record<string, any>) {
+
+  /** Institution "information" edit — includes the type id ⊕ free-type rule. */
+  async updateInstitutionInformation(accountId: string, dto: Record<string, any>) {
+    const role = Role.INSTITUTIONS;
     const cfg = this.config(role);
     const account = await this.getAccount(accountId);
     this.assertEditable(account);
 
     const profile: any = await this.getProfile(accountId, role, cfg);
-    const map = INFO_FIELD_MAP[role] ?? {};
 
-    // Plain columns, translated through the per-role map.
-    for (const [dtoField, column] of Object.entries(map)) {
-      if (dto[dtoField] !== undefined) profile[column] = dto[dtoField];
-    }
+    if (dto.institutionName !== undefined) profile.institutionName = dto.institutionName;
+    if (dto.licenseNumber !== undefined) profile.licenseNumber = dto.licenseNumber;
+    if (dto.taxNumber !== undefined) profile.taxNumber = dto.taxNumber;
+    if (dto.phoneNumber !== undefined) profile.institutionPhone = dto.phoneNumber;
 
-    // The national ID is validated EXPLICITLY on edit, exactly as on add
-    // (collector onboarding checks it before insert). The unique index is the
-    // final guard, but reaching it surfaces a generic constraint error; a buyer
-    // changing their ID to one another collector already holds is refused by
-    // name here, so the edit path and the add path enforce the same rule the
-    // same way rather than one checking and the other hoping.
-    if (role === Role.COLLECTOR && dto.NationalID !== undefined) {
+    // The type is EITHER a real institution-type id OR a free-typed name, never
+    // both — the two columns describe the same fact. So whichever one this edit
+    // sets, the other is cleared: choosing an id drops any leftover free text,
+    // and typing a custom name drops the id link. Sending both is rejected
+    // rather than silently guessed.
+    await this.applyInstitutionType(profile, dto);
+
+    await this.saveInfo(role, profile);
+    await this.afterEdit(role, accountId);
+    const fresh = await this.getSubmission(accountId, role);
+    return { information: fresh.information };
+  }
+
+  /** Factory "information" edit — name, the two registers, tax, phone. */
+  async updateFactoryInformation(accountId: string, dto: Record<string, any>) {
+    const role = Role.FACTORY;
+    const cfg = this.config(role);
+    const account = await this.getAccount(accountId);
+    this.assertEditable(account);
+
+    const profile: any = await this.getProfile(accountId, role, cfg);
+    if (dto.factoryName !== undefined) profile.factoryName = dto.factoryName;
+    if (dto.commercialRecord !== undefined) profile.commercialRecord = dto.commercialRecord;
+    if (dto.industrialRecord !== undefined) profile.industrialRecord = dto.industrialRecord;
+    if (dto.taxNumber !== undefined) profile.taxNumber = dto.taxNumber;
+    if (dto.phoneNumber !== undefined) profile.factoryPhone = dto.phoneNumber;
+
+    await this.saveInfo(role, profile);
+    await this.afterEdit(role, accountId);
+    const fresh = await this.getSubmission(accountId, role);
+    return { information: fresh.information };
+  }
+
+  /** Free-facility (external partner) "information" edit — name and phone. */
+  async updateExternalPartnerInformation(accountId: string, dto: Record<string, any>) {
+    const role = Role.EXTERNAL_PARTNER;
+    const cfg = this.config(role);
+    const account = await this.getAccount(accountId);
+    this.assertEditable(account);
+
+    const profile: any = await this.getProfile(accountId, role, cfg);
+    if (dto.externalPartnerName !== undefined) profile.externalPartnerName = dto.externalPartnerName;
+    if (dto.phoneNumber !== undefined) profile.externalPartnerPhone = dto.phoneNumber;
+
+    await this.saveInfo(role, profile);
+    await this.afterEdit(role, accountId);
+    const fresh = await this.getSubmission(accountId, role);
+    return { information: fresh.information };
+  }
+
+  /** Collector "information" edit — national id (unique) and driver shift. */
+  async updateCollectorInformation(accountId: string, dto: Record<string, any>) {
+    const role = Role.COLLECTOR;
+    const cfg = this.config(role);
+    const account = await this.getAccount(accountId);
+    this.assertEditable(account);
+
+    const profile: any = await this.getProfile(accountId, role, cfg);
+
+    if (dto.NationalID !== undefined) {
+      // Refused by name here — the unique index is the final guard, but
+      // reaching it surfaces a generic constraint error.
       const clash = await this.resolver
         .getRepo(role)
         .findOne({ where: { NationalID: dto.NationalID } });
       if (clash && clash.id !== profile.id) {
         throw new ConflictException('This National ID is already used by another account');
       }
+      profile.NationalID = dto.NationalID;
     }
 
-    // Relations need a lookup + validation.
-    if (role === Role.INSTITUTIONS && dto.institutionTypeId !== undefined) {
-      const type = await this.institutionTypeRepo.findOne({
-        where: { id: dto.institutionTypeId },
-      });
-      if (!type) throw new BadRequestException('institutionTypeId invalid');
-      profile.institutionType = type;
-    }
-    if (role === Role.COLLECTOR && dto.shiftId !== undefined) {
+    if (dto.shiftId !== undefined) {
       const shift = await this.shiftRepo.findOne({ where: { id: dto.shiftId } });
       // Same rule as onboarding: an applicant has no warehouse yet, so only a
       // GLOBAL driver shift is selectable.
@@ -365,20 +402,53 @@ export class OnboardingSubmissionService {
       profile.shiftId = shift.id;
     }
 
+    await this.saveInfo(role, profile);
+    await this.afterEdit(role, accountId);
+    const fresh = await this.getSubmission(accountId, role);
+    return { information: fresh.information };
+  }
+
+  /**
+   * Applies the institution type ⊕ free-type rule to a profile from a DTO.
+   * Shared by the onboarding add step and the edit above so both enforce it
+   * identically.
+   */
+  private async applyInstitutionType(profile: any, dto: Record<string, any>) {
+    const hasId = dto.institutionTypeId !== undefined && dto.institutionTypeId !== null && dto.institutionTypeId !== '';
+    const hasOther = dto.otherInstitutionType !== undefined && dto.otherInstitutionType !== null && dto.otherInstitutionType !== '';
+
+    if (hasId && hasOther) {
+      throw new BadRequestException(
+        'Provide either an institution type id or a custom type, not both',
+      );
+    }
+    if (hasId) {
+      const type = await this.institutionTypeRepo.findOne({
+        where: { id: dto.institutionTypeId },
+      });
+      if (!type) throw new BadRequestException('institutionTypeId invalid');
+      profile.institutionType = type;
+      profile.otherInstitutionType = null;
+    } else if (hasOther) {
+      profile.otherInstitutionType = dto.otherInstitutionType;
+      profile.institutionType = null;
+    }
+    // Neither sent → leave the existing choice untouched (PATCH semantics).
+  }
+
+  /**
+   * Saves a profile after an information edit, turning a UNIQUE violation
+   * (phone / license / register / national id) into a clean 409.
+   */
+  private async saveInfo(role: Role, profile: any) {
     try {
       await this.resolver.getRepo(role).save(profile);
     } catch (err: any) {
-      // licenseNumber / phones / NationalID are UNIQUE — surface a clean 409
-      // instead of letting the driver error bubble up as a 500.
       if (err?.code === '23505') {
         throw new ConflictException('One of these values is already used by another account');
       }
       throw err;
     }
-
-    await this.afterEdit(role, accountId);
-    const fresh = await this.getSubmission(accountId, role);
-    return { information: fresh.information };
   }
 
   // ---------------------------------------------------------------------------
@@ -461,13 +531,32 @@ export class OnboardingSubmissionService {
     }
 
     // Replacing the chosen waste categories: verify every id exists first, so a
-    // single bad id cannot wipe the previous selection.
+    // single bad id cannot wipe the previous selection. The ids are
+    // DE-DUPLICATED first — a category sent twice is stored once, and the
+    // existence check compares against the de-duplicated set (otherwise a
+    // legitimate repeat would fail the length comparison and be rejected as
+    // "invalid"). The offending ids are named, like the onboarding step does.
     if (dto.wasteCategoryId !== undefined) {
+      const uniqueIds: string[] = [...new Set<string>(dto.wasteCategoryId)];
       const categories = await this.wasteCategoryRepo.find({
-        where: { id: In(dto.wasteCategoryId) },
+        where: { id: In(uniqueIds) },
       });
-      if (categories.length !== dto.wasteCategoryId.length) {
-        throw new BadRequestException('One or more waste category ids are invalid');
+      if (categories.length !== uniqueIds.length) {
+        const found = new Set(categories.map((c) => c.id));
+        const missing = uniqueIds.filter((id) => !found.has(id));
+        throw new BadRequestException({
+          message: 'Some of these waste categories do not exist',
+          errorCode: 'WASTE_CATEGORY_NOT_FOUND',
+          invalid_ids: missing,
+        });
+      }
+      const inactive = categories.filter((c) => !c.isActive);
+      if (inactive.length) {
+        throw new BadRequestException({
+          message: 'Some of these waste categories are no longer available',
+          errorCode: 'WASTE_CATEGORY_INACTIVE',
+          invalid_ids: inactive.map((c) => c.id),
+        });
       }
       material.wasteTypes = categories.map((wasteType) => ({ wasteType }));
     }

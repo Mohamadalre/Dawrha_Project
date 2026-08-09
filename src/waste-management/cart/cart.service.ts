@@ -257,20 +257,34 @@ export class CartService {
     const items = preloaded ?? (await this.itemRepo.find({ where: { cartId } }));
 
     const subtotal = items.reduce((s, it) => s + Number(it.subtotal), 0);
-    // Sum quantities of items whose unit is flagged is_weight in
-    // measurement_units (KG by default; admin can add TON, ...).
+
+    // Total quantity PER UNIT OF MEASURE — the sum of quantities of every item
+    // that shares a unit. Kilograms and pieces are different physical things, so
+    // one flat "total quantity" would add 30 kg to 10 pieces and mean nothing;
+    // grouping by unit keeps each figure a real amount ("40 kg", "10 pieces").
+    const quantityByUnit = new Map<string, number>();
+    for (const it of items) {
+      const unit = it.unitType || '';
+      quantityByUnit.set(unit, (quantityByUnit.get(unit) ?? 0) + Number(it.quantity));
+    }
+    const totals_by_unit = [...quantityByUnit.entries()].map(([unit, qty]) => ({
+      unit,
+      total_quantity: +qty.toFixed(3),
+    }));
+
+    // Weight total kept for the clients that show it — but as a derived figure,
+    // never a constraint. The commercial guardrails are VALUE-based and
+    // admin-managed (minimum order value + spending cap) and are enforced at
+    // CHECKOUT on the goods PRICE, whatever the unit; the cart is just a basket.
     const weightCodes = await this.units.weightCodes();
     const totalWeight = items
       .filter((it) => weightCodes.has(it.unitType))
       .reduce((s, it) => s + Number(it.quantity), 0);
 
-    // No quantity floor or daily unit cap here any more: the commercial
-    // guardrails are VALUE-based and admin-managed (minimum order value +
-    // spending cap), enforced at CHECKOUT — the single place that turns a
-    // basket into money. The cart is just a basket, so it can be checked out
-    // whenever it holds something.
     return {
       total_items: items.length,
+      // Sum of quantities grouped by unit of measure.
+      totals_by_unit,
       total_weight: +totalWeight.toFixed(3),
       subtotal: +subtotal.toFixed(3),
       discount: 0,

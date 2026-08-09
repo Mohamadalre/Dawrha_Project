@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
 import { PermissionsModule } from '@src/permission/permissions.module';
 import { WasteManagementService } from './waste-management.service';
 import { WasteManagementController } from './waste-management.controller';
@@ -10,10 +9,8 @@ import { FactoryWasteCategory } from './entities/factory-waste-category.entity';
 import { ExternalPartnerWasteCategory } from './entities/external-partner-waste-category.entity';
 
 /**
- * Legacy waste-category endpoints (admin create with image upload + role-based
- * listing). The marketplace read/cart/admin features live in their own modules:
- * CatalogModule, CartModule, SuggestionsModule, WasteAdminModule — all sharing
- * WasteCommonModule (`common/`).
+ * Onboarding-facing waste-category READ endpoint. Category create / update /
+ * delete are owned by the admin catalogue module.
  */
 @Module({
   imports: [
@@ -23,7 +20,6 @@ import { ExternalPartnerWasteCategory } from './entities/external-partner-waste-
       FactoryWasteCategory,
       ExternalPartnerWasteCategory,
     ]),
-    CloudinaryModule,
     PermissionsModule,
   ],
   controllers: [WasteManagementController],

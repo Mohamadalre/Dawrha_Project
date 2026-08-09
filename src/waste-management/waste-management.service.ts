@@ -1,49 +1,18 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { CreateWasteCategory } from './dto/waste-category.dto';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { WasteCategory } from './entities/waste-category.entity';
 import { Repository } from 'typeorm';
-import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 
 /**
- * Service for managing waste categories
- * Handles creation and retrieval of waste category data
+ * Read side of waste categories (the onboarding pickers). Category CREATE /
+ * UPDATE / DELETE are owned by the admin catalogue service.
  */
 @Injectable()
 export class WasteManagementService {
   constructor(
     @InjectRepository(WasteCategory)
     private readonly repo: Repository<WasteCategory>,
-    private readonly cloudinaryService: CloudinaryService,
   ) { }
-  /**
-   * Creates a new waste category
-   *
-   * @param dto - Waste category creation data
-   * @returns The created waste category
-   * @throws BadRequestException if waste category already exists
-   */
-  async create({ name }: CreateWasteCategory, file: Express.Multer.File) {
-    if (!file) throw new BadRequestException('image category is required')
-
-    const exist = await this.repo.findOne({ where: { name: name } });
-    if (exist) throw new BadRequestException('Waste category already exists');
-
-
-    try {
-      const folder = `waste-category/`;
-      const imageURL = await this.cloudinaryService.uploadLogo(file, folder);
-      const category = this.repo.create({
-        name: name,
-        imageCategoryURL: imageURL
-
-      });
-      return await this.repo.save(category);
-    } catch (error: any) {
-      throw error;
-    }
-  }
-
 
   /**
    * Deletes a  waste category

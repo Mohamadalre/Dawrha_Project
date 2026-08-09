@@ -331,7 +331,9 @@ export class WarehouseAdminService {
           },
           capacity: w.capacity ?? null,
           current_load: Number(w.currentLoad),
-          truck_count: truckCounts.get(w.id) ?? 0,
+          // Fleet at this warehouse, split by type (mirrored from Odoo).
+          trucks: truckCounts.get(w.id) ?? { collection: 0, delivery: 0, total: 0 },
+          truck_count: (truckCounts.get(w.id)?.total) ?? 0,
           // Mirrored from Odoo — shipments only exist there.
           shipment_count: w.shipmentCount ?? 0,
           // Counted here — orders are placed on this side.
@@ -386,7 +388,8 @@ export class WarehouseAdminService {
       },
       capacity: w.capacity ?? null,
       current_load: Number(w.currentLoad),
-      truck_count: truckCounts.get(w.id) ?? 0,
+      trucks: truckCounts.get(w.id) ?? { collection: 0, delivery: 0, total: 0 },
+      truck_count: (truckCounts.get(w.id)?.total) ?? 0,
       shipment_count: w.shipmentCount ?? 0,
       order_count: orderCounts.get(w.id) ?? 0,
       load_percentage: w.capacity
@@ -487,18 +490,34 @@ export class WarehouseAdminService {
     };
   }
 
-  /** Trucks per warehouse in ONE query (fleet is authored in Odoo, mirrored here). */
-  private async truckCounts(warehouseIds: string[]): Promise<Map<string, number>> {
-    const map = new Map<string, number>();
+  /**
+   * Trucks per warehouse, split by TYPE, in ONE query (fleet is authored in
+   * Odoo, mirrored here). Collection and delivery are two fleets doing two
+   * jobs, so a warehouse's fleet is only meaningful when the count says of
+   * which kind.
+   */
+  private async truckCounts(
+    warehouseIds: string[],
+  ): Promise<Map<string, { collection: number; delivery: number; total: number }>> {
+    const map = new Map<string, { collection: number; delivery: number; total: number }>();
     if (warehouseIds.length === 0) return map;
     const rows = await this.truckRepo
       .createQueryBuilder('t')
       .select('t.warehouseId', 'warehouseId')
+      .addSelect('t.truckType', 'type')
       .addSelect('COUNT(*)', 'count')
       .where('t.warehouseId IN (:...ids)', { ids: warehouseIds })
       .groupBy('t.warehouseId')
+      .addGroupBy('t.truckType')
       .getRawMany();
-    for (const r of rows) map.set(r.warehouseId, Number(r.count));
+    for (const r of rows) {
+      const entry = map.get(r.warehouseId) ?? { collection: 0, delivery: 0, total: 0 };
+      const n = Number(r.count);
+      if (r.type === 'DELIVERY') entry.delivery += n;
+      else entry.collection += n;
+      entry.total += n;
+      map.set(r.warehouseId, entry);
+    }
     return map;
   }
 

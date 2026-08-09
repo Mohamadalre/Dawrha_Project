@@ -13,9 +13,10 @@ import { DeviceDto } from '../dto/auth.dto';
  * asked. Withholding the token instead left the applicant unable to look at
  * their own file, or to replace a document they were told to replace.
  *
- * The status travels INSIDE the token (`generateTokens` puts it in the
- * payload), so the guard reads it without a database round-trip — and cannot be
- * lied to, because the signature is verified.
+ * The status is NOT carried in the token — `AccountStatusGuard` reads it fresh
+ * from the DB each request (keyed by the token's account id), so the moment the
+ * application is decided (approved, or sent back for changes) the new status
+ * takes effect, without waiting for this token to expire.
  */
 @Injectable()
 export class PendingApprovalHandler implements LoginHandler {
@@ -28,7 +29,6 @@ export class PendingApprovalHandler implements LoginHandler {
     const token = await this.authService.generateTokens(
       account.id,
       account.role,
-      account.accountStatus,
       dto.deviceId,
       dto.deviceType,
       dto.fcmToken,

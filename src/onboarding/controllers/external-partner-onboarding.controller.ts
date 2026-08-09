@@ -55,13 +55,13 @@ export class ExternalPartnerOnboardingController {
   /** Correct the submitted information while the application is pending approval. */
   @Patch('information')
   @Roles(Role.EXTERNAL_PARTNER)
-  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
   async updateInformationExternalPartner(
     @Body() dto: UpdateInformationExternalPartnerDto,
     @Req() req,
   ) {
-    const result = await this.submissionService.updateInformation(
-      req.user.id, Role.EXTERNAL_PARTNER, dto);
+    const result = await this.submissionService.updateExternalPartnerInformation(
+      req.user.id, dto);
     return { message: 'Information updated successfully', result };
   }
 
@@ -69,7 +69,7 @@ export class ExternalPartnerOnboardingController {
   /** Correct the submitted materials while the application is pending approval. */
   @Patch('materials')
   @Roles(Role.EXTERNAL_PARTNER)
-  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
   async updateMaterialsExternalPartner(@Body() dto: UpdateMaterialsOrderDto, @Req() req) {
     const result = await this.submissionService.updateMaterials(
       req.user.id, Role.EXTERNAL_PARTNER, dto);
@@ -78,7 +78,7 @@ export class ExternalPartnerOnboardingController {
   /** Correct the registered location while the application is pending approval. */
   @Patch('location')
   @Roles(Role.EXTERNAL_PARTNER)
-  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
   async updateLocationExternalPartner(@Body() dto: UpdateLocationDto, @Req() req) {
     const result = await this.submissionService.updateLocation(
       req.user.id, Role.EXTERNAL_PARTNER, dto);
@@ -121,7 +121,7 @@ export class ExternalPartnerOnboardingController {
    */
   @UseGuards(ProfileOwnerGuard)
   @Roles(Role.EXTERNAL_PARTNER)
-  @Post('material')
+  @Post('materials')
   public async addMaterialExternalPartner(@Body() dto: WasteExternalPartnerDto, @Req() req: any) {
     const profile = req.profile;
     const account = req.user;

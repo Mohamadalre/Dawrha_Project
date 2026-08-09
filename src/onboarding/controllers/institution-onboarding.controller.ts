@@ -64,13 +64,13 @@ export class InstitutionOnboardingController {
   /** Correct the submitted information while the application is pending approval. */
   @Patch('information')
   @Roles(Role.INSTITUTIONS)
-  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
   async updateInformationInstitution(
     @Body() dto: UpdateInformationInstitutionDto,
     @Req() req,
   ) {
-    const result = await this.submissionService.updateInformation(
-      req.user.id, Role.INSTITUTIONS, dto);
+    const result = await this.submissionService.updateInstitutionInformation(
+      req.user.id, dto);
     return { message: 'Information updated successfully', result };
   }
 
@@ -78,7 +78,7 @@ export class InstitutionOnboardingController {
   /** Correct the submitted materials while the application is pending approval. */
   @Patch('materials')
   @Roles(Role.INSTITUTIONS)
-  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
   async updateMaterialsInstitution(@Body() dto: UpdateMaterialsInstitutionDto, @Req() req) {
     const result = await this.submissionService.updateMaterials(
       req.user.id, Role.INSTITUTIONS, dto);
@@ -87,7 +87,7 @@ export class InstitutionOnboardingController {
   /** Correct the registered location while the application is pending approval. */
   @Patch('location')
   @Roles(Role.INSTITUTIONS)
-  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
   async updateLocationInstitution(@Body() dto: UpdateLocationDto, @Req() req) {
     const result = await this.submissionService.updateLocation(
       req.user.id, Role.INSTITUTIONS, dto);
@@ -97,7 +97,7 @@ export class InstitutionOnboardingController {
   /** Replace a still-pending document while the application is pending approval. */
   @Patch('documents/:mediaId')
   @Roles(Role.INSTITUTIONS)
-  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
   @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
   async replaceDocumentInstitution(
     @Param('mediaId', ParseUUIDPipe) mediaId: string,
@@ -146,7 +146,7 @@ export class InstitutionOnboardingController {
    */
   @UseGuards(ProfileOwnerGuard)
   @Roles(Role.INSTITUTIONS)
-  @Post('material')
+  @Post('materials')
   public async addMaterialInstitution( @Body() dto: WasteInstitutionDto, @Req() req: any) {
     const profile = req.profile;
     const account = req.user;
