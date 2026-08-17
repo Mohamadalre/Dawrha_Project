@@ -25,7 +25,10 @@ describe('Points award on order receipt (scenario)', () => {
     };
     const settings = { defaultCurrency: jest.fn().mockResolvedValue('SYP') };
     const rates = new PointsRateService(rateRepo as any, settings as any);
-    const wallet = new PointsWalletService(walletRepo as any, rates, notifications as any);
+    const stageRepo = { find: jest.fn().mockResolvedValue([]) };
+    const wallet = new PointsWalletService(
+      walletRepo as any, rates, notifications as any, stageRepo as any,
+    );
 
     const order: any = {
       id: 'ord1',

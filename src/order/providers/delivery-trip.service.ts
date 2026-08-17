@@ -809,6 +809,9 @@ export class DeliveryTripService {
       backend_trip_id: trip.id,
       trip_number: trip.tripNumber,
       order_number: order?.orderNumber ?? '',
+      // The order's UUID — the join key Odoo uses to hang this trip's delivery
+      // cost onto the order (recycle.order.backend_order_id holds the same id).
+      backend_order_id: order?.id ?? '',
       buyer_name: order ? await this.buyerName(order.buyerAccountId) : '',
       origin_warehouse_odoo_id: whInfo.get(trip.originWarehouseId) ?? null,
       truck_odoo_id: trip.odooTruckId ?? null,

@@ -2,10 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Role } from '@src/user/enums/role.enum';
+import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { NotificationService } from '@src/notification/notification.service';
 import { NotificationType } from '@src/notification/enums/notification-type.enum';
 import { PointsWallet } from './entities/points-wallet.entity';
 import { PointsRateService } from './points-rate.service';
+import { Stage } from '@src/stages/entities/stage.entity';
 
 /**
  * The roles that TRADE and therefore earn points: citizens and institutions
@@ -32,6 +34,8 @@ export class PointsWalletService {
     private readonly walletRepo: Repository<PointsWallet>,
     private readonly rates: PointsRateService,
     private readonly notifications: NotificationService,
+    @InjectRepository(Stage)
+    private readonly stageRepo: Repository<Stage>,
   ) {}
 
   /**
@@ -135,6 +139,110 @@ export class PointsWalletService {
       points: wallet?.points ?? 0,
       currency: 'POINTS',
       wallet_id: wallet?.id ?? null,
+    };
+  }
+
+  /**
+   * The points leaderboard — every wallet-holder ranked by points, highest first.
+   *
+   * Paginated. Each row carries its 1-based position (1st, 2nd, …), the holder's
+   * name and role, and their points. Ties are broken by who reached the balance
+   * first (the older wallet ranks higher), so the order — and therefore the page
+   * boundaries — is stable across requests rather than shuffling on every call.
+   *
+   * The caller's OWN rank is returned alongside, so a user whose row is off the
+   * current page still sees where they stand.
+   *
+   * Scope: CITIZEN accounts only — the leaderboard is the citizens' standing, so
+   * institutions, factories, free facilities (and roles with no wallet at all —
+   * drivers, admins) never appear on it. Only ACTIVE accounts count: a
+   * deactivated one is not a current user.
+   */
+  async leaderboard(page: number, limit: number, callerAccountId?: string) {
+    const p = Math.max(1, Math.floor(page) || 1);
+    const l = Math.min(Math.max(1, Math.floor(limit) || 20), 100);
+    const offset = (p - 1) * l;
+
+    // A fresh builder each call — ACTIVE CITIZEN accounts only, for the counts.
+    const active = () =>
+      this.walletRepo
+        .createQueryBuilder('w')
+        .innerJoin('w.account', 'a')
+        .where('a.accountStatus = :status', { status: AccountStatus.ACTIVE })
+        .andWhere('a.role = :role', { role: Role.CITIZEN });
+
+    const total = await active().getCount();
+
+    const rows = await this.walletRepo
+      .createQueryBuilder('w')
+      .innerJoinAndSelect('w.account', 'a')
+      .where('a.accountStatus = :status', { status: AccountStatus.ACTIVE })
+      .andWhere('a.role = :role', { role: Role.CITIZEN })
+      .orderBy('w.points', 'DESC')
+      .addOrderBy('w.createdAt', 'ASC')
+      .skip(offset)
+      .take(l)
+      .getMany();
+
+    // Each user's CURRENT stage name — the active band their points fall in, or
+    // null when they are in none. Stages are loaded once for the whole page
+    // rather than per row (ranges never overlap, so at most one matches).
+    const stages = await this.stageRepo.find({
+      where: { isActive: true },
+      order: { sortOrder: 'ASC' },
+    });
+    const stageName = (pts: number): string | null =>
+      stages.find((s) => pts >= s.minPoints && pts <= s.maxPoints)?.name ?? null;
+
+    const leaderboard = rows.map((w, i) => ({
+      rank: offset + i + 1,
+      account_id: w.accountId,
+      name: w.account?.name ?? null,
+      points: w.points,
+      // The user's stage — its NAME only, as requested.
+      stage: stageName(w.points),
+    }));
+
+    // The caller's own standing — null unless they are an ACTIVE CITIZEN (no
+    // wallet, or a non-citizen role, means they are not on this leaderboard).
+    let me: { rank: number; points: number; stage: string | null } | null = null;
+    if (callerAccountId) {
+      const mine = await this.walletRepo
+        .createQueryBuilder('w')
+        .innerJoin('w.account', 'a')
+        .where('w.accountId = :id', { id: callerAccountId })
+        .andWhere('a.accountStatus = :status', { status: AccountStatus.ACTIVE })
+        .andWhere('a.role = :role', { role: Role.CITIZEN })
+        .getOne();
+      if (mine) {
+        // Same positional rule as the list: everyone strictly ahead on points,
+        // plus everyone tied who reached the balance earlier, plus one.
+        const ahead = await active()
+          .andWhere('w.points > :pts', { pts: mine.points })
+          .getCount();
+        const tiedAhead = await active()
+          .andWhere('w.points = :pts', { pts: mine.points })
+          .andWhere('w.createdAt < :createdAt', { createdAt: mine.createdAt })
+          .getCount();
+        me = {
+          rank: ahead + tiedAhead + 1,
+          points: mine.points,
+          stage: stageName(mine.points),
+        };
+      }
+    }
+
+    return {
+      me,
+      leaderboard,
+      pagination: {
+        total,
+        page: p,
+        limit: l,
+        total_pages: l > 0 ? Math.ceil(total / l) : 0,
+        has_next: p * l < total,
+        has_prev: p > 1,
+      },
     };
   }
 }

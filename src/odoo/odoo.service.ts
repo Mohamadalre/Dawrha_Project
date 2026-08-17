@@ -33,6 +33,8 @@ export interface DeliveryTripPushPayload {
   backend_trip_id: string;
   trip_number: string;
   order_number?: string;
+  /** The order's backend UUID — Odoo joins the trip's cost onto the order by it. */
+  backend_order_id?: string;
   buyer_name?: string;
   origin_warehouse_odoo_id?: number | null;
   truck_odoo_id?: number | null;

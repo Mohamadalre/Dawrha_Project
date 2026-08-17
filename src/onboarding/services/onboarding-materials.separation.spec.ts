@@ -68,7 +68,7 @@ describe('OnboardingSubmissionService — per-role material separation', () => {
         wasteTypes: [],
         estimatedWasteQuantity: '500',
         collectionFrequney: 'WEEKLY',
-        preferredCollectionTime: ['morning'],
+        preferredCollectionTime: [{ day: 'MONDAY', from: '08:00', to: '12:00' }],
         // Even if the row somehow carried order fields, they must NOT surface.
         averageOrderQuantity: 'LEAKED',
       },

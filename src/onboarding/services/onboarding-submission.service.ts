@@ -579,6 +579,10 @@ export class OnboardingSubmissionService {
     if (role === Role.FACTORY && dto.deliveryTimeSlots !== undefined) {
       assertValidTimeSlots(dto.deliveryTimeSlots);
     }
+    // An institution's edited collection windows follow the same rule.
+    if (role === Role.INSTITUTIONS && dto.preferredCollectionTime !== undefined) {
+      assertValidTimeSlots(dto.preferredCollectionTime);
+    }
 
     // Replacing the chosen waste categories: verify every id exists first, so a
     // single bad id cannot wipe the previous selection. The ids are

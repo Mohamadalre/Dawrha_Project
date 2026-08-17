@@ -4,6 +4,7 @@ import { NotificationModule } from '@src/notification/notification.module';
 import { PlatformSettingsModule } from '@src/platform-settings/platform-settings.module';
 import { PointsWallet } from './entities/points-wallet.entity';
 import { PointsRate } from './entities/points-rate.entity';
+import { Stage } from '@src/stages/entities/stage.entity';
 import { PointsWalletService } from './points-wallet.service';
 import { PointsRateService } from './points-rate.service';
 import { PointsWalletController } from './points-wallet.controller';
@@ -18,7 +19,10 @@ import { PointsRateController } from './points-rate.controller';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PointsWallet, PointsRate]),
+    // Stage is read (not written) here so the leaderboard can name each user's
+    // current stage. Registering the entity is enough — no dependency on
+    // StagesModule, which would be circular (stages already read wallets).
+    TypeOrmModule.forFeature([PointsWallet, PointsRate, Stage]),
     // Awarding points tells the buyer they were gifted them.
     NotificationModule,
     // The rate's currency comes from the central platform setting.

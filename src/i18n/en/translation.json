@@ -477,6 +477,8 @@
   "Platform settings updated successfully": "Platform settings updated successfully",
   "Send a price to correct": "Send a price to correct",
   "Offer fetched successfully": "Offer fetched successfully",
+  "Leaderboard fetched successfully": "Leaderboard fetched successfully",
+  "The leaderboard is available to user accounts only": "The leaderboard is available to user accounts only",
   "Odoo admin account created successfully": "Odoo admin account created successfully",
   "An Odoo admin with this login already exists": "An Odoo admin with this login already exists",
   "Send at least one field to update": "Send at least one field to update",

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, ILike, Not, Repository } from 'typeorm';
 import { Stage } from './entities/stage.entity';
 import { PointsWallet } from '@src/points-wallet/entities/points-wallet.entity';
+import { Role } from '@src/user/enums/role.enum';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { CreateStageDto, ListStagesQueryDto, UpdateStageDto } from './dto/stage.dto';
 
@@ -287,7 +288,7 @@ export class StagesService {
    * the band and their own points. `stage` is null when their balance falls in
    * no configured band (or no stages exist yet).
    */
-  async myStage(accountId: string) {
+  async myStage(accountId: string, role?: Role) {
     const wallet = await this.walletRepo.findOne({ where: { accountId } });
     const points = wallet?.points ?? 0;
     // Only an ACTIVE stage classifies the user; an inactive band matches no one.
@@ -297,9 +298,41 @@ export class StagesService {
       .andWhere('s.isActive = true')
       .orderBy('s.sortOrder', 'ASC')
       .getOne();
+
+    // The caller's rank WITHIN their own stage, by points, highest first.
+    //
+    // The stages are the CITIZENS' loyalty ladder, so the rank is computed among
+    // CITIZEN accounts only — a factory / institution / free facility is never
+    // ranked, and gets no rank here. Competition ranking: rank = 1 + how many
+    // citizens in the SAME band have MORE points, so ties share a rank.
+    // `stage_users_count` is the citizens in the band ("3 of 20"). Null when the
+    // caller is in no stage, or is not a citizen.
+    let stageRank: number | null = null;
+    let stageUsersCount = 0;
+    if (stage && role === Role.CITIZEN) {
+      const band = { min: stage.minPoints, max: stage.maxPoints, role: Role.CITIZEN };
+      stageUsersCount = await this.walletRepo
+        .createQueryBuilder('w')
+        .innerJoin('w.account', 'a')
+        .where('w.points BETWEEN :min AND :max', band)
+        .andWhere('a.role = :role', band)
+        .getCount();
+      const ahead = await this.walletRepo
+        .createQueryBuilder('w')
+        .innerJoin('w.account', 'a')
+        .where('w.points BETWEEN :min AND :max', band)
+        .andWhere('a.role = :role', band)
+        .andWhere('w.points > :p', { p: points })
+        .getCount();
+      stageRank = ahead + 1;
+    }
+
     return {
       points,
       current_stage: stage ? this.map(stage) : null,
+      // The caller's standing inside their stage.
+      stage_rank: stageRank,
+      stage_users_count: stageUsersCount,
       // A plain sentence for the common "no stage yet" case, so the client shows
       // something meaningful instead of an empty object the user has to
       // interpret.

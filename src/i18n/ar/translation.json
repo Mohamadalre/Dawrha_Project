@@ -477,6 +477,8 @@
   "Platform settings updated successfully": "تم تحديث إعدادات المنصة بنجاح",
   "Send a price to correct": "أرسل سعرًا لتصحيحه",
   "Offer fetched successfully": "تم جلب العرض بنجاح",
+  "Leaderboard fetched successfully": "تم جلب لوحة الصدارة بنجاح",
+  "The leaderboard is available to user accounts only": "لوحة الصدارة متاحة لحسابات المستخدمين فقط",
   "Odoo admin account created successfully": "تم إنشاء حساب أدمن الأودو بنجاح",
   "An Odoo admin with this login already exists": "يوجد أدمن أودو بهذا اسم الدخول مسبقًا",
   "Send at least one field to update": "أرسل حقلًا واحدًا على الأقل للتعديل",

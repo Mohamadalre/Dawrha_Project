@@ -99,7 +99,7 @@ export class StagesController {
   /** Just the caller's current stage and points. */
   @Get('me')
   async myStage(@CurrentUser() user) {
-    const result = await this.stages.myStage(user.id);
+    const result = await this.stages.myStage(user.id, user.role);
     return { message: 'Your stage fetched successfully', result };
   }
 }
