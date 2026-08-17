@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { Warehouse } from './entities/warehouse.entity';
 import { WarehouseState } from './enums/warehouse-state.enum';
@@ -491,33 +491,66 @@ export class WarehouseAdminService {
   }
 
   /**
-   * Trucks per warehouse, split by TYPE, in ONE query (fleet is authored in
-   * Odoo, mirrored here). Collection and delivery are two fleets doing two
-   * jobs, so a warehouse's fleet is only meaningful when the count says of
-   * which kind.
+   * Trucks per warehouse, split by TYPE. Collection and delivery are two fleets
+   * doing two jobs, so a warehouse's fleet is only meaningful when the count
+   * says of which kind.
+   *
+   * The two counts come from two places on purpose: COLLECTION trucks are
+   * mirrored in the backend and counted from the local table; DELIVERY trucks
+   * are Odoo's alone — never stored here — so their per-warehouse counts are
+   * read LIVE from Odoo (one batched call) and merged in by warehouse.
    */
   private async truckCounts(
     warehouseIds: string[],
   ): Promise<Map<string, { collection: number; delivery: number; total: number }>> {
     const map = new Map<string, { collection: number; delivery: number; total: number }>();
     if (warehouseIds.length === 0) return map;
+
+    // Collection fleet — from the mirror.
     const rows = await this.truckRepo
       .createQueryBuilder('t')
       .select('t.warehouseId', 'warehouseId')
-      .addSelect('t.truckType', 'type')
       .addSelect('COUNT(*)', 'count')
       .where('t.warehouseId IN (:...ids)', { ids: warehouseIds })
       .groupBy('t.warehouseId')
-      .addGroupBy('t.truckType')
       .getRawMany();
     for (const r of rows) {
       const entry = map.get(r.warehouseId) ?? { collection: 0, delivery: 0, total: 0 };
       const n = Number(r.count);
-      if (r.type === 'DELIVERY') entry.delivery += n;
-      else entry.collection += n;
+      entry.collection += n;
       entry.total += n;
       map.set(r.warehouseId, entry);
     }
+
+    // Delivery fleet — live from Odoo, mapped from Odoo warehouse ids to ours.
+    try {
+      const deliveryByOdoo = await this.odoo.deliveryTruckCountsByWarehouse();
+      if (deliveryByOdoo.length) {
+        const listed = await this.warehouseRepo.find({
+          where: { id: In(warehouseIds) },
+          select: ['id', 'odooWarehouseId'],
+        });
+        const backendByOdoo = new Map<number, string>();
+        for (const w of listed) {
+          if (w.odooWarehouseId != null) backendByOdoo.set(w.odooWarehouseId, w.id);
+        }
+        for (const d of deliveryByOdoo) {
+          const backendId = backendByOdoo.get(d.odooWarehouseId);
+          if (!backendId) continue;
+          const entry = map.get(backendId) ?? { collection: 0, delivery: 0, total: 0 };
+          entry.delivery += d.count;
+          entry.total += d.count;
+          map.set(backendId, entry);
+        }
+      }
+    } catch (err) {
+      // Odoo unreachable: report the collection fleet from the mirror, and leave
+      // delivery at 0 rather than failing the whole warehouse listing.
+      this.logger.warn(
+        `Could not read delivery truck counts from Odoo: ${(err as Error).message}`,
+      );
+    }
+
     return map;
   }
 

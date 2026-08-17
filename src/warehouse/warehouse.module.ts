@@ -56,6 +56,7 @@ from '../odoo-sync/odoo-sync.module';
 
 import { PermissionsModule }
 from '../permission/permissions.module';
+import { PlatformSettingsModule } from '@src/platform-settings/platform-settings.module';
 
 /**
  * Warehouses are authored in THIS backend (POST /admin/warehouses) and pushed to
@@ -97,6 +98,7 @@ from '../permission/permissions.module';
     WasteCommonModule,
     OdooSyncModule,
     PermissionsModule,
+    PlatformSettingsModule,
   ],
 
   providers: [

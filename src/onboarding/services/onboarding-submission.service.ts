@@ -20,6 +20,7 @@ import { Shift, ShiftType } from '@src/shift/entities/shift.entity';
 import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
 import { ApplicationsCacheService } from '@src/account-management/providers/applications-cache.service';
 import { ONBOARDING_STEPS } from '../config/onboarding.config';
+import { assertValidTimeSlots } from '../dto/delivery-time-slot.dto';
 
 /**
  * States in which an applicant may LOOK at what they submitted. Before that the
@@ -65,9 +66,13 @@ const ROLE_CONFIG: Record<
     ownerType: OwnerType.FACTORY,
   },
   [Role.EXTERNAL_PARTNER]: {
-    // No documents step for this role (see ONBOARDING_STEPS).
     materialRelation: 'externalPartnerMaterial',
     infoFields: ['externalPartnerName', 'externalPartnerPhone', 'externalPartnerSlogo'],
+    // Documents are OPTIONAL for a free facility (not in ONBOARDING_STEPS, so the
+    // application is submitted without them) — but when uploaded they are owned,
+    // shown in the submission, replaceable, and reviewed by the admin like any
+    // other role's.
+    ownerType: OwnerType.EXTERNAL_PARTNER,
   },
   [Role.COLLECTOR]: {
     infoFields: ['NationalID'],
@@ -194,24 +199,49 @@ export class OnboardingSubmissionService {
     };
   }
 
-  private mapMaterials(profile: any, materialRelation?: string) {
+  /**
+   * The materials block, shaped to the ROLE — never a union of every role's
+   * fields. An institution describes a PICKUP (quantity, how often, when to
+   * collect); a factory or free-facility describes an ORDER (average quantity,
+   * schedule, delivery preference). Returning both sets meant an institution's
+   * screen carried a factory's fields (all null) and the reverse — which is the
+   * "editing at an institution shows the factory's details" bug. Each role now
+   * gets only the fields it actually fills in.
+   */
+  private mapMaterials(profile: any, role: Role, materialRelation?: string) {
     if (!materialRelation) return null;
     const m = profile[materialRelation];
     if (!m) return null;
     const wasteTypes = (m.wasteTypes ?? [])
       .map((w: any) => w.wasteType && { id: w.wasteType.id, name: w.wasteType.name })
       .filter(Boolean);
+
+    const base = { id: m.id, waste_types: wasteTypes };
+
+    if (role === Role.INSTITUTIONS) {
+      return {
+        ...base,
+        estimated_waste_quantity: m.estimatedWasteQuantity ?? null,
+        collection_frequency: m.collectionFrequney ?? null,
+        preferred_collection_time: m.preferredCollectionTime ?? null,
+      };
+    }
+
+    // A FACTORY arranges a delivery: quantity, whether it wants delivery, and
+    // the detailed windows it can receive it in.
+    if (role === Role.FACTORY) {
+      return {
+        ...base,
+        average_order_quantity: m.averageOrderQuantity ?? null,
+        delivery_preference: m.deliveryPreference ?? null,
+        delivery_time_slots: m.deliveryTimeSlots ?? null,
+      };
+    }
+
+    // A free facility (EXTERNAL_PARTNER) gives only categories and a quantity.
     return {
-      id: m.id,
-      waste_types: wasteTypes,
-      // Institutions describe a pickup; factories/partners describe an order.
-      estimated_waste_quantity: m.estimatedWasteQuantity ?? null,
-      collection_frequency: m.collectionFrequney ?? null,
-      preferred_collection_time: m.preferredCollectionTime ?? null,
+      ...base,
       average_order_quantity: m.averageOrderQuantity ?? null,
-      estimation_order_schedule: m.estimationOrderSchedule ?? null,
-      delivery_preference: m.deliveryPreference ?? null,
-      preferred_delivery_schedule: m.perferredDeliverySchedule ?? null,
     };
   }
 
@@ -283,7 +313,7 @@ export class OnboardingSubmissionService {
       information,
       location: this.mapLocation(profile),
       documents: this.mapDocuments(documents),
-      materials: this.mapMaterials(profile, cfg.materialRelation),
+      materials: this.mapMaterials(profile, role, cfg.materialRelation),
       // True while at least one document was rejected — the applicant must use
       // the re-upload endpoint for those specific files.
       has_rejected_documents: documents.some((m) => m.status === statusMedia.REJECTED),
@@ -521,13 +551,33 @@ export class OnboardingSubmissionService {
       throw new NotFoundException('Materials were not submitted yet');
     }
 
-    // Scalars — only the ones this role actually owns.
-    const scalars = role === Role.INSTITUTIONS
-      ? ['estimatedWasteQuantity', 'collectionFrequney', 'preferredCollectionTime']
-      : ['averageOrderQuantity', 'estimationOrderSchedule', 'deliveryPreference',
-         'perferredDeliverySchedule'];
+    // Scalars — only the ones this role actually owns. Each role's fields are
+    // disjoint now (an institution schedules a pickup, a factory arranges a
+    // delivery with windows, a free facility gives only a quantity), so the set
+    // is chosen by role and nothing bleeds across.
+    const scalars =
+      role === Role.INSTITUTIONS
+        ? ['estimatedWasteQuantity', 'collectionFrequney', 'preferredCollectionTime']
+        : role === Role.FACTORY
+          ? ['deliveryPreference', 'deliveryTimeSlots']
+          : [];
     for (const f of scalars) {
       if (dto[f] !== undefined) material[f] = dto[f];
+    }
+
+    // The quantity is a positive number on the wire but a decimal string in the
+    // column — convert it here so both buyer roles store it identically.
+    if (
+      (role === Role.FACTORY || role === Role.EXTERNAL_PARTNER) &&
+      dto.averageOrderQuantity !== undefined
+    ) {
+      material.averageOrderQuantity = String(dto.averageOrderQuantity);
+    }
+
+    // A factory's edited delivery windows obey the same start-before-end rule
+    // as first submission.
+    if (role === Role.FACTORY && dto.deliveryTimeSlots !== undefined) {
+      assertValidTimeSlots(dto.deliveryTimeSlots);
     }
 
     // Replacing the chosen waste categories: verify every id exists first, so a

@@ -5,6 +5,8 @@ import { Repository } from 'typeorm';
 import Redis from 'ioredis';
 import { TruckAssignmentEntity } from '../entities/truck-assignment.entity';
 import { TruckLocationLog } from '../entities/truck-location-log.entity';
+import { TruckHandover } from '../entities/truck-handover.entity';
+import { HandoverStatus } from '../enums/handover-status.enum';
 import { StopReason } from './enums/stop-reason.enum';
 import { StoredTruckLocation, TruckLocationDto } from './dto/truck-location.dto';
 
@@ -32,6 +34,8 @@ export class TruckTrackingService {
     private readonly assignmentRepo: Repository<TruckAssignmentEntity>,
     @InjectRepository(TruckLocationLog)
     private readonly locationLogRepo: Repository<TruckLocationLog>,
+    @InjectRepository(TruckHandover)
+    private readonly handoverRepo: Repository<TruckHandover>,
   ) {}
 
   private locationKey(truckId: string): string {
@@ -192,6 +196,28 @@ export class TruckTrackingService {
       .innerJoin('a.truck', 'truck')
       .where('account.id = :accountId', { accountId })
       .andWhere('truck.id = :truckId', { truckId })
+      .getCount();
+    return count > 0;
+  }
+
+  /**
+   * Is this driver ACTIVELY OPERATING this truck right now?
+   *
+   * True only while an OPEN handover exists — i.e. the driver pressed "pick up"
+   * (استلام/تشغيل الشاحنة) and has not yet handed it back. This is the gate that
+   * makes tracking live ONLY for a truck a driver is actually running: an
+   * assigned-but-not-picked-up truck (no open session) is NOT tracked, and since
+   * only COLLECTION trucks have a handover flow at all (delivery trucks are
+   * Odoo's), tracking is naturally limited to the collection fleet in operation.
+   */
+  async hasActiveHandover(accountId: string, truckId: string): Promise<boolean> {
+    const count = await this.handoverRepo
+      .createQueryBuilder('h')
+      .innerJoin('h.driver', 'driver')
+      .innerJoin('driver.account', 'account')
+      .where('account.id = :accountId', { accountId })
+      .andWhere('h.truckId = :truckId', { truckId })
+      .andWhere('h.status = :status', { status: HandoverStatus.OPEN })
       .getCount();
     return count > 0;
   }

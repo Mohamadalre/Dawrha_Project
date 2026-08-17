@@ -15,6 +15,37 @@ interface OdooSession {
 }
 
 /** One document as Odoo currently judges it. */
+/** One warehouse stop on a delivery trip, as pushed to Odoo. */
+export interface DeliveryTripPushStop {
+  backend_stop_id: string;
+  sequence: number;
+  warehouse_odoo_id?: number | null;
+  part_ref?: string;
+  product_summary?: string;
+  distance_to_buyer_km: number;
+  latitude?: number | null;
+  longitude?: number | null;
+  picked_up_at?: string | null;
+}
+
+/** A planned delivery trip pushed to Odoo for the driver to run. */
+export interface DeliveryTripPushPayload {
+  backend_trip_id: string;
+  trip_number: string;
+  order_number?: string;
+  buyer_name?: string;
+  origin_warehouse_odoo_id?: number | null;
+  truck_odoo_id?: number | null;
+  driver_odoo_id?: number | null;
+  status: string;
+  route_distance_km: number;
+  delivery_cost: number;
+  currency: string;
+  dest_latitude?: number | null;
+  dest_longitude?: number | null;
+  stops: DeliveryTripPushStop[];
+}
+
 export interface OdooDriverRequestImage {
   backendMediaId: string;
   status: 'pending' | 'accepted' | 'rejected';
@@ -389,6 +420,68 @@ export class OdooService {
   }
 
   /**
+   * Creates a NEW Odoo admin user (res.users), so the platform can have MORE THAN
+   * ONE admin.
+   *
+   * Invite model — the backend NEVER handles the new admin's password. It creates
+   * the account with admin rights and triggers Odoo's own "reset password" flow,
+   * which emails the new admin a link to set their own secret. So no admin
+   * password is ever chosen by, sent through, or stored on the backend.
+   *
+   * Admin rights = the Settings/System group (`base.group_system`), resolved by
+   * its EXTERNAL id at call time because the numeric id differs per database.
+   * A duplicate login is surfaced by Odoo's own unique constraint and mapped to a
+   * clean conflict by the caller.
+   */
+  async createAdminUser(values: {
+    name: string;
+    login: string;
+    email?: string | null;
+    phone?: string | null;
+  }): Promise<{ id: number; login: string }> {
+    await this.authenticate();
+
+    const groupId = await this.resolveXmlId('base', 'group_system');
+    const id = await this.callKw<number>('res.users', 'create', [
+      {
+        name: values.name,
+        login: values.login,
+        email: values.email ?? false,
+        phone: values.phone ?? false,
+        // (6, 0, ids) REPLACES the user's groups with exactly this set.
+        groups_id: [[6, 0, [groupId]]],
+      },
+    ]);
+    if (!id) throw new InternalServerErrorException('Odoo did not return a user id');
+
+    // Send the "set your password" invite. Best-effort: if email/reset is not
+    // configured the user still exists and an admin can trigger the reset inside
+    // Odoo — the invite step must never fail the creation.
+    try {
+      await this.callKw('res.users', 'action_reset_password', [[id]]);
+    } catch {
+      /* invite email not configured — the account is created regardless */
+    }
+
+    return { id, login: values.login };
+  }
+
+  /** Resolves an Odoo external id (`module.name`) to its numeric record id. */
+  private async resolveXmlId(module: string, name: string): Promise<number> {
+    const rows = await this.callKw<any[]>(
+      'ir.model.data',
+      'search_read',
+      [[['module', '=', module], ['name', '=', name]], ['res_id']],
+      { limit: 1 },
+    );
+    const resId = rows?.[0]?.res_id;
+    if (!resId) {
+      throw new InternalServerErrorException(`Odoo external id not found: ${module}.${name}`);
+    }
+    return resId;
+  }
+
+  /**
    * Changes the CONNECTED admin's Odoo login and/or password — the credentials
    * the backend itself authenticates with — and keeps the connection alive.
    *
@@ -686,6 +779,82 @@ export class OdooService {
     return this.callKw('recycle.order', 'action_reserve_stock', [[odooOrderId]]);
   }
 
+  /**
+   * The active driver of a delivery truck, so the backend can dispatch and
+   * notify them once it has scored and picked the truck. Returns `{}` when the
+   * truck has no active driver — a state to handle, not an error.
+   */
+  async fetchDeliveryDriverForTruck(odooTruckId: number): Promise<{
+    driver_id?: number;
+    name?: string;
+    phone?: string;
+    has_login?: boolean;
+  }> {
+    return this.callKw(
+      'recycle.delivery.driver',
+      'backend_driver_for_truck',
+      [odooTruckId],
+    );
+  }
+
+  /**
+   * Pushes a planned delivery trip into Odoo for the driver to run. Idempotent
+   * on `backend_trip_id`: dispatched once and re-pushed after an edit both land
+   * on the same trip, and any pickup the driver already confirmed is kept.
+   */
+  async pushDeliveryTrip(
+    payload: DeliveryTripPushPayload,
+  ): Promise<{ ok: boolean; id: number; trip_number: string }> {
+    return this.callKw('recycle.delivery.trip', 'backend_upsert', [payload]);
+  }
+
+  /**
+   * Notifies a warehouse's manager of a complaint about one of its parts — a
+   * shortage or a quality problem, decided from the deduction evidence that
+   * lives in Odoo, not here.
+   */
+  async notifyWarehouseComplaint(payload: {
+    odooWarehouseId: number;
+    kind: string;
+    description: string;
+    orderNumber: string;
+  }): Promise<{ notified: boolean }> {
+    return this.callKw('recycle.warehouse', 'notify_complaint', [
+      payload.odooWarehouseId,
+      payload.kind,
+      payload.description,
+      payload.orderNumber,
+    ]);
+  }
+
+  /**
+   * Re-grades UNRESERVED stock of one material between two conditions, INSIDE
+   * Odoo, keeping the warehouse total unchanged.
+   *
+   * Odoo owns the quantities: the backend once moved its own mirror and the next
+   * inventory sync overwrote it, reverting the re-grade silently. So the move is
+   * made here and the mirror follows the inventory ping this triggers.
+   *
+   * Returns `transferred:false` (with what WAS movable) instead of raising when
+   * the unreserved stock cannot cover the request — a race the caller can report
+   * rather than a crash.
+   */
+  async transferStockGrade(payload: {
+    warehouseOdooId: number;
+    odooProductId: number;
+    fromCondition: string;
+    toCondition: string;
+    quantity: number;
+  }): Promise<{ transferred: boolean; moved?: number; movable?: number; requested?: number }> {
+    return this.callKw('recycle.stock', 'transfer_grade', [
+      payload.warehouseOdooId,
+      payload.odooProductId,
+      payload.fromCondition,
+      payload.toCondition,
+      payload.quantity,
+    ]);
+  }
+
   // ---------------------------------------------------------------------------
   // Delivery tariffs (recycle.delivery.tariff) — ODOO IS THE AUTHOR
   // ---------------------------------------------------------------------------
@@ -771,6 +940,79 @@ export class OdooService {
         'truck_type',
       ],
     });
+  }
+
+  /**
+   * The DELIVERY trucks of one warehouse, read LIVE from Odoo.
+   *
+   * Delivery trucks are Odoo's to author and are NOT mirrored in the backend —
+   * only collection trucks are. So the delivery-trip planner cannot pick one
+   * from a local table; it asks Odoo here, at plan time, for the active delivery
+   * vehicles stationed at the warehouse a trip departs from. Only the fields the
+   * scorer needs travel (id + payload); "busy" and "recent trips" are still
+   * derived from the backend's own trip rows, keyed by the Odoo truck id.
+   */
+  async fetchDeliveryTrucksForWarehouse(odooWarehouseId: number): Promise<any[]> {
+    return this.callKw<any[]>(
+      'recycle.truck',
+      'search_read',
+      [
+        [
+          ['truck_type', '=', 'delivery'],
+          ['is_active', '=', true],
+          ['warehouse_id', '=', odooWarehouseId],
+        ],
+      ],
+      { fields: ['max_payload_kg', 'plate_number'] },
+    );
+  }
+
+  /**
+   * Which of these delivery trucks have an AVAILABLE driver (active, unblocked)
+   * right now — so the scorer can rank a driverless truck last instead of
+   * picking it and stalling at dispatch. One call for the whole candidate set.
+   */
+  async fetchTrucksWithAvailableDriver(odooTruckIds: number[]): Promise<number[]> {
+    if (!odooTruckIds.length) return [];
+    const ids = await this.callKw<number[]>(
+      'recycle.delivery.driver',
+      'backend_available_driver_truck_ids',
+      [odooTruckIds],
+    );
+    return (ids ?? []).map((id) => Number(id));
+  }
+
+  /**
+   * How many DELIVERY trucks Odoo holds right now. The backend mirrors only
+   * collection trucks, so the admin's fleet statistics read the delivery figure
+   * live from its master rather than from a table it no longer keeps.
+   */
+  async countDeliveryTrucks(): Promise<number> {
+    return this.callKw<number>('recycle.truck', 'search_count', [
+      [['truck_type', '=', 'delivery']],
+    ]);
+  }
+
+  /**
+   * DELIVERY trucks grouped by warehouse, read LIVE from Odoo — one call for a
+   * whole listing. The backend mirrors only collection trucks, so the admin's
+   * per-warehouse fleet screen reads its delivery figures straight from Odoo.
+   * Keyed by the ODOO warehouse id; the caller maps those to its own rows.
+   */
+  async deliveryTruckCountsByWarehouse(): Promise<
+    Array<{ odooWarehouseId: number; count: number }>
+  > {
+    const rows = await this.callKw<any[]>('recycle.truck', 'read_group', [
+      [['truck_type', '=', 'delivery']],
+      ['warehouse_id'],
+      ['warehouse_id'],
+    ]);
+    return (rows ?? [])
+      .map((r) => {
+        const wid = Array.isArray(r.warehouse_id) ? r.warehouse_id[0] : r.warehouse_id;
+        return { odooWarehouseId: Number(wid), count: Number(r.warehouse_id_count ?? r.__count ?? 0) };
+      })
+      .filter((r) => Number.isFinite(r.odooWarehouseId) && r.odooWarehouseId > 0);
   }
 
   async fetchDriverAssignments(): Promise<any[]> {

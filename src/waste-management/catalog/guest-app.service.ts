@@ -469,7 +469,7 @@ export class GuestAppService {
         has_offer: !!offer,
         offer_amount: offer ? Number(offer.amount) : null,
         discount_percentage: offer ? Number(offer.discountPercentage) : null,
-        currency: 'JOD',
+        currency: 'SYP',
         // A visitor can look at all of this; they cannot act on any of it.
         requires_login_to_order: true,
       };

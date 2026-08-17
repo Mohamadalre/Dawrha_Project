@@ -157,13 +157,16 @@ describe('CatalogService', () => {
       expect(c.available).toBe(70);
       expect(c.base_price).toBe(10);
       expect(c.price).toBe(8); // offer applied
-      expect(c.has_offer).toBe(true);
-      expect(c.discount_percentage).toBe(20);
+      // The offer is one tidy object, not scattered has_offer/discount fields.
+      expect(c.offer.old_price).toBe(10);
+      expect(c.offer.new_price).toBe(8);
+      expect(c.offer.percentage).toBe(20);
+      expect(c).not.toHaveProperty('has_offer');
       // The price came from the token role (FACTORY), never a fixed tier.
       expect(effectivePrice.effectivePrice).toHaveBeenCalledWith('p1', Role.FACTORY, 'EXCELLENT');
     });
 
-    it('does not scope stock/price for a flat-tier caller (citizen)', async () => {
+    it('hides grades entirely from a flat-tier caller (citizen), even when the material has them', async () => {
       productRepo.findOne.mockResolvedValue({ id: 'p1', categoryId: 'c1', odooProductId: 5 });
       assigned.getAssignedCategoryIds.mockResolvedValue(null);
       conditionsService.activeForProduct.mockResolvedValue([
@@ -172,9 +175,10 @@ describe('CatalogService', () => {
 
       const res: any = await service.getConditions({ id: 'u2', role: Role.CITIZEN }, 'p1');
 
-      // Grade metadata only — no price/stock leaked to a flat buyer.
-      expect(res.conditions[0]).not.toHaveProperty('price');
-      expect(res.conditions[0]).not.toHaveProperty('available');
+      // Grades are a graded-buyer concern: a citizen sees none, and no price is
+      // even looked up.
+      expect(res.has_conditions).toBe(false);
+      expect(res.conditions).toEqual([]);
       expect(effectivePrice.effectivePrice).not.toHaveBeenCalled();
     });
   });
@@ -279,6 +283,42 @@ describe('CatalogService', () => {
     expect(qb.setParameter).toHaveBeenCalledWith('callerTier', PricingTier.FACTORY);
   });
 
+  it('getCategories searches categories by name', async () => {
+    cache.get.mockResolvedValue(null);
+    assigned.getAssignedCategoryIds.mockResolvedValue(null);
+    const qb = makeQb();
+    categoryRepo.createQueryBuilder.mockReturnValue(qb);
+
+    await service.getCategories(
+      { id: 'c1', role: Role.CITIZEN },
+      { page: 1, limit: 10, sort: 'name', order: 'asc', search: 'plast' } as any,
+    );
+
+    const nameClause = qb.andWhere.mock.calls
+      .map((c: any[]) => String(c[0]))
+      .find((c: string) => c.includes('c.name ILIKE'));
+    expect(nameClause).toBeDefined();
+  });
+
+  it('getProductsByCategory searches materials by name WITHIN the category', async () => {
+    cache.get.mockResolvedValue(null);
+    assigned.getAssignedCategoryIds.mockResolvedValue(null);
+    categoryRepo.findOne = jest.fn().mockResolvedValue({ id: 'cat1', name: 'Plastics' });
+    const qb = makeQb();
+    productRepo.createQueryBuilder.mockReturnValue(qb);
+
+    await service.getProductsByCategory(
+      { id: 'c1', role: Role.CITIZEN },
+      'cat1',
+      { page: 1, limit: 10, sort: 'name', order: 'asc', search: 'pet' } as any,
+    );
+
+    const clauses = qb.andWhere.mock.calls.map((c: any[]) => String(c[0]));
+    // Scoped to the category AND filtered by the material-name search.
+    expect(clauses.some((c: string) => c.includes('p.categoryId = :categoryId'))).toBe(true);
+    expect(clauses.some((c: string) => c.includes('p.name ILIKE :search'))).toBe(true);
+  });
+
   /**
    * Switching off a CATEGORY must switch off its materials.
    *
@@ -306,9 +346,10 @@ describe('CatalogService', () => {
     expect(clauses).toContain('c.isActive = :active');
   });
 
-  it('getCategories does NOT apply the price test for an admin', async () => {
-    // An admin is not buying, so "priced for my tier" is not a question they
-    // have — applying it would hide categories they are meant to administer.
+  it('getCategories shows ALL categories to an admin — no active/price/exists filter', async () => {
+    // An admin administers the catalogue, so they see every category: active or
+    // not, and even one whose materials are all unpriced or out of stock —
+    // exactly the ones they need to go in and finish.
     cache.get.mockResolvedValue(null);
     assigned.getAssignedCategoryIds.mockResolvedValue(null);
     const qb = makeQb();
@@ -319,10 +360,12 @@ describe('CatalogService', () => {
       { page: 1, limit: 10, sort: 'name', order: 'asc' } as any,
     );
 
-    const existsClause = qb.andWhere.mock.calls
-      .map((c: any[]) => String(c[0]))
-      .find((c: string) => c.includes('EXISTS'));
-    expect(existsClause).not.toContain('product_pricing');
+    const clauses = [
+      ...qb.where.mock.calls.map((c: any[]) => String(c[0])),
+      ...qb.andWhere.mock.calls.map((c: any[]) => String(c[0])),
+    ];
+    expect(clauses).not.toContain('c.isActive = :active');
+    expect(clauses.find((c: string) => c.includes('EXISTS'))).toBeUndefined();
     expect(qb.setParameter).not.toHaveBeenCalledWith('callerTier', expect.anything());
   });
 

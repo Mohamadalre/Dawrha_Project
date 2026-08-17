@@ -1,7 +1,7 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
 import { OdooService } from '@src/odoo/odoo.service';
 import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
 import { Product } from '@src/waste-management/entities/product.entity';
@@ -28,11 +28,21 @@ import { DeliveryTariff } from '@src/warehouse/entities/delivery-tariff.entity';
 import { tariffScopeFromOdoo } from '@src/warehouse/enums/delivery-tariff-scope.enum';
 import { Order } from '@src/order/entities/order.entity';
 import { OrderPart } from '@src/order/entities/order-part.entity';
-import { OrderStatus, canTransition } from '@src/order/enums/order-status.enum';
+import { OrderPartOffer } from '@src/order/entities/order-part-offer.entity';
+import { latestRoundWasSplit } from '@src/order/latest-round-split';
+import { FulfilmentMode } from '@src/order/enums/fulfilment-mode.enum';
+import { DeliveryRateService } from '@src/warehouse/providers/delivery-rate.service';
+import {
+  OrderStatus,
+  canTransition,
+  TERMINAL_ORDER_STATUSES,
+} from '@src/order/enums/order-status.enum';
 import {
   OrderPartStatus,
   canTransitionPart,
+  FAILED_PART_STATUSES,
 } from '@src/order/enums/order-part-status.enum';
+import { ORDER_TASKS, ORDER_TASKS_QUEUE } from '@src/order/order-tasks.constants';
 import {
   autoAdvanceAfterPreparation,
   resolvePartStatus,
@@ -56,7 +66,7 @@ import { WarehouseManager } from '@src/warehouse/entities/warehouse-manager.enti
 import { NotificationService } from '@src/notification/notification.service';
 import { NotificationType } from '@src/notification/enums/notification-type.enum';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
-import { truckTypeFromOdoo } from '@src/truck/enums/truck-type.enum';
+import { truckTypeFromOdoo, TruckType } from '@src/truck/enums/truck-type.enum';
 import {
   CancelShiftChangePayload,
   CreateWarehousePayload,
@@ -66,6 +76,9 @@ import {
   DeleteProvincePayload,
   CancelOrderPartPayload,
   OrderEventPayload,
+  TransferStockGradePayload,
+  PushDeliveryTripPayload,
+  PushComplaintPayload,
   PushOrderPartPayload,
   UpdateWarehousePayload,
   DeleteUnitPayload,
@@ -124,6 +137,9 @@ export class OdooSyncProcessor extends WorkerHost {
   constructor(
     private readonly odoo: OdooService,
     private readonly notifications: NotificationService,
+    // Enqueued (not consumed here): starting a consolidation once its last
+    // warehouse has prepared. The order module consumes this queue.
+    @InjectQueue(ORDER_TASKS_QUEUE) private readonly orderTasks: Queue,
     @InjectRepository(WasteCategory)
     private readonly categoryRepo: Repository<WasteCategory>,
     @InjectRepository(Product)
@@ -153,6 +169,8 @@ export class OdooSyncProcessor extends WorkerHost {
     private readonly orderRepo: Repository<Order>,
     @InjectRepository(OrderPart)
     private readonly orderPartRepo: Repository<OrderPart>,
+    @InjectRepository(OrderPartOffer)
+    private readonly orderPartOfferRepo: Repository<OrderPartOffer>,
     @InjectRepository(DistanceCache)
     private readonly distanceCacheRepo: Repository<DistanceCache>,
     @InjectRepository(TruckEntity)
@@ -173,6 +191,9 @@ export class OdooSyncProcessor extends WorkerHost {
     private readonly userDeviceRepo: Repository<UserDevice>,
     @InjectRepository(Media)
     private readonly mediaRepo: Repository<Media>,
+    // Re-prices a reassigned split part's delivery leg. Provided by THIS module
+    // (see the module note) to avoid a cycle with WarehouseModule.
+    private readonly rates: DeliveryRateService,
   ) {
     super();
   }
@@ -196,6 +217,9 @@ export class OdooSyncProcessor extends WorkerHost {
     [ODOO_JOBS.PUSH_ORDER_PART]: (job) => this.pushOrderPart(job.data as PushOrderPartPayload),
     [ODOO_JOBS.CANCEL_ORDER_PART]: (job) => this.cancelOrderPart(job.data as CancelOrderPartPayload),
     [ODOO_JOBS.APPLY_ORDER_EVENT]: (job) => this.applyOrderEvent(job.data as OrderEventPayload),
+    [ODOO_JOBS.TRANSFER_STOCK_GRADE]: (job) => this.transferStockGrade(job.data as TransferStockGradePayload),
+    [ODOO_JOBS.PUSH_DELIVERY_TRIP]: (job) => this.pushDeliveryTrip(job.data as PushDeliveryTripPayload),
+    [ODOO_JOBS.PUSH_COMPLAINT]: (job) => this.pushComplaint(job.data as PushComplaintPayload),
     [ODOO_JOBS.SYNC_DELIVERY_TARIFFS]: () => this.syncDeliveryTariffs(),
     [ODOO_JOBS.SYNC_CONDITION]: (job) => this.syncCondition(job.data as SyncConditionPayload),
     [ODOO_JOBS.DELETE_CONDITION]: (job) => this.deleteCondition(job.data as DeleteConditionPayload),
@@ -619,6 +643,29 @@ export class OdooSyncProcessor extends WorkerHost {
     }
   }
 
+  /** Push a planned delivery trip to Odoo for the driver to run. */
+  private async pushDeliveryTrip(payload: PushDeliveryTripPayload) {
+    await this.odoo.pushDeliveryTrip(payload.trip);
+    winstonLogger.info(
+      `Delivery trip ${payload.trip.trip_number} pushed to Odoo`,
+      LOG_META,
+    );
+  }
+
+  /** Notify a warehouse's manager in Odoo of a warehouse-routed complaint. */
+  private async pushComplaint(payload: PushComplaintPayload) {
+    const res = await this.odoo.notifyWarehouseComplaint({
+      odooWarehouseId: payload.odooWarehouseId,
+      kind: payload.kind,
+      description: payload.description,
+      orderNumber: payload.orderNumber,
+    });
+    winstonLogger.info(
+      `Complaint ${payload.complaintId} sent to warehouse ${payload.odooWarehouseId} (notified: ${res?.notified})`,
+      LOG_META,
+    );
+  }
+
   /** The buyer cancelled before the goods were committed. */
   private async cancelOrderPart(payload: CancelOrderPartPayload) {
     const part = await this.orderPartRepo.findOne({
@@ -628,6 +675,75 @@ export class OdooSyncProcessor extends WorkerHost {
     await this.odoo.cancelOrderPart(part.id, payload.reason);
     part.stockReserved = false;
     await this.orderPartRepo.save(part);
+  }
+
+  /**
+   * Re-grades unreserved stock in Odoo, which OWNS the quantity.
+   *
+   * The backend service pre-checked its mirror before enqueuing, but Odoo is the
+   * authority — so a refusal here means the unreserved stock changed in between
+   * (another movement, a fresh reservation). That is a business outcome, not a
+   * transient fault: retrying will not grow the stock, so the admin is told and
+   * the job stops rather than burning its attempts. A genuine RPC fault throws,
+   * and is retried by the queue as usual.
+   *
+   * On success nothing is written here: Odoo's `recycle.stock` write fires an
+   * inventory ping, and SYNC_WAREHOUSE refreshes the mirror with the truth —
+   * the same channel every quantity change already flows through, so no new
+   * reconciler is owed.
+   */
+  private async transferStockGrade(payload: TransferStockGradePayload) {
+    const result = await this.odoo.transferStockGrade({
+      warehouseOdooId: payload.warehouseOdooId,
+      odooProductId: payload.odooProductId,
+      fromCondition: payload.fromCondition,
+      toCondition: payload.toCondition,
+      quantity: payload.quantity,
+    });
+
+    if (!result?.transferred) {
+      winstonLogger.warn(
+        `Grade transfer refused by Odoo (product ${payload.odooProductId}, ` +
+          `warehouse ${payload.warehouseId}): ${result?.movable ?? 0} movable of ${payload.quantity}`,
+        LOG_META,
+      );
+      await this.notifyGradeTransferFailed(payload);
+      return;
+    }
+
+    winstonLogger.info(
+      `Grade transfer applied in Odoo: ${payload.quantity} of product ` +
+        `${payload.odooProductId} from ${payload.fromCondition} to ${payload.toCondition} ` +
+        `in warehouse ${payload.warehouseId}`,
+      LOG_META,
+    );
+  }
+
+  /** Tell the admin who asked that the re-grade could not be applied. */
+  private async notifyGradeTransferFailed(
+    payload: TransferStockGradePayload,
+  ): Promise<void> {
+    try {
+      const product = await this.productRepo.findOne({
+        where: { odooProductId: payload.odooProductId },
+      });
+      const name = product?.name ?? `#${payload.odooProductId}`;
+      const n = await this.notifications.createNotification({
+        userId: payload.adminId,
+        title: 'Grade transfer could not be applied',
+        body: `Re-grading stock of "${name}" was refused because the unreserved quantity changed.`,
+        titleKey: 'notifications.gradeTransferFailed.title',
+        bodyKey: 'notifications.gradeTransferFailed.body',
+        args: { product: name },
+        type: NotificationType.ODOO,
+      });
+      await this.notifications.enqueueNotification(n.id);
+    } catch (error) {
+      winstonLogger.warn(
+        `Failed to notify admin of grade-transfer refusal: ${(error as Error).message}`,
+        LOG_META,
+      );
+    }
   }
 
   /**
@@ -650,6 +766,13 @@ export class OdooSyncProcessor extends WorkerHost {
       return;
     }
 
+    // A reassignment is not a status change — it re-points the part at another
+    // warehouse. Handled on its own and returned early, before the status map.
+    if (payload.event === 'reassigned') {
+      await this.applyReassignment(part, payload);
+      return;
+    }
+
     // Odoo may have created the order without our push recording the id.
     if (!part.odooOrderId) {
       part.odooOrderId = payload.odooOrderId;
@@ -664,8 +787,13 @@ export class OdooSyncProcessor extends WorkerHost {
       this.stampPart(part, target);
 
       // A collection order is ready the instant it is prepared; a delivery
-      // waits for the manager to release it to a carrier.
-      const next = autoAdvanceAfterPreparation(target, part.order.fulfilmentMode);
+      // waits for the manager to release it to a carrier; a consolidation waits
+      // for the gathering trip, so it stays in the output zone for now.
+      const next = autoAdvanceAfterPreparation(
+        target,
+        part.order.fulfilmentMode,
+        part.order.consolidate,
+      );
       if (next && canTransitionPart(part.status, next)) {
         part.status = next;
       }
@@ -680,7 +808,199 @@ export class OdooSyncProcessor extends WorkerHost {
     }
     await this.orderPartRepo.save(part);
 
+    // A split refused by the admin does not re-allocate: the whole split was one
+    // verdict, so the buyer is told and the order waits on their confirmation.
+    // A single warehouse's rejection falls through to the normal derive, and the
+    // offer-expiry sweep re-allocates it as before.
+    if (
+      part.status === OrderPartStatus.REJECTED &&
+      (await this.routeSplitRejectionToBuyer(part.orderId))
+    ) {
+      return;
+    }
+
     await this.refreshOrderStatus(part.orderId);
+
+    // A consolidation the buyer chose earlier can only run once every warehouse
+    // has prepared — which the part just advanced toward. Check, and start it.
+    await this.maybeTriggerConsolidation(part.orderId);
+  }
+
+  /**
+   * Starts a chosen consolidation the moment its LAST warehouse finishes
+   * preparing. Enqueued onto the order module's own queue (which owns the truck
+   * planning), keyed by order id so the many part events of one order do not
+   * stack — the planner is idempotent behind that anyway.
+   */
+  private async maybeTriggerConsolidation(orderId: string): Promise<void> {
+    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    if (!order?.consolidate) return;
+    if (order.fulfilmentMode === FulfilmentMode.DELIVERY) return;
+
+    const parts = await this.orderPartRepo.find({ where: { orderId } });
+    const live = parts.filter(
+      (p) =>
+        !FAILED_PART_STATUSES.includes(p.status) &&
+        p.status !== OrderPartStatus.CANCELLED,
+    );
+    // Nothing to gather from one warehouse, and not ready until every part is.
+    if (live.length < 2) return;
+    if (!live.every((p) => p.status === OrderPartStatus.IN_OUTPUT_ZONE)) return;
+
+    await this.orderTasks.add(
+      ORDER_TASKS.PLAN_CONSOLIDATION,
+      { orderId },
+      {
+        jobId: `plan-consolidation-${orderId}`,
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
+    );
+  }
+
+  /**
+   * If the order was split in its latest round, moves it to
+   * REJECTED_AWAITING_BUYER and tells the buyer — and returns true so the caller
+   * skips the ordinary re-allocation path. Returns false for a single-warehouse
+   * order, which re-allocates as before.
+   *
+   * Sticky and idempotent: a split's parts are all rejected in Odoo at once and
+   * report back one by one, so the FIRST report moves the order and the rest
+   * find it already there (or already terminal) and change nothing.
+   */
+  private async routeSplitRejectionToBuyer(orderId: string): Promise<boolean> {
+    if (!(await this.wasSplitInLatestRound(orderId))) return false;
+
+    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    if (!order) return false;
+    if (order.status === OrderStatus.REJECTED_AWAITING_BUYER) return true;
+    if (TERMINAL_ORDER_STATUSES.includes(order.status)) return true;
+    if (!canTransition(order.status, OrderStatus.REJECTED_AWAITING_BUYER)) {
+      // Already moved on some other path — leave it be, but still owned here.
+      return true;
+    }
+
+    order.status = OrderStatus.REJECTED_AWAITING_BUYER;
+    await this.orderRepo.save(order);
+    winstonLogger.info(
+      `Order ${order.orderNumber}: split refused by the administrator — awaiting the buyer's confirmation`,
+      LOG_META,
+    );
+    await this.notifySplitRejected(order);
+    return true;
+  }
+
+  /**
+   * A split was one allocation to several warehouses. The decision lives in the
+   * pure helper; this only reads the round ledger for the order.
+   */
+  private async wasSplitInLatestRound(orderId: string): Promise<boolean> {
+    const offers = await this.orderPartOfferRepo.find({ where: { orderId } });
+    return latestRoundWasSplit(offers);
+  }
+
+  /**
+   * The admin re-routed a split part to another warehouse in Odoo, which owns
+   * the reservation. Here the backend catches up: re-point the part, read the
+   * new leg's distance from the cache, re-price its delivery, and refresh the
+   * order's totals.
+   *
+   * Only a part still OFFERED can be reassigned (Odoo enforces the same, on the
+   * pending state) — a later event for one already moving is stale and ignored.
+   */
+  private async applyReassignment(
+    part: OrderPart,
+    payload: OrderEventPayload,
+  ): Promise<void> {
+    if (!payload.warehouseOdooId) return;
+    if (part.status !== OrderPartStatus.OFFERED) {
+      winstonLogger.warn(
+        `Ignoring reassignment of part ${part.id}: it is already ${part.status}`,
+        LOG_META,
+      );
+      return;
+    }
+
+    const warehouse = await this.warehouseRepo.findOne({
+      where: { odooWarehouseId: payload.warehouseOdooId },
+    });
+    if (!warehouse) {
+      winstonLogger.warn(
+        `Reassignment names Odoo warehouse ${payload.warehouseOdooId}, which has no mirror here`,
+        LOG_META,
+      );
+      return;
+    }
+    if (warehouse.id === part.warehouseId) return; // already there
+
+    const order = part.order;
+    const from = part.warehouseId;
+    part.warehouseId = warehouse.id;
+
+    // Distance to the new warehouse from the cache (buyer↔warehouse pairs are
+    // pre-measured); leave the old figure if this pair is not cached yet — the
+    // warm-up/refresh fills it and delivery re-prices then.
+    const cached = await this.distanceCacheRepo.findOne({
+      where: { buyerProfileId: order.buyerProfileId, warehouseId: warehouse.id },
+    });
+    if (cached) part.distanceKm = String(cached.distanceKm);
+
+    // Re-price the delivery leg for the new warehouse at the backend-admin rate
+    // (the same one allocation and the trip use); a collection order has no leg,
+    // so its cost stays zero.
+    if (order.fulfilmentMode === FulfilmentMode.DELIVERY) {
+      const quote = await this.rates.quote(Number(part.distanceKm));
+      part.deliveryCost = String(quote.cost);
+    }
+    await this.orderPartRepo.save(part);
+
+    await this.recalculateOrderTotals(order.id);
+    winstonLogger.info(
+      `Order ${order.orderNumber}: part ${part.id} reassigned ${from} -> ${warehouse.id}`,
+      LOG_META,
+    );
+  }
+
+  /**
+   * Re-sums an order's delivery from its live parts after one was reassigned.
+   * Goods are unchanged — the same lines at the same frozen prices — so only the
+   * delivery leg and the grand total can move.
+   */
+  private async recalculateOrderTotals(orderId: string): Promise<void> {
+    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    if (!order) return;
+    const parts = await this.orderPartRepo.find({ where: { orderId } });
+    const live = parts.filter(
+      (p) =>
+        p.status !== OrderPartStatus.REJECTED &&
+        p.status !== OrderPartStatus.EXPIRED &&
+        p.status !== OrderPartStatus.CANCELLED,
+    );
+    const delivery = live.reduce((sum, p) => sum + Number(p.deliveryCost), 0);
+    order.deliveryTotal = String(round3(delivery));
+    order.grandTotal = String(round3(Number(order.goodsTotal) + delivery));
+    await this.orderRepo.save(order);
+  }
+
+  /** Tell the buyer their split order could not be fulfilled. */
+  private async notifySplitRejected(order: Order): Promise<void> {
+    try {
+      const n = await this.notifications.createNotification({
+        userId: order.buyerAccountId,
+        title: 'Your order could not be fulfilled',
+        body: `Order ${order.orderNumber} could not be fulfilled and was declined. Confirm to close it.`,
+        titleKey: 'notifications.orderSplitRejected.title',
+        bodyKey: 'notifications.orderSplitRejected.body',
+        args: { order: order.orderNumber },
+        type: NotificationType.ODOO,
+      });
+      await this.notifications.enqueueNotification(n.id);
+    } catch (error) {
+      winstonLogger.warn(
+        `Failed to notify buyer of split rejection: ${(error as Error).message}`,
+        LOG_META,
+      );
+    }
   }
 
   /**
@@ -765,7 +1085,7 @@ export class OdooSyncProcessor extends WorkerHost {
       tariff.baseFee = String(row.base_fee ?? 0);
       tariff.ratePerKm = String(row.rate_per_km ?? 0);
       tariff.minFee = String(row.min_fee ?? 0);
-      tariff.currency = row.currency || 'JOD';
+      tariff.currency = row.currency || 'SYP';
       tariff.isActive = row.active !== false;
       tariff.syncedAt = new Date();
       const saved = await this.tariffRepo.save(tariff);
@@ -1186,8 +1506,19 @@ export class OdooSyncProcessor extends WorkerHost {
     // 2) Trucks (linked to their warehouse via odooWarehouseId).
     // The backend admin is told about fleet authoring done in Odoo: a new
     // truck, or an existing truck (re/un)assigned to a warehouse.
+    //
+    // ONLY COLLECTION trucks are mirrored. Delivery trucks are Odoo's to manage
+    // — they are driven by delivery drivers who have no backend account, and the
+    // delivery-trip planner reads them LIVE from Odoo at plan time — so keeping a
+    // stale local copy would only be a second source of truth to drift. Delivery
+    // trucks are skipped below, and any that a previous sync had already mirrored
+    // are purged afterwards.
     const odooTrucks = await this.odoo.fetchTrucks();
     for (const ot of odooTrucks) {
+      // A delivery truck is not the backend's to store: skip it entirely, so it
+      // is neither upserted nor announced to the backend admin.
+      if (truckTypeFromOdoo(ot.truck_type) === TruckType.DELIVERY) continue;
+
       const warehouseOdooId = Array.isArray(ot.warehouse_id) ? ot.warehouse_id[0] : ot.warehouse_id;
       const warehouse = warehouseOdooId
         ? await this.warehouseRepo.findOne({ where: { odooWarehouseId: warehouseOdooId } })
@@ -1246,6 +1577,13 @@ export class OdooSyncProcessor extends WorkerHost {
         }
       }
     }
+
+    // 2b) Purge any DELIVERY trucks a previous sync mirrored, before the type
+    // split existed. Delivery trucks belong to Odoo alone now; a leftover local
+    // row would be stale the moment Odoo's admin touched it. Delivery trips are
+    // keyed by the ODOO truck id (a number), not a FK to this table, so nothing
+    // references these rows and the delete is safe.
+    await this.truckRepo.delete({ truckType: TruckType.DELIVERY });
 
     // 3) Driver assignments (decided by the Odoo admin; mirrored 1:1).
     const odooAssignments = await this.odoo.fetchDriverAssignments();
@@ -1875,4 +2213,9 @@ export class OdooSyncProcessor extends WorkerHost {
       });
     }
   }
+}
+
+/** Money is stored with 3 decimals across this project; keep totals aligned. */
+function round3(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }

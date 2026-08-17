@@ -27,6 +27,10 @@ export class TransformInterceptor<T>
     const ctx = context.switchToHttp();
     const response = ctx.getResponse();
     const statusCode = response.statusCode;
+    // The authenticated account's chosen language wins over any header, so a
+    // signed-in user gets every response in their saved language without ever
+    // sending one. Guests fall back to the header/default (inside translateMessage).
+    const userLang = ctx.getRequest()?.user?.language as string | undefined;
 
     return next.handle().pipe(
       map((data) => {
@@ -52,7 +56,7 @@ export class TransformInterceptor<T>
 
         return {
           success: true,
-          message: translateMessage(message, context),
+          message: translateMessage(message, context, userLang),
           data: finalData ?? null,
           statusCode,
           timestamp: new Date().toISOString(),
@@ -68,12 +72,18 @@ export class TransformInterceptor<T>
  * (or no i18n context), the original message is returned unchanged — so every
  * route is translatable without breaking ones that aren't keyed yet.
  */
-export function translateMessage(message: unknown, context?: ExecutionContext): string {
+export function translateMessage(
+  message: unknown,
+  context?: ExecutionContext,
+  langOverride?: string,
+): string {
   if (typeof message !== 'string' || !message) return (message as string) ?? '';
   const i18n = context ? I18nContext.current(context) : I18nContext.current();
   if (!i18n) return message;
 
   const key = `translation.${message}`;
-  const translated = i18n.t(key);
+  // The account's saved language, when signed in, takes precedence over the
+  // language the header/query resolvers picked.
+  const translated = langOverride ? i18n.t(key, { lang: langOverride }) : i18n.t(key);
   return typeof translated === 'string' && translated !== key ? translated : message;
 }

@@ -37,16 +37,9 @@ export class CreateStageDto {
   @Min(0)
   maxPoints: number;
 
-  /**
-   * Where to place the stage in the order (1-based). Optional: omitted appends
-   * to the end; given, the stage is inserted at that position and the ones at or
-   * after it shift down by one.
-   */
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  order?: number;
+  // No `order` on create: the admin never numbers a new stage by hand. It is
+  // appended to the end of the ladder automatically (the next number in the
+  // 1..N sequence), and re-ordered afterwards through the dedicated order route.
 
   /** Defaults to active. */
   @IsOptional()

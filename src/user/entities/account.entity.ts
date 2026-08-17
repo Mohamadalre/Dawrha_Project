@@ -11,6 +11,7 @@ import { Exclude } from 'class-transformer';
 import { Role } from '../enums/role.enum';
 import { AccountStatus } from '../enums/account-status.enum';
 import { AuthProvider } from '../enums/auth-provider.enum';
+import { Language } from '@src/common/enums/language.enum';
 import { CollectorProfile } from './profile/collector-profile.entity';
 import { FactoryProfile } from './profile/factory-profile.entity';
 import { CitizenProfile } from './profile/citizen-profile.entity';
@@ -73,6 +74,18 @@ export class Account {
     default: AccountStatus.INACTIVE,
   })
   accountStatus: AccountStatus;
+
+  /**
+   * The account's chosen response language. Set once in settings and then every
+   * API response comes back in it — the client never has to send a language
+   * header. Defaults to English until the holder picks otherwise.
+   */
+  @Column({
+    type: 'enum',
+    enum: Language,
+    default: Language.EN,
+  })
+  language: Language;
 
   @Column({ default: false })
   isEmailVerified: boolean;

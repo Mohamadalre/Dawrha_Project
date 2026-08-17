@@ -10,6 +10,7 @@ describe('TruckTrackingService', () => {
   let multi: any;
   let assignmentRepo: any;
   let locationLogRepo: any;
+  let handoverRepo: any;
 
   beforeEach(() => {
     multi = {
@@ -35,8 +36,9 @@ describe('TruckTrackingService', () => {
       save: jest.fn((x) => Promise.resolve({ id: 'log1', ...x })),
       findOne: jest.fn(),
     };
+    handoverRepo = { createQueryBuilder: jest.fn() };
 
-    service = new TruckTrackingService(redis, assignmentRepo, locationLogRepo);
+    service = new TruckTrackingService(redis, assignmentRepo, locationLogRepo, handoverRepo);
   });
 
   it('saveLocation stores the position in Redis and returns the payload', async () => {
@@ -94,5 +96,31 @@ describe('TruckTrackingService', () => {
     assignmentRepo.createQueryBuilder.mockReturnValue(qb);
 
     await expect(service.isDriverOfTruck('acc1', 't1')).resolves.toBe(true);
+  });
+
+  it('hasActiveHandover is true only when an OPEN handover exists', async () => {
+    const qb = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(1),
+    };
+    handoverRepo.createQueryBuilder.mockReturnValue(qb);
+
+    await expect(service.hasActiveHandover('acc1', 't1')).resolves.toBe(true);
+    // The status filter is the gate: tracking only while the truck is picked up.
+    expect(qb.andWhere).toHaveBeenCalledWith('h.status = :status', { status: 'open' });
+  });
+
+  it('hasActiveHandover is false when the truck was not picked up', async () => {
+    const qb = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(0),
+    };
+    handoverRepo.createQueryBuilder.mockReturnValue(qb);
+
+    await expect(service.hasActiveHandover('acc1', 't1')).resolves.toBe(false);
   });
 });

@@ -36,7 +36,7 @@ export class OrderSpendingCap {
   @Column({ type: 'enum', enum: SpendingCapPeriod, default: SpendingCapPeriod.MONTHLY })
   period: SpendingCapPeriod;
 
-  @Column({ default: 'JOD' })
+  @Column({ default: 'SYP' })
   currency: string;
 
   /**

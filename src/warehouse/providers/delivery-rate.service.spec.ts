@@ -27,7 +27,6 @@ describe('DeliveryRateService', () => {
     id: 'r1',
     ratePerKm: '0.500',
     baseFee: '2.000',
-    minCharge: '3.000',
     currency: 'JOD',
     isActive: true,
     effectiveFrom: new Date('2026-01-01'),
@@ -48,7 +47,8 @@ describe('DeliveryRateService', () => {
     };
     manager = { getRepository: jest.fn(() => repo) };
     dataSource = { transaction: jest.fn(async (cb) => cb(manager)) };
-    service = new DeliveryRateService(repo, dataSource);
+    const settings = { defaultCurrency: jest.fn().mockResolvedValue('SYP') };
+    service = new DeliveryRateService(repo, dataSource, settings as any);
   });
 
   // ------------------------------------------------------------------
@@ -81,12 +81,9 @@ describe('DeliveryRateService', () => {
     );
   });
 
-  it('refuses a negative base fee or minimum charge', async () => {
+  it('refuses a negative base fee', async () => {
     await expect(
       service.set({ rate_per_km: 1, base_fee: -1 }, ADMIN),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    await expect(
-      service.set({ rate_per_km: 1, min_charge: -5 }, ADMIN),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -135,7 +132,7 @@ describe('DeliveryRateService', () => {
   // Quoting
   // ------------------------------------------------------------------
   it('quotes base fee plus distance times the rate', async () => {
-    repo.findOne.mockResolvedValue(rate({ minCharge: '0' }));
+    repo.findOne.mockResolvedValue(rate());
 
     const q = await service.quote(10);
 
@@ -143,18 +140,16 @@ describe('DeliveryRateService', () => {
     expect(q.distance_km).toBe(10);
   });
 
-  it('applies the minimum charge to a very short trip', async () => {
-    repo.findOne.mockResolvedValue(rate());   // min 3, base 2, 0.5/km
+  it('quotes just the base fee for a very short trip — no floor', async () => {
+    repo.findOne.mockResolvedValue(rate());   // base 2, 0.5/km
 
     const q = await service.quote(1);
 
-    // 2 + 0.5 = 2.5, below the floor. A short trip still costs a driver, a
-    // vehicle and an hour.
-    expect(q.cost).toBe(3);
+    expect(q.cost).toBe(2.5); // 2 + 1 × 0.5
   });
 
   it('treats a negative distance as zero rather than a discount', async () => {
-    repo.findOne.mockResolvedValue(rate({ minCharge: '0' }));
+    repo.findOne.mockResolvedValue(rate());
 
     const q = await service.quote(-50);
 

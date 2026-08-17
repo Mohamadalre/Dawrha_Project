@@ -80,6 +80,7 @@ export class InstitutionController {
   async findAll(
     @CurrentUser() user,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
   ) {
     if (
       user.role === Role.INSTITUTIONS &&
@@ -89,7 +90,7 @@ export class InstitutionController {
         'Institution types are only available while your application is being completed',
       );
     }
-    const result = await this.institutionService.findAll(page);
-    return { message: 'Fetch institution type  successfully', result };
+    const result = await this.institutionService.findAll(page, limit);
+    return { message: 'Fetch institution type successfully', result };
   }
 }

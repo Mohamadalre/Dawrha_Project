@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Role } from '@src/user/enums/role.enum';
+import { NotificationService } from '@src/notification/notification.service';
+import { NotificationType } from '@src/notification/enums/notification-type.enum';
 import { PointsWallet } from './entities/points-wallet.entity';
+import { PointsRateService } from './points-rate.service';
 
 /**
  * The roles that TRADE and therefore earn points: citizens and institutions
@@ -27,7 +30,64 @@ export class PointsWalletService {
   constructor(
     @InjectRepository(PointsWallet)
     private readonly walletRepo: Repository<PointsWallet>,
+    private readonly rates: PointsRateService,
+    private readonly notifications: NotificationService,
   ) {}
+
+  /**
+   * Reward a COMPLETED order: convert its value to points at the buyer's role
+   * rate and credit their wallet, then tell them.
+   *
+   * `points = floor(orderValue / amountPerPoint)` — a 3000 order at 1000-per-
+   * point earns 3. Returns null when the admin has set no rate for the role (no
+   * conversion, so nothing is awarded), and awards nothing when the value is too
+   * small to earn a whole point. Best-effort: a wallet or notification hiccup
+   * must never fail the receipt that triggered it.
+   */
+  async awardForOrder(
+    accountId: string,
+    role: Role,
+    orderValue: number,
+    orderNumber?: string,
+  ): Promise<{ points: number; balance: number } | null> {
+    try {
+      const rate = await this.rates.forRole(role);
+      if (!rate) return null;
+      const per = Number(rate.amountPerPoint);
+      if (!(per > 0) || !(orderValue > 0)) return null;
+
+      const points = Math.floor(orderValue / per);
+      if (points <= 0) return { points: 0, balance: (await this.view(accountId, role)).points };
+
+      const wallet = await this.ensureForAccount(accountId, role);
+      if (!wallet) return null;
+      wallet.points += points;
+      await this.walletRepo.save(wallet);
+
+      await this.notifications
+        .createNotification({
+          userId: accountId,
+          type: NotificationType.GENERAL,
+          title: `You earned ${points} point(s)`,
+          body: `You have been gifted ${points} point(s) in your wallet for receiving order ${orderNumber ?? ''}.`,
+          titleKey: 'notifications.pointsEarned.title',
+          bodyKey: 'notifications.pointsEarned.body',
+          args: { points, order: orderNumber ?? '' },
+        })
+        .catch((e) =>
+          this.logger.warn(
+            `Points credited but the notification was not queued for ${accountId}: ${e instanceof Error ? e.message : e}`,
+          ),
+        );
+
+      return { points, balance: wallet.points };
+    } catch (e) {
+      this.logger.warn(
+        `Could not award points for ${accountId}: ${e instanceof Error ? e.message : e}`,
+      );
+      return null;
+    }
+  }
 
   /**
    * Make sure an eligible account has a wallet, creating an empty one if not.

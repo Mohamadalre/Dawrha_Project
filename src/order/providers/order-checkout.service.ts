@@ -35,6 +35,7 @@ import { OrderSpendingCapService } from './order-spending-cap.service';
 import {
   OrderAllocationService,
   RequestedLine,
+  describeAllocation,
 } from './order-allocation.service';
 
 const LOG_META = { context: 'ORDER_CHECKOUT', channel: 'orders' } as const;
@@ -44,6 +45,32 @@ export interface CheckoutInput {
   role: Role;
   profileId: string;
   provinceId: string | null;
+  fulfilmentMode?: FulfilmentMode;
+  acceptPartialFulfilment?: boolean;
+}
+
+/** One requested material — from a cart line or an admin-typed line alike. */
+export interface CheckoutItemInput {
+  productId: string;
+  quantity: number | string;
+  conditionCode?: string | null;
+  /** Absent on an admin-built line; the product's own unit is used instead. */
+  unitType?: string;
+}
+
+/**
+ * An order the ADMIN places ON BEHALF OF a buyer — the recovery path for a
+ * factory or free facility whose own order fell short. The items are named
+ * explicitly (not read from the buyer's cart), priced at the buyer's tier, and
+ * allocated exactly like a self-placed order.
+ */
+export interface AdminCheckoutInput {
+  adminId: string;
+  buyerAccountId: string;
+  buyerRole: Role;
+  profileId: string;
+  provinceId: string | null;
+  items: CheckoutItemInput[];
   fulfilmentMode?: FulfilmentMode;
   acceptPartialFulfilment?: boolean;
 }
@@ -161,7 +188,72 @@ export class OrderCheckoutService {
       currency: check.currency,
       fulfilment_mode: mode,
       delivery_available: canUseDelivery(input.role),
-      allocation: outcome,
+      // The raw code (for the client's logic) AND a sentence the buyer can read.
+      allocation: { ...outcome, message: describeAllocation(outcome) },
+    };
+  }
+
+  /**
+   * The ADMIN places an order ON BEHALF OF a buyer — the recovery path for a
+   * factory or free facility whose own order fell short (a shortage, say).
+   *
+   * The items are named explicitly rather than read from the buyer's cart, but
+   * from there on it is an ordinary order: priced at the buyer's tier, frozen,
+   * and handed to the same allocator. The per-order minimum and the spending cap
+   * are NOT enforced here — this IS the override for a buyer the normal rules
+   * could not serve, so holding it to those same rules would defeat the purpose.
+   */
+  async adminCheckout(input: AdminCheckoutInput) {
+    if (!input.provinceId) {
+      throw new BadRequestException(
+        'The buyer has no location set — warehouses are matched to their governorate',
+      );
+    }
+    if (!input.items.length) {
+      throw new BadRequestException('Add at least one item to the order');
+    }
+
+    const lines = await this.toRequestedLines(input.items, input.buyerRole);
+    const goodsTotal = round3(
+      lines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0),
+    );
+    // Only for the currency the buyer's tier is billed in — never to block.
+    const check = await this.minimums.check(input.buyerRole, goodsTotal);
+
+    const mode = resolveFulfilmentMode(input.buyerRole, input.fulfilmentMode);
+    const order = await this.orderRepo.save(
+      this.orderRepo.create({
+        orderNumber: await this.nextOrderNumber(),
+        buyerAccountId: input.buyerAccountId,
+        buyerRole: input.buyerRole,
+        buyerProfileId: input.profileId,
+        provinceId: input.provinceId,
+        status: OrderStatus.PENDING_ALLOCATION,
+        fulfilmentMode: mode,
+        acceptPartialFulfilment: input.acceptPartialFulfilment ?? false,
+        goodsTotal: String(goodsTotal),
+        grandTotal: String(goodsTotal),
+        currency: check.currency,
+      }),
+    );
+
+    const outcome = await this.allocation.allocate(order.id, lines);
+    winstonLogger.info(
+      `Order ${order.orderNumber} placed by ADMIN ${input.adminId} for ${input.buyerRole} ${input.buyerAccountId} — ${outcome.result}`,
+      LOG_META,
+    );
+
+    return {
+      message: 'Order placed',
+      order_id: order.id,
+      order_number: order.orderNumber,
+      status: (await this.orderRepo.findOne({ where: { id: order.id } }))!.status,
+      goods_total: goodsTotal,
+      currency: check.currency,
+      fulfilment_mode: mode,
+      delivery_available: canUseDelivery(input.buyerRole),
+      created_by_admin: input.adminId,
+      allocation: { ...outcome, message: describeAllocation(outcome) },
     };
   }
 
@@ -232,6 +324,123 @@ export class OrderCheckoutService {
   }
 
   /**
+   * The buyer's answer when the order could not be fully covered.
+   *
+   * `accept` → go ahead with whatever is available: allocation re-plans against
+   * CURRENT stock (which may have moved while they decided) and proceeds on the
+   * covered part, so the buyer gets the freshest possible fill rather than the
+   * snapshot they were shown. `!accept` → cancel; nothing was reserved while it
+   * waited, so there is nothing to release.
+   *
+   * Locked and status-guarded: a buyer double-tapping, or racing their own
+   * cancel, must resolve to exactly one outcome. The order is moved out of
+   * NEEDS_CUSTOMER_DECISION inside the lock, so a second call finds it already
+   * decided and is refused.
+   */
+  async respondToPartial(accountId: string, orderId: string, accept: boolean) {
+    const snapshot = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .getRepository(Order)
+        .createQueryBuilder('o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+
+      if (!order || order.buyerAccountId !== accountId) {
+        throw new NotFoundException('Order not found');
+      }
+      if (order.status !== OrderStatus.NEEDS_CUSTOMER_DECISION) {
+        throw new ConflictException(
+          `This order is not awaiting your decision — it is already ${order.status}`,
+        );
+      }
+
+      if (!accept) {
+        order.status = OrderStatus.CANCELLED;
+        order.cancelledAt = new Date();
+        order.cancelReason = 'Buyer declined the available quantity';
+        order.requestedLines = null;
+        await manager.getRepository(Order).save(order);
+        return null;
+      }
+
+      const lines = order.requestedLines ?? [];
+      if (!lines.length) {
+        // Should never happen — the snapshot is written whenever this status is
+        // set — but proceeding with nothing would silently do nothing.
+        throw new ConflictException(
+          'This order can no longer be processed — please place it again',
+        );
+      }
+
+      // Hand it back to allocation, which will move it on to AWAITING_APPROVAL.
+      order.status = OrderStatus.PENDING_ALLOCATION;
+      await manager.getRepository(Order).save(order);
+      return lines as RequestedLine[];
+    });
+
+    if (snapshot === null) {
+      winstonLogger.info(
+        `Order ${orderId} cancelled by the buyer after a partial-fulfilment offer`,
+        LOG_META,
+      );
+      return { message: 'Order cancelled', cancelled: true };
+    }
+
+    // Outside the lock: allocation reads stock and pushes to Odoo, and holding a
+    // row lock across those calls would block other buyers.
+    const outcome = await this.allocation.allocate(orderId, snapshot, {
+      forcePartial: true,
+    });
+    return {
+      message: 'Proceeding with the available quantity',
+      order_id: orderId,
+      allocation: { ...outcome, message: describeAllocation(outcome) },
+    };
+  }
+
+  /**
+   * The buyer's acknowledgement that their split order was refused.
+   *
+   * A split is decided by the administrator in one verdict for every part, so a
+   * refusal leaves nothing to re-try — the order simply cannot be filled. The
+   * buyer is shown that and confirms here, which closes the order. The stock was
+   * already released the moment Odoo rejected each part, so there is nothing to
+   * unwind; this only records the buyer's acknowledgement and the final state.
+   */
+  async confirmRejection(accountId: string, orderId: string) {
+    await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .getRepository(Order)
+        .createQueryBuilder('o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+
+      if (!order || order.buyerAccountId !== accountId) {
+        throw new NotFoundException('Order not found');
+      }
+      if (order.status !== OrderStatus.REJECTED_AWAITING_BUYER) {
+        throw new ConflictException(
+          `This order is not awaiting a rejection confirmation — it is ${order.status}`,
+        );
+      }
+
+      order.status = OrderStatus.CANCELLED;
+      order.cancelledAt = new Date();
+      order.cancelReason =
+        'Order could not be fulfilled — declined by the administrator and confirmed by the buyer';
+      await manager.getRepository(Order).save(order);
+    });
+
+    winstonLogger.info(
+      `Order ${orderId} closed after the buyer confirmed a split rejection`,
+      LOG_META,
+    );
+    return { message: 'Order closed', cancelled: true };
+  }
+
+  /**
    * Cart items, with everything Odoo and the planner need, RE-PRICED as of now.
    *
    * The basket is not a contract; the order is. A price can be withdrawn while a
@@ -241,7 +450,7 @@ export class OrderCheckoutService {
    * refusal naming the material.
    */
   private async toRequestedLines(
-    items: CartItem[],
+    items: CheckoutItemInput[],
     role: Role,
   ): Promise<RequestedLine[]> {
     const tier = tierForRole(role);
@@ -291,7 +500,9 @@ export class OrderCheckoutService {
         productName: product.name,
         conditionCode: item.conditionCode ?? null,
         quantity: Number(item.quantity),
-        unitType: item.unitType,
+        // The cart carries the unit it was added with; an admin-built line omits
+        // it, so fall back to the product's own unit — the source of truth.
+        unitType: item.unitType ?? product.unitType,
         unitPrice,
       });
     }

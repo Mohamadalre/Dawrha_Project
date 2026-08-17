@@ -57,6 +57,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
 
 
-    return { id: account.id, role: payload.role, email: account.email, accountStatus: account.accountStatus ,jti:payload.jti};
+    // `language` is read FRESH from the account (not the token) so a language
+    // change in settings takes effect on the very next request, no re-login.
+    return { id: account.id, role: payload.role, email: account.email, accountStatus: account.accountStatus, language: account.language, jti: payload.jti };
   }
 }

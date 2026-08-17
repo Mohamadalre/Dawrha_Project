@@ -9,6 +9,8 @@ import { TruckAssignmentEntity } from './entities/truck-assignment.entity';
 import { HandoverStatus } from './enums/handover-status.enum';
 import { TruckStatus } from './enums/truck-status.enum';
 import { resolveShiftWindow } from './shift-window.util';
+import { TruckTrackingGateway } from './tracking/truck-tracking.gateway';
+import { StopReason } from './tracking/enums/stop-reason.enum';
 import {
   DriverHasNoTruckException,
   DriverInactiveException,
@@ -22,6 +24,29 @@ import {
   TruckDisabledException,
   TruckHeldByOtherException,
 } from './exceptions/truck.exceptions';
+
+/** GPS the app captures when the driver presses pick up / hand over. */
+export interface HandoverCoords {
+  lat?: number;
+  lng?: number;
+}
+
+/**
+ * A pair is stored only when BOTH halves are present — a lone latitude is not a
+ * location. Decimals as strings, matching the entity's `decimal` columns.
+ */
+function normalizeCoords(coords?: HandoverCoords): { lat: string | null; lng: string | null } {
+  if (coords?.lat != null && coords?.lng != null) {
+    return { lat: String(coords.lat), lng: String(coords.lng) };
+  }
+  return { lat: null, lng: null };
+}
+
+/** Shapes a stored decimal pair back into a response object, or null. */
+function coordsOf(lat?: string | null, lng?: string | null): { lat: number; lng: number } | null {
+  if (lat == null || lng == null) return null;
+  return { lat: Number(lat), lng: Number(lng) };
+}
 
 /**
  * Driver truck-handover (pickup / dropoff). Two timestamped buttons, guarded by
@@ -45,6 +70,9 @@ export class HandoverService {
     @InjectRepository(TruckAssignmentEntity)
     private readonly assignmentRepo: Repository<TruckAssignmentEntity>,
     private readonly odooSync: OdooSyncService,
+    // Live tracking turns ON at pickup and OFF at dropoff — the handover is the
+    // single source of truth for whether a truck is "in operation".
+    private readonly tracking: TruckTrackingGateway,
   ) {}
 
   private async getDriver(accountId: string): Promise<CollectorProfile> {
@@ -67,7 +95,9 @@ export class HandoverService {
       shift_id: h.shiftId,
       work_date: h.workDate,
       picked_up_at: h.pickedUpAt ?? null,
+      pickup_location: coordsOf(h.pickupLat, h.pickupLng),
       dropped_off_at: h.droppedOffAt ?? null,
+      dropoff_location: coordsOf(h.dropoffLat, h.dropoffLng),
       dropoff_reason: h.dropoffReason ?? null,
       late_dropoff_minutes: h.lateDropoffMinutes ?? null,
     };
@@ -100,7 +130,7 @@ export class HandoverService {
   // ---------------------------------------------------------------------------
   // Pickup
   // ---------------------------------------------------------------------------
-  async pickup(accountId: string) {
+  async pickup(accountId: string, coords?: HandoverCoords) {
     const driver = await this.getDriver(accountId);
 
     const assignment = await this.assignmentRepo.findOne({
@@ -142,9 +172,12 @@ export class HandoverService {
       // Already completed a session for this shift/day.
       throw new TruckAlreadyHeldException();
     }
+    const pickup = normalizeCoords(coords);
     if (h) {
       h.status = HandoverStatus.OPEN;
       h.pickedUpAt = now;
+      h.pickupLat = pickup.lat;
+      h.pickupLng = pickup.lng;
       h.truckId = truck.id;
       h.warehouseId = truck.warehouseId ?? driver.warehouseId ?? null;
     } else {
@@ -155,11 +188,26 @@ export class HandoverService {
         warehouseId: truck.warehouseId ?? driver.warehouseId ?? null,
         workDate: win.workDate,
         pickedUpAt: now,
+        pickupLat: pickup.lat,
+        pickupLng: pickup.lng,
         status: HandoverStatus.OPEN,
       });
     }
     await this.handoverRepo.save(h);
     await this.odooSync.enqueuePushHandoverPickup({ handoverId: h.id });
+
+    // Tracking becomes live now: the admin map may show this truck the moment
+    // its session opens, even before the first coordinate arrives. Best-effort —
+    // the handover is already saved, so a socket hiccup must not fail the pickup.
+    try {
+      this.tracking.announceSessionStarted({
+        truckId: truck.id,
+        driverId: driver.id,
+        plateNumber: truck.plateNumber ?? null,
+      });
+    } catch {
+      /* the truck is picked up regardless; its first ping will surface it */
+    }
 
     return {
       message: 'Truck picked up successfully',
@@ -171,7 +219,7 @@ export class HandoverService {
   // ---------------------------------------------------------------------------
   // Dropoff
   // ---------------------------------------------------------------------------
-  async dropoff(accountId: string, reason: string) {
+  async dropoff(accountId: string, reason: string, coords?: HandoverCoords) {
     const driver = await this.getDriver(accountId);
 
     const note = (reason || '').trim();
@@ -196,12 +244,25 @@ export class HandoverService {
     const overdueMs = now.getTime() - (win.end.getTime() + win.toleranceMs);
     const lateMinutes = overdueMs > 0 ? Math.round(overdueMs / 60000) : 0;
 
+    const dropoff = normalizeCoords(coords);
     h.droppedOffAt = now;
+    h.dropoffLat = dropoff.lat;
+    h.dropoffLng = dropoff.lng;
     h.dropoffReason = note;
     h.lateDropoffMinutes = lateMinutes;
     h.status = HandoverStatus.CLOSED;
     await this.handoverRepo.save(h);
     await this.odooSync.enqueuePushHandoverDropoff({ handoverId: h.id });
+
+    // The session is over: stop tracking this truck, persist its last position
+    // as a stop, and tell subscribers it is no longer live. Best-effort — the
+    // handover is already CLOSED, and the inactivity cron finalises the stop as a
+    // backstop, so a Redis blip here must not fail the truck handback.
+    try {
+      await this.tracking.endSession(h.truckId, StopReason.HANDOVER_DROPOFF);
+    } catch {
+      /* the truck is handed back regardless; the inactivity cron retires it */
+    }
 
     return {
       message: 'Truck handed back successfully',

@@ -5,4 +5,6 @@ export enum StopReason {
   DRIVER_DISCONNECT = 'DRIVER_DISCONNECT',
   /** No coordinates received within the inactivity window (cron). */
   INACTIVITY = 'INACTIVITY',
+  /** The driver handed the truck back (dropoff) — the session ended cleanly. */
+  HANDOVER_DROPOFF = 'HANDOVER_DROPOFF',
 }

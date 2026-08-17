@@ -10,8 +10,6 @@ import {
 } from 'typeorm';
 import { ExternalPartnerProfile } from '../profile/external-partner-profile.entity';
 import { ExternalPartnerWasteCategory } from '@src/waste-management/entities/external-partner-waste-category.entity';
-import { CollectionFrequeny } from '@src/user/enums/collectionFrequeny.enum';
-import { DeliverySchedule } from '@src/user/enums/delivery-schedule.enum';
 
 @Entity('external_partner_materials')
 export class ExternalPartnerMaterial {
@@ -27,24 +25,10 @@ export class ExternalPartnerMaterial {
   })
   wasteTypes: ExternalPartnerWasteCategory[];
 
-  @Column()
+  // Typical order size — a positive number (stored decimal; read back as a
+  // string). A free facility gives only this and its categories.
+  @Column('decimal', { precision: 14, scale: 3 })
   averageOrderQuantity: string;
-
-  @Column({
-    type: 'enum',
-    enum: CollectionFrequeny,
-  })
-  estimationOrderSchedule: CollectionFrequeny;
-
-  @Column({ default: false })
-  deliveryPreference: boolean;
-
-  @Column({
-    type: 'enum',
-    enum: DeliverySchedule,
-    nullable: true,
-  })
-  perferredDeliverySchedule?: DeliverySchedule;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -46,9 +46,8 @@ export class UpdateTierPriceDto {
   @MaxLength(30)
   condition?: string;
 
-  @IsOptional()
-  @IsString()
-  currency?: string;
+  // Currency is not accepted per price: it comes from the central platform
+  // setting (PATCH /v1/admin/platform-settings), never per row.
 
   @IsOptional()
   @IsDateString()

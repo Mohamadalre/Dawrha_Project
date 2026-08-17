@@ -20,6 +20,7 @@ describe('HandoverService', () => {
   let driverRepo: any;
   let assignmentRepo: any;
   let odooSync: any;
+  let tracking: any;
 
   // Pin the clock to a fixed noon so shift-window math is deterministic
   // (anchoring HH:MM to "today" is otherwise ambiguous near midnight).
@@ -55,7 +56,11 @@ describe('HandoverService', () => {
       enqueuePushHandoverPickup: jest.fn().mockResolvedValue(undefined),
       enqueuePushHandoverDropoff: jest.fn().mockResolvedValue(undefined),
     };
-    service = new HandoverService(handoverRepo, driverRepo, assignmentRepo, odooSync);
+    tracking = {
+      announceSessionStarted: jest.fn(),
+      endSession: jest.fn().mockResolvedValue(undefined),
+    };
+    service = new HandoverService(handoverRepo, driverRepo, assignmentRepo, odooSync, tracking);
   });
 
   describe('pickup', () => {
@@ -82,11 +87,34 @@ describe('HandoverService', () => {
         shift: activeShift,
       });
       handoverRepo.findOne.mockResolvedValue(null); // no existing / no held
-      const res = await service.pickup('acc1');
+      const res = await service.pickup('acc1', { lat: 31.9, lng: 35.9 });
       expect(res.message).toMatch(/picked up/i);
       expect(odooSync.enqueuePushHandoverPickup).toHaveBeenCalled();
+      // The pickup GPS is persisted on the session row (as decimal strings).
       expect(handoverRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ status: HandoverStatus.OPEN, truckId: 't1' }),
+        expect.objectContaining({
+          status: HandoverStatus.OPEN,
+          truckId: 't1',
+          pickupLat: '31.9',
+          pickupLng: '35.9',
+        }),
+      );
+      // Tracking goes live the moment the truck is picked up.
+      expect(tracking.announceSessionStarted).toHaveBeenCalledWith(
+        expect.objectContaining({ truckId: 't1' }),
+      );
+    });
+
+    it('stores no pickup location when the app sends only half a coordinate', async () => {
+      assignmentRepo.findOne.mockResolvedValue({
+        truck: { id: 't1', status: TruckStatus.ACTIVE, warehouseId: 'w1' },
+        shift: activeShift,
+      });
+      handoverRepo.findOne.mockResolvedValue(null);
+      // Only a latitude — a lone half is not a location, so neither is stored.
+      await service.pickup('acc1', { lat: 31.9 });
+      expect(handoverRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ pickupLat: null, pickupLng: null }),
       );
     });
   });
@@ -113,13 +141,20 @@ describe('HandoverService', () => {
     it('allows dropoff any time when the truck is out of service', async () => {
       handoverRepo.findOne.mockResolvedValue({
         id: 'h1',
+        truckId: 't1',
         status: HandoverStatus.OPEN,
         truck: { status: TruckStatus.DISABLED },
         shift: activeShift,
       });
-      const res = await service.dropoff('acc1', 'engine died');
+      const res = await service.dropoff('acc1', 'engine died', { lat: 32.1, lng: 36.2 });
       expect(res.message).toMatch(/handed back/i);
       expect(odooSync.enqueuePushHandoverDropoff).toHaveBeenCalled();
+      // The dropoff GPS is persisted on the session row.
+      expect(handoverRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ dropoffLat: '32.1', dropoffLng: '36.2' }),
+      );
+      // Handing the truck back stops its live tracking session.
+      expect(tracking.endSession).toHaveBeenCalledWith('t1', 'HANDOVER_DROPOFF');
     });
   });
 });

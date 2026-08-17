@@ -1,6 +1,6 @@
 import { Controller, UseGuards, Post, Get, Patch, Param, ParseUUIDPipe, Body, Req, UseInterceptors, BadRequestException, UploadedFile, ForbiddenException } from '@nestjs/common';
 import { UpdateLocationDto } from '../dto/update-location.dto';
- import { UpdateMaterialsOrderDto } from '../dto/update-materials.dto';
+ import { UpdateMaterialsFactoryDto } from '../dto/update-materials.dto';
 import { UpdateInformationFactoryDto } from '../dto/update-information.dto';
 import { OnboardingSubmissionService } from '../services/onboarding-submission.service';
 import { RolesGuard } from '@src/auth/guards/roles.guard';
@@ -75,7 +75,7 @@ export class FactoryOnboardingController {
   @Patch('materials')
   @Roles(Role.FACTORY)
   @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
-  async updateMaterialsFactory(@Body() dto: UpdateMaterialsOrderDto, @Req() req) {
+  async updateMaterialsFactory(@Body() dto: UpdateMaterialsFactoryDto, @Req() req) {
     const result = await this.submissionService.updateMaterials(
       req.user.id, Role.FACTORY, dto);
     return { message: 'Materials updated successfully', result };

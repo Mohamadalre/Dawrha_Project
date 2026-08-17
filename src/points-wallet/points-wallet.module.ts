@@ -1,18 +1,31 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { NotificationModule } from '@src/notification/notification.module';
+import { PlatformSettingsModule } from '@src/platform-settings/platform-settings.module';
 import { PointsWallet } from './entities/points-wallet.entity';
+import { PointsRate } from './entities/points-rate.entity';
 import { PointsWalletService } from './points-wallet.service';
+import { PointsRateService } from './points-rate.service';
 import { PointsWalletController } from './points-wallet.controller';
+import { PointsRateController } from './points-rate.controller';
 
 /**
- * Points wallets. Exports the service so the activation paths (admin approval,
- * OTP verification, Google sign-up) can create a wallet the moment an account
- * becomes active.
+ * Points wallets and the money-per-point rate that feeds them.
+ *
+ * Exports the wallet service so the activation paths (admin approval, OTP
+ * verification, Google sign-up) can create a wallet the moment an account
+ * becomes active, and so the order flow can reward a completed order.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([PointsWallet])],
-  controllers: [PointsWalletController],
-  providers: [PointsWalletService],
-  exports: [PointsWalletService],
+  imports: [
+    TypeOrmModule.forFeature([PointsWallet, PointsRate]),
+    // Awarding points tells the buyer they were gifted them.
+    NotificationModule,
+    // The rate's currency comes from the central platform setting.
+    PlatformSettingsModule,
+  ],
+  controllers: [PointsWalletController, PointsRateController],
+  providers: [PointsWalletService, PointsRateService],
+  exports: [PointsWalletService, PointsRateService],
 })
 export class PointsWalletModule {}

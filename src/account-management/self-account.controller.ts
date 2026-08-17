@@ -6,15 +6,15 @@ import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { AccountManagementService } from './account-management.service';
 
 /**
- * Self-service reads for a FACTORY / free facility about its OWN account, once
- * ACTIVE.
+ * Self-service reads for a FACTORY, INSTITUTION, free facility or DRIVER about
+ * its OWN account, once ACTIVE.
  *
  * These mirror the admin review routes (`account-details` / `location` /
  * documents) exactly — same builders, same shape — but resolve the profile
  * from the caller's token instead of taking a profile id, and are gated to
- * ACTIVE accounts: a buyer is looking at their own finished application, not
- * one still under review. The role check (factories and free facilities only)
- * lives in the service, next to the resolution it guards.
+ * ACTIVE accounts: the caller is looking at their own finished application, not
+ * one still under review. The role check (the four self-service roles) lives in
+ * the service, next to the resolution it guards.
  */
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'account', version: '1' })

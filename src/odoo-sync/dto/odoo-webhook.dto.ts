@@ -251,6 +251,17 @@ export class OdooOrderEventDto {
   @IsInt()
   priority?: number;
 
+  /**
+   * The Odoo warehouse this part now sits in. Acted on for a `reassigned` event
+   * — the admin re-routed a split part — to re-point the backend's part and
+   * re-price its delivery leg.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  warehouse_odoo_id?: number;
+
   @IsOptional()
   @IsString()
   @MaxLength(128)

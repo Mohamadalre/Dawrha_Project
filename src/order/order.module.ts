@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BullModule } from '@nestjs/bullmq';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 import { WarehouseModule } from '@src/warehouse/warehouse.module';
 import { OdooSyncModule } from '@src/odoo-sync/odoo-sync.module';
+import { OdooModule } from '@src/odoo/odoo.module';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { Order } from './entities/order.entity';
@@ -18,7 +20,11 @@ import { OrderComplaint } from './entities/order-complaint.entity';
 import { DeliveryTrip } from './entities/delivery-trip.entity';
 import { DeliveryTripStop } from './entities/delivery-trip-stop.entity';
 import { DeliveryTripService } from './providers/delivery-trip.service';
+import { DeliveryDispatchService } from './providers/delivery-dispatch.service';
 import { DeliveryTripController } from './delivery-trip.controller';
+import { DeliveryWebhookController } from './delivery-webhook.controller';
+import { AdminComplaintService } from './providers/admin-complaint.service';
+import { AdminComplaintController } from './admin-complaint.controller';
 import { Cart } from '@src/waste-management/entities/cart.entity';
 import { CartItem } from '@src/waste-management/entities/cart-item.entity';
 import { Product } from '@src/waste-management/entities/product.entity';
@@ -35,9 +41,13 @@ import { DistanceRefreshService } from './providers/distance-refresh.service';
 import { OrderCheckoutService } from './providers/order-checkout.service';
 import { OrderViewService } from './providers/order-view.service';
 import { OrderController } from './order.controller';
+import { AdminOrderController } from './admin-order.controller';
 import { OrderConstraintsController } from './order-constraints.controller';
+import { OrderTasksProcessor } from './order-tasks.processor';
+import { ORDER_TASKS_QUEUE } from './order-tasks.constants';
 import { PermissionsModule } from '@src/permission/permissions.module';
 import { WasteCommonModule } from '@src/waste-management/common/waste-common.module';
+import { PointsWalletModule } from '@src/points-wallet/points-wallet.module';
 
 /**
  * Ordering for factories and free facilities.
@@ -76,14 +86,23 @@ import { WasteCommonModule } from '@src/waste-management/common/waste-common.mod
       FactoryProfile,
       ExternalPartnerProfile,
     ]),
+    // A consolidation is started off an Odoo part event, but planned by this
+    // module's own service — so the Odoo-sync module enqueues onto this queue
+    // and this module's processor consumes it, with no dependency between them.
+    BullModule.registerQueue({ name: ORDER_TASKS_QUEUE }),
     // Delivery is priced from the mirror of the tariffs Odoo's admin authors.
     WarehouseModule,
     // Parts are pushed to Odoo through the queue, never called inline.
     OdooSyncModule,
+    // Reading a delivery truck's driver during dispatch is a live RPC lookup.
+    OdooModule,
     PermissionsModule,
     // Supplies SellabilityService: a line may not be ordered without a live
     // price for the buyer's tier.
     WasteCommonModule,
+    // Confirming receipt rewards the buyer with points at the admin's per-role
+    // rate.
+    PointsWalletModule,
   ],
   providers: [
     OrderStateService,
@@ -96,8 +115,18 @@ import { WasteCommonModule } from '@src/waste-management/common/waste-common.mod
     OrderCheckoutService,
     OrderViewService,
     DeliveryTripService,
+    DeliveryDispatchService,
+    AdminComplaintService,
+    OrderTasksProcessor,
   ],
-  controllers: [OrderController, OrderConstraintsController, DeliveryTripController],
+  controllers: [
+    OrderController,
+    AdminOrderController,
+    OrderConstraintsController,
+    DeliveryTripController,
+    DeliveryWebhookController,
+    AdminComplaintController,
+  ],
   exports: [
     OrderStateService,
     OrderMinimumService,

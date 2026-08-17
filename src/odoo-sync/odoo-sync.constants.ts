@@ -1,3 +1,5 @@
+import { DeliveryTripPushPayload } from '@src/odoo/odoo.service';
+
 export const ODOO_SYNC_QUEUE = 'waste-odoo-sync';
 
 export const ODOO_JOBS = {
@@ -20,6 +22,12 @@ export const ODOO_JOBS = {
   PUSH_ORDER_PART: 'push-order-part-to-odoo',
   CANCEL_ORDER_PART: 'cancel-order-part-in-odoo',
   APPLY_ORDER_EVENT: 'apply-order-event-from-odoo',
+  /** Re-grade unreserved stock in Odoo (backend admin action). */
+  TRANSFER_STOCK_GRADE: 'transfer-stock-grade-in-odoo',
+  /** Push a planned delivery trip to Odoo for the driver to run. */
+  PUSH_DELIVERY_TRIP: 'push-delivery-trip-to-odoo',
+  /** Notify a warehouse's manager in Odoo of a warehouse-routed complaint. */
+  PUSH_COMPLAINT: 'push-complaint-to-odoo',
   SYNC_CONDITION: 'sync-condition-to-odoo',
   DELETE_CONDITION: 'delete-condition-from-odoo',
   SYNC_FLEET: 'sync-fleet-from-odoo',
@@ -55,6 +63,9 @@ export const ODOO_JOB_OPTIONS: Record<string, { attempts: number; backoff: numbe
   [ODOO_JOBS.PUSH_ORDER_PART]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.CANCEL_ORDER_PART]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.APPLY_ORDER_EVENT]: { attempts: 3, backoff: 5000 },
+  [ODOO_JOBS.TRANSFER_STOCK_GRADE]: { attempts: 3, backoff: 5000 },
+  [ODOO_JOBS.PUSH_DELIVERY_TRIP]: { attempts: 3, backoff: 5000 },
+  [ODOO_JOBS.PUSH_COMPLAINT]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.SYNC_CONDITION]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.DELETE_CONDITION]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.SYNC_FLEET]: { attempts: 2, backoff: 10000 },
@@ -126,6 +137,42 @@ export interface CancelOrderPartPayload {
   partId: string;
   reason?: string;
 }
+/**
+ * Re-grade a quantity of one material between two conditions in Odoo.
+ * Codes are the upper-case grade codes the backend authors; Odoo validates
+ * them against the material and moves only unreserved stock.
+ */
+export interface TransferStockGradePayload {
+  /** Local warehouse uuid — for logging and correlation. */
+  warehouseId: string;
+  warehouseOdooId: number;
+  odooProductId: number;
+  fromCondition: string;
+  toCondition: string;
+  quantity: number;
+  /** The admin who asked — carried for the failure notification. */
+  adminId: string;
+  reason?: string;
+}
+/**
+ * A delivery trip to push to Odoo. The whole pre-built payload rides on the job
+ * (the processor has no delivery repos), keyed by the backend trip id so the
+ * push is idempotent.
+ */
+export interface PushDeliveryTripPayload {
+  trip: DeliveryTripPushPayload;
+}
+/**
+ * A warehouse-routed complaint (shortage / quality), to notify the warehouse's
+ * manager in Odoo — where the deduction evidence lives.
+ */
+export interface PushComplaintPayload {
+  complaintId: string;
+  odooWarehouseId: number;
+  kind: string;
+  description: string;
+  orderNumber: string;
+}
 /** One thing a warehouse did to one part, reported back from Odoo. */
 export interface OrderEventPayload {
   partId: string;
@@ -135,6 +182,8 @@ export interface OrderEventPayload {
   outputZone?: string;
   handoverType?: string;
   rejectReason?: string;
+  /** The part's Odoo warehouse — acted on for a `reassigned` event. */
+  warehouseOdooId?: number;
 }
 export interface SyncConditionPayload {
   conditionId: string;

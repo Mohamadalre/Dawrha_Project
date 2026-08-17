@@ -1,6 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { OdooSyncProcessor } from './odoo-sync.processor';
 import { ODOO_JOBS } from './odoo-sync.constants';
+import { OrderPartStatus } from '@src/order/enums/order-part-status.enum';
+import { FulfilmentMode } from '@src/order/enums/fulfilment-mode.enum';
 import { OdooSyncStatus } from '@src/waste-management/enums/odoo-sync-status.enum';
 
 /**
@@ -26,6 +28,11 @@ describe('OdooSyncProcessor', () => {
   let shiftChangeRepo: any;
   let mediaRepo: any;
   let offerRepo: any;
+  let orderRepo: any;
+  let orderPartRepo: any;
+  let orderPartOfferRepo: any;
+  let distanceCacheRepo: any;
+  let rates: any;
 
   beforeEach(() => {
     // The compensation tests deliberately trigger failures; silence the logger.
@@ -91,9 +98,10 @@ describe('OdooSyncProcessor', () => {
     });
     const provinceRepo: any = mkRepo();
     const tariffRepo: any = mkRepo();
-    const orderRepo: any = mkRepo();
-    const orderPartRepo: any = mkRepo();
-    const distanceCacheRepo: any = mkRepo();
+    orderRepo = mkRepo();
+    orderPartRepo = mkRepo();
+    orderPartOfferRepo = mkRepo();
+    distanceCacheRepo = mkRepo();
     truckRepo = mkRepo();
     assignmentRepo = mkRepo();
     shiftRepo = mkRepo();
@@ -104,10 +112,14 @@ describe('OdooSyncProcessor', () => {
     const userDeviceRepo: any = { ...mkRepo(), update: jest.fn().mockResolvedValue({ affected: 1 }) };
     mediaRepo = { ...mkRepo(), update: jest.fn().mockResolvedValue({ affected: 1 }) };
     offerRepo = mkRepo();
+    rates = {
+      quote: jest.fn().mockResolvedValue({ cost: 0, currency: 'JOD' }),
+    };
 
     processor = new OdooSyncProcessor(
       odoo,
       notifications,
+      { add: jest.fn().mockResolvedValue(undefined) } as any, // orderTasks queue
       categoryRepo,
       productRepo,
       pricingRepo,
@@ -122,6 +134,7 @@ describe('OdooSyncProcessor', () => {
       tariffRepo,
       orderRepo,
       orderPartRepo,
+      orderPartOfferRepo,
       distanceCacheRepo,
       truckRepo,
       assignmentRepo,
@@ -132,6 +145,7 @@ describe('OdooSyncProcessor', () => {
       handoverRepo,
       userDeviceRepo,
       mediaRepo,
+      rates,
     );
   });
 
@@ -321,6 +335,84 @@ describe('OdooSyncProcessor', () => {
 
       await expect(processor.process(syncJob)).resolves.not.toThrow();
       expect(odoo.fetchWarehouseInventory).toHaveBeenCalledWith(55);
+    });
+  });
+
+  describe('APPLY_ORDER_EVENT — admin reassigned a split part', () => {
+    const reassignJob = (warehouseOdooId = 77): any => ({
+      name: ODOO_JOBS.APPLY_ORDER_EVENT,
+      data: {
+        partId: 'part-1',
+        odooOrderId: 500,
+        event: 'reassigned',
+        warehouseOdooId,
+      },
+      attemptsMade: 0,
+      opts: { attempts: 3 },
+    });
+
+    const offeredPart = () => ({
+      id: 'part-1',
+      orderId: 'ord-1',
+      warehouseId: 'wh-old',
+      status: OrderPartStatus.OFFERED,
+      distanceKm: '10',
+      deliveryCost: '5',
+      order: {
+        id: 'ord-1',
+        orderNumber: 'ORD-1',
+        buyerProfileId: 'buyer-1',
+        provinceId: 'prov-1',
+        fulfilmentMode: FulfilmentMode.DELIVERY,
+        goodsTotal: '100',
+      },
+    });
+
+    beforeEach(() => {
+      orderPartRepo.findOne.mockResolvedValue(offeredPart());
+      warehouseRepo.findOne.mockResolvedValue({ id: 'wh-new', odooWarehouseId: 77 });
+      distanceCacheRepo.findOne.mockResolvedValue({ distanceKm: '42' });
+      orderRepo.findOne.mockResolvedValue({
+        id: 'ord-1', orderNumber: 'ORD-1', goodsTotal: '100',
+      });
+      orderPartRepo.find.mockResolvedValue([
+        { status: OrderPartStatus.OFFERED, deliveryCost: '8' },
+      ]);
+      rates.quote.mockResolvedValue({ cost: 8, currency: 'JOD' });
+    });
+
+    it('re-points the part, re-prices the leg from the new distance, and refreshes totals', async () => {
+      await processor.process(reassignJob());
+
+      const savedPart = orderPartRepo.save.mock.calls[0][0];
+      expect(savedPart.warehouseId).toBe('wh-new');
+      expect(savedPart.distanceKm).toBe('42');
+      expect(rates.quote).toHaveBeenCalledWith(42);
+      expect(savedPart.deliveryCost).toBe('8');
+
+      const savedOrder = orderRepo.save.mock.calls[0][0];
+      expect(savedOrder.deliveryTotal).toBe('8');
+      expect(savedOrder.grandTotal).toBe('108');
+    });
+
+    it('ignores a reassignment of a part that has already moved on', async () => {
+      orderPartRepo.findOne.mockResolvedValue({
+        ...offeredPart(),
+        status: OrderPartStatus.PROCESSING,
+      });
+
+      await processor.process(reassignJob());
+
+      expect(orderPartRepo.save).not.toHaveBeenCalled();
+      expect(rates.quote).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when the new Odoo warehouse has no mirror here', async () => {
+      warehouseRepo.findOne.mockResolvedValue(null);
+
+      await processor.process(reassignJob(999));
+
+      expect(orderPartRepo.save).not.toHaveBeenCalled();
     });
   });
 });

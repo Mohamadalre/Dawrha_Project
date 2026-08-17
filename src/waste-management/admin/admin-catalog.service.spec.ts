@@ -198,6 +198,62 @@ describe('AdminCatalogService', () => {
     });
   });
 
+  describe('per-unit weight (kg)', () => {
+    const PIECE = { id: 'u-pc', code: 'PIECE', nameEn: 'Piece', nameAr: 'قطعة' };
+    const asPiece = () =>
+      units.resolveActiveById.mockResolvedValue({ ...PIECE });
+
+    it('stores no weight for a kilogram material (1:1)', async () => {
+      categoryRepo.findOne.mockResolvedValue({ id: 'c1' });
+      await service.createProduct('a1', {
+        name: 'X', category_id: 'c1', unit_id: 'u-kg', unit_weight_kg: 5,
+      } as any, 'https://img/x.jpg');
+      // KG ignores any figure sent — a kilogram already weighs a kilogram.
+      expect(productRepo.create.mock.calls[0][0].unitWeightKg).toBeNull();
+    });
+
+    it('refuses a non-kilogram material with no weight', async () => {
+      asPiece();
+      categoryRepo.findOne.mockResolvedValue({ id: 'c1' });
+      await expect(
+        service.createProduct('a1', {
+          name: 'X', category_id: 'c1', unit_id: 'u-pc',
+        } as any, 'https://img/x.jpg'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('stores the weight for a non-kilogram material', async () => {
+      asPiece();
+      categoryRepo.findOne.mockResolvedValue({ id: 'c1' });
+      await service.createProduct('a1', {
+        name: 'X', category_id: 'c1', unit_id: 'u-pc', unit_weight_kg: 12.5,
+      } as any, 'https://img/x.jpg');
+      expect(productRepo.create.mock.calls[0][0].unitWeightKg).toBe('12.5');
+    });
+
+    it('clears the weight when a material is switched to kilograms', async () => {
+      // resolveActiveById defaults to KG in this suite.
+      productRepo.findOne.mockResolvedValue({
+        id: 'p1', name: 'X', unitType: 'PIECE', unitWeightKg: '12.5',
+      });
+      await service.updateProduct('a1', 'p1', { unit_id: 'u-kg' } as any);
+      expect(productRepo.save.mock.calls[0][0].unitWeightKg).toBeNull();
+    });
+
+    it('keeps the existing weight of a non-kg material when none is resent', async () => {
+      asPiece();
+      // Load returns the product; the name-clash lookup (by name) returns null.
+      productRepo.findOne.mockImplementation(async ({ where }: any) =>
+        where?.name
+          ? null
+          : { id: 'p1', name: 'X', unitType: 'PIECE', unitWeightKg: '12.5' },
+      );
+      // Editing only the name must not wipe or demand the weight again.
+      await service.updateProduct('a1', 'p1', { name: 'Y' } as any);
+      expect(productRepo.save.mock.calls[0][0].unitWeightKg).toBe('12.5');
+    });
+  });
+
   describe('deleteProduct', () => {
     /**
      * A material still on a warehouse floor cannot be deleted.

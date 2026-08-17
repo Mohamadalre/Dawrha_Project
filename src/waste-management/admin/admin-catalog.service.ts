@@ -60,8 +60,7 @@ import {
   CreateUnitDto,
   UpdateCategoryDto,
   UpdateConditionDto,
-  UpdateOfferAmountDto,
-  UpdateOfferValidityDto,
+  UpdateOfferDto,
   OfferTimelineQueryDto,
   UpdateProductDto,
   UpdateUnitDto,
@@ -101,6 +100,12 @@ interface OfferPlanRow {
    */
   roleSpecific: boolean;
 }
+
+/**
+ * The one unit that needs no weight conversion: a kilogram IS the delivery
+ * capacity's own measure, so a material sold in it carries no per-unit weight.
+ */
+const KG_UNIT_CODE = 'KG';
 
 /**
  * Admin write-side for the catalogue. Every mutation is persisted locally with a
@@ -407,7 +412,7 @@ export class AdminCatalogService {
         role,
         tier,
         base: base ? Number(base.price) : null,
-        currency: base?.currency ?? tierRows[0]?.currency ?? 'JOD',
+        currency: base?.currency ?? tierRows[0]?.currency ?? 'SYP',
         by_condition: byCondition,
       };
     });
@@ -435,6 +440,30 @@ export class AdminCatalogService {
     return null as unknown as MeasurementUnit;
   }
 
+  /**
+   * The per-unit weight to STORE, given the material's unit and what the admin
+   * sent.
+   *
+   * A kilogram already weighs a kilogram, so a KG material stores null and any
+   * figure sent for it is ignored. Every other unit MUST carry a weight, because
+   * delivery capacity is measured in kilograms and a piece-count says nothing
+   * about load — so a non-kg material with neither a new figure nor an existing
+   * one is refused. On update, an unchanged non-kg material keeps the weight it
+   * already had when none is resent.
+   */
+  private resolveUnitWeight(
+    unitCode: string,
+    provided?: number,
+    existing?: string | null,
+  ): string | null {
+    if (unitCode === KG_UNIT_CODE) return null;
+    if (provided !== undefined) return String(provided);
+    if (existing != null) return existing;
+    throw new BadRequestException(
+      'This material is not measured in kilograms, so its weight in kilograms per unit is required — delivery capacity is measured by weight',
+    );
+  }
+
   async createProduct(adminId: string, dto: CreateProductDto, imageUrl?: string) {
     if (!imageUrl) throw new ImageRequiredException();
 
@@ -446,6 +475,9 @@ export class AdminCatalogService {
     if (exists) throw new ProductAlreadyExistsException();
 
     const unit = await this.resolveUnit(dto.unit_id, true);
+    // A non-kg material must declare its weight up front — refused here, before
+    // anything is written, rather than surfacing when a route cannot be loaded.
+    const unitWeightKg = this.resolveUnitWeight(unit.code, dto.unit_weight_kg);
 
     const product = await this.productRepo.save(
       this.productRepo.create({
@@ -459,6 +491,7 @@ export class AdminCatalogService {
         // priced in another.
         unitId: unit.id,
         unitType: unit.code,
+        unitWeightKg,
         isActive: dto.is_active ?? true,
         odooSyncStatus: OdooSyncStatus.PENDING,
       }),
@@ -502,6 +535,17 @@ export class AdminCatalogService {
       const unit = await this.resolveUnit(dto.unit_id, true);
       product.unitId = unit.id;
       product.unitType = unit.code;
+    }
+    // Re-resolve the weight whenever the unit or the weight itself is touched:
+    // switching TO kg clears it, switching AWAY from kg demands it, and a bare
+    // weight edit on a non-kg material updates it. An untouched material keeps
+    // whatever it had.
+    if (dto.unit_id !== undefined || dto.unit_weight_kg !== undefined) {
+      product.unitWeightKg = this.resolveUnitWeight(
+        product.unitType,
+        dto.unit_weight_kg,
+        product.unitWeightKg,
+      );
     }
     if (dto.is_active !== undefined) product.isActive = dto.is_active;
     product.odooSyncStatus = OdooSyncStatus.PENDING;
@@ -1218,95 +1262,72 @@ export class AdminCatalogService {
    * `valid_until: null` is honoured as "open-ended" rather than treated as
    * absent — an offer that has once had an end date must be able to lose it.
    */
-  async updateOfferValidity(adminId: string, id: string, dto: UpdateOfferValidityDto) {
-    const offer = await this.offerRepo.findOne({ where: { id } });
-    if (!offer) throw new OfferNotFoundException();
-
-    if (dto.valid_from !== undefined) offer.validFrom = new Date(dto.valid_from);
-    if (dto.valid_until !== undefined) {
-      offer.validUntil = dto.valid_until ? new Date(dto.valid_until) : undefined;
-    }
-    if (
-      offer.validUntil &&
-      new Date(offer.validUntil).getTime() <= new Date(offer.validFrom).getTime()
-    ) {
-      throw new BadRequestException('The offer must end after it starts');
-    }
-
-    const saved = await this.offerRepo.save(offer);
-    // Every reader of an offer is cached; a window change that did not clear
-    // them would leave an expired offer quoted until the cache aged out.
-    await this.afterOfferChange(
-      await this.productOfOffer(offer.productId),
-      adminId,
-      'UPDATE_OFFER_VALIDITY',
-      id,
-      { valid_from: offer.validFrom, valid_until: offer.validUntil ?? null },
-    );
-
-    return { offer: this.mapAdminOffer(saved) };
-  }
-
   /**
-   * Change an offer's price. Nothing else on it is touched.
+   * Edit an offer through ONE route: its description, its size (amount OR
+   * percentage), and its window — any subset, in a single call.
    *
-   * Placed orders are unaffected BY CONSTRUCTION, not by anything done here:
-   * the cart stores `unitPrice` on the line when it is added, so the number a
-   * buyer was quoted is already a snapshot. This edit changes what the NEXT
-   * reader is quoted — the offers list, the material listings, and any cart
-   * line created after it.
+   * Consolidates the former `/amount` and `/validity` routes. Each rule they
+   * enforced is kept:
+   *
+   *  - amount / percentage are MUTUALLY EXCLUSIVE, and the size is re-validated
+   *    through the SAME builder creation uses — an amount raised past a price
+   *    makes it NEGATIVE (paying a buyer to take the material), which is caught
+   *    here as it is on create;
+   *  - the BASIS follows what was sent: an explicit amount freezes the number, a
+   *    percentage keeps the ratio as the promise so a later price edit recomputes
+   *    the amount;
+   *  - `valid_until = null` clears the end date; the window must end after it
+   *    starts, and the size + window move together so the offer is never briefly
+   *    live at a new size on old dates.
+   *
+   * The audience and target roles are NOT editable here — that flips which way a
+   * price moves and is not part of a routine edit.
+   *
+   * Placed orders are unaffected: the cart snapshots `unitPrice` when a line is
+   * added, so an edit only changes what the NEXT reader is quoted.
    */
-  async updateOfferAmount(adminId: string, id: string, dto: UpdateOfferAmountDto) {
+  async updateOffer(adminId: string, id: string, dto: UpdateOfferDto) {
     const offer = await this.offerRepo.findOne({ where: { id } });
     if (!offer) throw new OfferNotFoundException();
+
+    const touchesSize = dto.amount != null || dto.percentage != null;
+    const touchesWindow = dto.valid_from !== undefined || dto.valid_until !== undefined;
+    const touchesDescription = dto.description !== undefined;
+    if (!touchesSize && !touchesWindow && !touchesDescription) {
+      throw new BadRequestException('Send at least one field to update');
+    }
 
     const previous = Number(offer.amount);
 
-    // Exactly one of amount / percentage — the same rule creation follows.
-    // Both would disagree the first time the price moved and nothing could then
-    // say which the administrator meant; neither leaves nothing to change.
+    // Size — amount XOR percentage, rebuilt through the create-time validator.
     if (dto.amount != null && dto.percentage != null) {
       throw new BadRequestException(
         'Give an amount OR a percentage, not both — they would disagree the first time the price changed, and nothing would say which one you meant',
       );
     }
-    if (dto.amount == null && dto.percentage == null) {
-      throw new BadRequestException('An amount or a percentage is required');
+    if (touchesSize) {
+      const spec =
+        dto.percentage != null ? { percentage: dto.percentage } : { amount: dto.amount };
+      const rebuilt = await this.buildOfferRow(
+        offer.productId,
+        offer.audience,
+        (offer.targetRoles as Role[] | null)?.length
+          ? (offer.targetRoles as Role[])
+          : [...AUDIENCE_ROLES[offer.audience]],
+        offer.conditionId ?? null,
+        offer.conditionCode ?? null,
+        spec,
+      );
+      offer.basis = rebuilt.basis;
+      offer.basisPercentage =
+        rebuilt.basisPercentage == null ? null : String(rebuilt.basisPercentage);
+      offer.amount = String(rebuilt.amount);
+      // Re-derived, never carried over: the old percentage described the old
+      // amount, and leaving it would advertise a change that no longer happens.
+      offer.discountPercentage = String(rebuilt.percentage);
     }
-    const spec =
-      dto.percentage != null ? { percentage: dto.percentage } : { amount: dto.amount };
 
-    // Re-validated through the SAME builder that created the row, so a changed
-    // size faces every check a new one does — including the one that matters
-    // most here: an amount raised past a price does not make it small, it makes
-    // it NEGATIVE, which means paying a buyer to take the material away.
-    const rebuilt = await this.buildOfferRow(
-      offer.productId,
-      offer.audience,
-      (offer.targetRoles as Role[] | null)?.length
-        ? (offer.targetRoles as Role[])
-        : [...AUDIENCE_ROLES[offer.audience]],
-      offer.conditionId ?? null,
-      offer.conditionCode ?? null,
-      spec,
-    );
-
-    // The BASIS follows what was sent, exactly as on creation. An explicit
-    // amount OVERRIDES a percentage basis — the admin has named the number they
-    // want, so the ratio is no longer the promise and must not silently
-    // reassert itself at the next price change. A percentage sets the promise
-    // to keep, so a later price move recomputes the amount from it.
-    offer.basis = rebuilt.basis;
-    offer.basisPercentage =
-      rebuilt.basisPercentage == null ? null : String(rebuilt.basisPercentage);
-    offer.amount = String(rebuilt.amount);
-    // Re-derived, never carried over: the old percentage described the old
-    // amount, and leaving it would advertise a change that no longer happens.
-    offer.discountPercentage = String(rebuilt.percentage);
-
-    // The window moves in the SAME transaction as the amount, because they are
-    // one decision. Done separately, the offer is live at the new amount on the
-    // old dates in between — long enough for a real order to be priced by it.
+    // Window.
     if (dto.valid_from !== undefined) offer.validFrom = new Date(dto.valid_from);
     if (dto.valid_until !== undefined) {
       offer.validUntil = dto.valid_until ? new Date(dto.valid_until) : undefined;
@@ -1318,11 +1339,16 @@ export class AdminCatalogService {
       throw new BadRequestException('The offer must end after it starts');
     }
 
+    // Description.
+    if (dto.description !== undefined) offer.description = dto.description;
+
     const saved = await this.offerRepo.save(offer);
+    // Every reader of an offer is cached; an edit that did not clear them would
+    // leave the old size / window / text quoted until the cache aged out.
     await this.afterOfferChange(
       await this.productOfOffer(offer.productId),
       adminId,
-      'UPDATE_OFFER_AMOUNT',
+      'UPDATE_OFFER',
       id,
       {
         previous_amount: previous,
@@ -1330,6 +1356,7 @@ export class AdminCatalogService {
         percentage: Number(offer.discountPercentage),
         valid_from: offer.validFrom,
         valid_until: offer.validUntil ?? null,
+        description: offer.description ?? null,
       },
     );
 
@@ -1643,6 +1670,9 @@ export class AdminCatalogService {
             name_ar: p.unit.nameAr,
           }
         : null,
+      // Weight of one unit in kg — for delivery capacity. ADMIN-ONLY: it appears
+      // here and in no buyer-facing mapper. Null for kg materials (1:1).
+      unit_weight_kg: p.unitWeightKg != null ? Number(p.unitWeightKg) : null,
       // Whether the material has a LIVE price for any role right now. Unpriced
       // materials still appear in this admin listing (they are the ones that
       // need pricing) — this flag is what tells them apart from priced ones.

@@ -1,7 +1,9 @@
-import { Controller, UseGuards, Post, Get, Patch, Body, Req,UseInterceptors, UploadedFile } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { UpdateLocationDto } from '../dto/update-location.dto';
- import { UpdateMaterialsOrderDto } from '../dto/update-materials.dto';
+ import { UpdateMaterialsExternalPartnerDto } from '../dto/update-materials.dto';
 import { UpdateInformationExternalPartnerDto } from '../dto/update-information.dto';
+import { ExternalPartnerMediaDto } from '../dto/media.dto';
+import { MediaService } from '@src/media/media.service';
 import { OnboardingSubmissionService } from '../services/onboarding-submission.service';
 import { RolesGuard } from '@src/auth/guards/roles.guard';
 import { Roles } from '@src/auth/decorators/roles.decorator';
@@ -30,13 +32,17 @@ export class ExternalPartnerOnboardingController {
   constructor(
     private readonly externalPartnerOnboardingService: ExternalPartnerOnboardingService,
     private readonly submissionService: OnboardingSubmissionService,
+    private readonly mediaService: MediaService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────
   // Submitted application: review + corrections (class-level
   // @AccountsStatus(PENDING_PROFILE) is overridden per handler).
-  // This role has NO documents step (see ONBOARDING_STEPS), so there is no
-  // document-replacement endpoint here.
+  //
+  // Documents are an OPTIONAL step for this role: `upload-doc` may be called at
+  // any point (or never), and the application is submitted for review without
+  // it. When a document IS uploaded it appears in the submission, can be
+  // replaced, and is reviewed by the admin exactly like any other role's.
   // ─────────────────────────────────────────────────────────────────────
 
   /** The application as submitted, in step order (info → location → materials). */
@@ -50,6 +56,50 @@ export class ExternalPartnerOnboardingController {
   async getSubmissionExternalPartner(@Req() req) {
     const result = await this.submissionService.getSubmission(req.user.id, Role.EXTERNAL_PARTNER);
     return { message: 'Application fetched successfully', result };
+  }
+
+  /**
+   * OPTIONAL document upload — a free facility may add a licence image while
+   * onboarding, but is never required to. No step gate: unlike the factory's
+   * `documents` step, this is not a stage the applicant must pass to finish, so
+   * it can be sent any time the account is still theirs to build or correct.
+   */
+  @UseGuards(ProfileOwnerGuard)
+  @Roles(Role.EXTERNAL_PARTNER)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
+  @Post('upload-doc')
+  @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
+  async uploadFileExternalPartner(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: ExternalPartnerMediaDto,
+    @Req() req,
+  ) {
+    if (!file) throw new BadRequestException('file is required');
+    const data = await this.mediaService.uploadImage(
+      file,
+      { ownerId: req.profile.id, ownerType: req.user.role, fileType: dto.fileType },
+      req.user.id,
+    );
+    return {
+      message: 'Document uploaded successfully',
+      result: { mediaDetails: { id: data.mediaId, image: data.image } },
+    };
+  }
+
+  /** Replace a still-pending document while the application is pending approval. */
+  @Patch('documents/:mediaId')
+  @Roles(Role.EXTERNAL_PARTNER)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
+  @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
+  async replaceDocumentExternalPartner(
+    @Param('mediaId', ParseUUIDPipe) mediaId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req,
+  ) {
+    if (!file) throw new BadRequestException('file is required');
+    const result = await this.submissionService.replaceDocument(
+      req.user.id, Role.EXTERNAL_PARTNER, mediaId, file);
+    return { message: 'Document replaced successfully', result };
   }
 
   /** Correct the submitted information while the application is pending approval. */
@@ -70,7 +120,7 @@ export class ExternalPartnerOnboardingController {
   @Patch('materials')
   @Roles(Role.EXTERNAL_PARTNER)
   @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
-  async updateMaterialsExternalPartner(@Body() dto: UpdateMaterialsOrderDto, @Req() req) {
+  async updateMaterialsExternalPartner(@Body() dto: UpdateMaterialsExternalPartnerDto, @Req() req) {
     const result = await this.submissionService.updateMaterials(
       req.user.id, Role.EXTERNAL_PARTNER, dto);
     return { message: 'Materials updated successfully', result };

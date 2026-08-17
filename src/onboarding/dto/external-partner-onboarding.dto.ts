@@ -1,8 +1,6 @@
 import { Transform } from "class-transformer";
 import { normalizeSyrianPhoneNumber } from "@src/common/utils/phone-normalization.provider";
-import { CollectionFrequeny } from "@src/user/enums/collectionFrequeny.enum";
-import { DeliverySchedule } from "@src/user/enums/delivery-schedule.enum";
-import { IsNotEmpty, IsString, IsOptional, Matches, IsArray, ArrayNotEmpty, IsEnum, IsBoolean, IsUUID } from "class-validator";
+import { IsNotEmpty, IsString, Matches, IsArray, ArrayNotEmpty, IsUUID, IsNumber, IsPositive } from "class-validator";
 
 export class InformationExternalPartnerDto {
     @IsNotEmpty()
@@ -42,23 +40,13 @@ export class WasteExternalPartnerDto {
     wasteCategoryId: string[];
 
 
-    @IsNotEmpty()
-    @IsString()
-    averageOrderQuantity: string;
-
-    @IsNotEmpty()
-    @IsEnum(CollectionFrequeny)
-    @IsString()
-    estimationOrderSchedule: CollectionFrequeny;
-
-    @IsNotEmpty()
-    @IsBoolean()
-    deliveryPreference: boolean;
-
-    @IsOptional()
-    @IsEnum(DeliverySchedule)
-    @IsString()
-    perferredDeliverySchedule: DeliverySchedule;
+    // A free facility gives only what it recycles and how much a typical order
+    // is — the categories above and this positive quantity. Everything else
+    // (schedule, delivery preference, delivery windows) was removed: a free
+    // facility does not schedule or arrange delivery the way a factory does.
+    @IsNumber({}, { message: 'The estimated order quantity must be a positive number' })
+    @IsPositive({ message: 'The estimated order quantity must be a positive number' })
+    averageOrderQuantity: number;
 
 
 }

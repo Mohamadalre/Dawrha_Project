@@ -61,7 +61,7 @@ export class ProductPricing {
   @Column({ type: 'decimal', precision: 12, scale: 3 })
   price: string;
 
-  @Column({ default: 'JOD' })
+  @Column({ default: 'SYP' })
   currency: string;
 
   @Column({ type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })

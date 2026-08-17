@@ -399,16 +399,26 @@ export class UserService {
    * "current" one is the most recently used device's; the request language is
    * the fallback before any device has been recorded.
    */
-  async getAppSettings(accountId: string, requestLang?: string) {
-    const device = await this.deviceRepo.findOne({
-      where: { accountId },
-      order: { lastLogin: 'DESC' },
-    });
-    const language = device?.language ?? (requestLang === 'ar' ? Language.AR : Language.EN);
+  async getAppSettings(accountId: string, _requestLang?: string) {
+    const account = await this.accountRepository.findOne({ where: { id: accountId } });
+    // The account's SAVED language is the source of truth now — it is what every
+    // response is returned in, so the settings screen must show the same value.
     return {
-      language,
+      language: account?.language ?? Language.EN,
       available_languages: [Language.EN, Language.AR],
     };
+  }
+
+  /**
+   * Change the account's language. From the next request on, every response
+   * comes back in it — the client never sends a language header again.
+   */
+  async setLanguage(accountId: string, language: Language) {
+    const account = await this.accountRepository.findOne({ where: { id: accountId } });
+    if (!account) throw new NotFoundException('Account not found');
+    account.language = language;
+    await this.accountRepository.save(account);
+    return { message: 'Language updated successfully', result: { language } };
   }
 
   /**

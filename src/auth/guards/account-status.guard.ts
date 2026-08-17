@@ -3,6 +3,7 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
@@ -40,15 +41,21 @@ import { ACCOUNTSTATUS_KEY } from '../decorators/account-status.decorator';
 export class AccountStatusGuard implements CanActivate {
   constructor(
     private reflector: Reflector,
-    private readonly jwtService?: JwtService,
-    private readonly configService?: ConfigService,
+    // Marked @Optional() to match how the guard actually behaves: `statusOf`
+    // returns undefined when any of these is absent (the request then falls
+    // through to JwtAuthGuard). Without the decorator Nest treats an optional
+    // TS param as REQUIRED and refuses to construct the guard in any injector
+    // that lacks the provider — which is exactly what broke it under @UseGuards
+    // and in tests, even though the runtime path tolerates their absence.
+    @Optional() private readonly jwtService?: JwtService,
+    @Optional() private readonly configService?: ConfigService,
     // The DataSource (not a per-feature repository): this guard is applied both
     // globally and — in a handful of controllers — via @UseGuards, so it is
     // instantiated in several module injectors. DataSource is registered
     // globally by TypeOrmModule, so it resolves in all of them; a
     // @InjectRepository(Account) would force every such module to import
     // forFeature([Account]) and break the moment one forgot.
-    private readonly dataSource?: DataSource,
+    @Optional() private readonly dataSource?: DataSource,
   ) {}
 
   /**

@@ -46,6 +46,15 @@ import { PointsWalletService } from '@src/points-wallet/points-wallet.service';
 const REVIEWABLE_ROLES = [Role.FACTORY, Role.INSTITUTIONS, Role.EXTERNAL_PARTNER];
 
 /**
+ * The roles that may read their OWN account (details / location / documents)
+ * through the self-service routes. Everyone who fills in an onboarding
+ * application has one to look back at — factories, institutions and free
+ * facilities, plus drivers, whose application lives in Odoo but whose profile,
+ * location and documents are still mirrored and shown here.
+ */
+const SELF_SERVICE_ROLES = [...REVIEWABLE_ROLES, Role.COLLECTOR];
+
+/**
  * The account statuses in which a reviewer may still re-mark a DOCUMENT.
  *
  * ACTIVE is absent because an approval is final: those documents are the
@@ -446,15 +455,16 @@ export class AccountManagementService {
   // resolve the caller's profile from the token and reuse the admin builders
   // rather than duplicating them — one shape, one place it is computed.
   //
-  // Restricted to FACTORY and EXTERNAL_PARTNER: they are the roles with a
-  // reviewed application, uploaded documents and a single onboarding location to
-  // show. The controller additionally gates these to ACTIVE accounts.
+  // Open to every role that filled in an onboarding application — factories,
+  // institutions, free facilities and drivers — each reading back its OWN
+  // reviewed details, location and documents. The controller additionally gates
+  // these to ACTIVE accounts.
 
   /** This account's own profile id for its role, or a clear refusal. */
   private async ownProfileId(accountId: string, role: Role): Promise<string> {
-    if (role !== Role.FACTORY && role !== Role.EXTERNAL_PARTNER) {
+    if (!SELF_SERVICE_ROLES.includes(role)) {
       throw new ForbiddenException(
-        'This view is available only to factories and free facilities',
+        'This view is available only to factories, institutions, free facilities and drivers',
       );
     }
     const repo = this.profileResolver.getRepo(role);

@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Not, Repository } from 'typeorm';
+import { DataSource, ILike, Not, Repository } from 'typeorm';
 import { Stage } from './entities/stage.entity';
 import { PointsWallet } from '@src/points-wallet/entities/points-wallet.entity';
+import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { CreateStageDto, ListStagesQueryDto, UpdateStageDto } from './dto/stage.dto';
 
 /**
@@ -22,6 +23,7 @@ export class StagesService {
     private readonly stageRepo: Repository<Stage>,
     @InjectRepository(PointsWallet)
     private readonly walletRepo: Repository<PointsWallet>,
+    private readonly cloudinary: CloudinaryService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -58,8 +60,13 @@ export class StagesService {
       take: limit,
     });
 
+    // How many users each stage currently holds — a user is "in" a stage when
+    // their wallet balance falls in its band. Useful before an admin edits or
+    // deletes one: a band with people in it is not an empty slot.
+    const counts = await this.userCounts(rows);
+
     return {
-      stages: rows.map((s) => this.map(s)),
+      stages: rows.map((s) => ({ ...this.map(s), user_count: counts.get(s.id) ?? 0 })),
       pagination: {
         total,
         page,
@@ -69,6 +76,53 @@ export class StagesService {
         has_prev: page > 1,
       },
     };
+  }
+
+  /** Users whose wallet balance falls in each stage's band, by stage id. */
+  private async userCounts(stages: Stage[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (!stages.length) return map;
+    // Ranges never overlap, so a wallet is counted for at most one stage. One
+    // query per stage keeps this simple; a ladder has a handful of stages.
+    for (const s of stages) {
+      const count = await this.walletRepo
+        .createQueryBuilder('w')
+        .where('w.points BETWEEN :min AND :max', { min: s.minPoints, max: s.maxPoints })
+        .getCount();
+      map.set(s.id, count);
+    }
+    return map;
+  }
+
+  /**
+   * The ladder as a USER sees it: the active stages in order, each flagged
+   * whether it is the caller's current one. Read-only — users never edit stages.
+   */
+  async listForUser(accountId: string) {
+    const wallet = await this.walletRepo.findOne({ where: { accountId } });
+    const points = wallet?.points ?? 0;
+    const rows = await this.stageRepo.find({
+      where: { isActive: true },
+      order: { sortOrder: 'ASC' },
+    });
+    const currentId = rows.find((s) => points >= s.minPoints && points <= s.maxPoints)?.id ?? null;
+    return {
+      points,
+      current_stage_id: currentId,
+      stages: rows.map((s) => ({ ...this.map(s), is_current: s.id === currentId })),
+    };
+  }
+
+  /** Refuse a name another stage already uses (case-insensitive). */
+  private async assertNameFree(name: string, excludeId?: string) {
+    const clash = await this.stageRepo.findOne({
+      where: excludeId
+        ? { name: ILike(name), id: Not(excludeId) }
+        : { name: ILike(name) },
+    });
+    if (clash) {
+      throw new BadRequestException(`A stage named "${clash.name}" already exists`);
+    }
   }
 
   /**
@@ -92,29 +146,26 @@ export class StagesService {
   }
 
   async create(dto: CreateStageDto, imageUrl?: string | null) {
+    // A stage image is mandatory — the ladder is shown to users as badges, and a
+    // stage with no image is a blank one on their screen.
+    if (!imageUrl) {
+      throw new BadRequestException('A stage image is required');
+    }
+    await this.assertNameFree(dto.name);
     await this.assertRange(dto.minPoints, dto.maxPoints);
 
     return this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(Stage);
-      const count = await repo.count();
-      // Where to place it: clamp a requested position into 1..count+1; append by default.
-      const target = dto.order ? Math.min(Math.max(dto.order, 1), count + 1) : count + 1;
-      // Make room: everything at or after the target shifts down by one.
-      if (target <= count) {
-        await repo
-          .createQueryBuilder()
-          .update(Stage)
-          .set({ sortOrder: () => '"sort_order" + 1' })
-          .where('"sort_order" >= :target', { target })
-          .execute();
-      }
+      // The order is never chosen by hand: a new stage is appended as the next
+      // number in the sequence. Re-ordering is a separate, deliberate action.
+      const sortOrder = (await repo.count()) + 1;
       const saved = await repo.save(
         repo.create({
           name: dto.name,
-          imageUrl: imageUrl ?? null,
+          imageUrl,
           minPoints: dto.minPoints,
           maxPoints: dto.maxPoints,
-          sortOrder: target,
+          sortOrder,
           isActive: dto.isActive ?? true,
         }),
       );
@@ -126,13 +177,22 @@ export class StagesService {
     const stage = await this.stageRepo.findOne({ where: { id } });
     if (!stage) throw new NotFoundException('Stage not found');
 
+    if (dto.name !== undefined && dto.name !== stage.name) {
+      await this.assertNameFree(dto.name, id);
+    }
+
     const min = dto.minPoints ?? stage.minPoints;
     const max = dto.maxPoints ?? stage.maxPoints;
     if (dto.minPoints !== undefined || dto.maxPoints !== undefined) {
       await this.assertRange(min, max, id);
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    // Remember the old image: a new one REPLACES it, and the old Cloudinary
+    // asset must not be left orphaned once the row no longer points at it.
+    const oldImageUrl = stage.imageUrl ?? null;
+    const replacingImage = imageUrl !== undefined && imageUrl !== oldImageUrl;
+
+    const result = await this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(Stage);
 
       if (dto.name !== undefined) stage.name = dto.name;
@@ -150,6 +210,13 @@ export class StagesService {
       const fresh = await repo.findOne({ where: { id } });
       return { message: 'Stage updated successfully', result: this.map(fresh!) };
     });
+
+    // Best-effort, AFTER the row is safely saved: deleting the old file must
+    // never fail an otherwise-successful edit.
+    if (replacingImage && oldImageUrl) {
+      await this.cloudinary.deleteByUrl(oldImageUrl);
+    }
+    return result;
   }
 
   /** Move a stage to a new 1-based position; the span between shifts to fill in. */
@@ -195,6 +262,8 @@ export class StagesService {
     const stage = await this.stageRepo.findOne({ where: { id } });
     if (!stage) throw new NotFoundException('Stage not found');
 
+    const imageUrl = stage.imageUrl ?? null;
+
     await this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(Stage);
       const removedOrder = stage.sortOrder;
@@ -208,6 +277,8 @@ export class StagesService {
         .execute();
     });
 
+    // The stage is gone; its image would otherwise be an orphan on Cloudinary.
+    if (imageUrl) await this.cloudinary.deleteByUrl(imageUrl);
     return { message: 'Stage deleted successfully', result: { id } };
   }
 
@@ -229,6 +300,12 @@ export class StagesService {
     return {
       points,
       current_stage: stage ? this.map(stage) : null,
+      // A plain sentence for the common "no stage yet" case, so the client shows
+      // something meaningful instead of an empty object the user has to
+      // interpret.
+      message: stage
+        ? `You are in the "${stage.name}" stage`
+        : 'You are not in any stage yet — earn more points to reach one',
     };
   }
 }

@@ -80,15 +80,23 @@ export class AdminStagesController {
 }
 
 /**
- * The caller's own stage — which band their points put them in, with the band
- * and their current balance. Available to any signed-in account (a role with no
- * wallet simply reports 0 points and no stage).
+ * Stages as the USER sees them. This is a CITIZEN feature — the points ladder a
+ * recycler climbs — so only citizens reach it; they can look, never edit.
  */
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.CITIZEN)
 @Controller({ path: 'stages', version: '1' })
 export class StagesController {
   constructor(private readonly stages: StagesService) {}
 
+  /** The whole ladder (active stages, in order), with the caller's own flagged. */
+  @Get()
+  async list(@CurrentUser() user) {
+    const result = await this.stages.listForUser(user.id);
+    return { message: 'Stages fetched successfully', result };
+  }
+
+  /** Just the caller's current stage and points. */
   @Get('me')
   async myStage(@CurrentUser() user) {
     const result = await this.stages.myStage(user.id);

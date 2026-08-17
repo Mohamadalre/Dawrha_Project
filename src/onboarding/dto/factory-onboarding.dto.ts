@@ -1,9 +1,8 @@
 
 import { normalizeSyrianPhoneNumber } from "@src/common/utils/phone-normalization.provider";
-import { CollectionFrequeny } from "@src/user/enums/collectionFrequeny.enum";
-import { DeliverySchedule } from "@src/user/enums/delivery-schedule.enum";
-import { Transform } from 'class-transformer';
-import { IsNotEmpty, IsString, IsOptional, Matches, IsArray, ArrayNotEmpty, IsEnum, IsBoolean, IsUUID } from "class-validator";
+import { Transform, Type } from 'class-transformer';
+import { IsNotEmpty, IsString, IsOptional, Matches, IsArray, ArrayNotEmpty, IsBoolean, IsUUID, IsNumber, IsPositive, ValidateNested } from "class-validator";
+import { DeliveryTimeSlotDto } from "./delivery-time-slot.dto";
 
 
 export class InformationFactoryDto {
@@ -47,23 +46,27 @@ export class WasteFactoryDto {
     wasteCategoryId: string[];
 
 
-    @IsNotEmpty()
-    @IsString()
-    averageOrderQuantity: string;
+    // The estimated size of a typical order — a positive number, not free text.
+    // A zero or a negative estimate is meaningless for planning, so both are
+    // rejected here rather than stored and surprising the dispatcher later.
+    @IsNumber({}, { message: 'The estimated order quantity must be a positive number' })
+    @IsPositive({ message: 'The estimated order quantity must be a positive number' })
+    averageOrderQuantity: number;
 
-    @IsNotEmpty()
-    @IsEnum(CollectionFrequeny)
-    @IsString()
-    estimationOrderSchedule: CollectionFrequeny;
-
+    // Does the factory want the order DELIVERED (true) or will it collect (false).
     @IsNotEmpty()
     @IsBoolean()
     deliveryPreference: boolean;
 
+    // The detailed windows the factory can receive a delivery in — a weekday +
+    // a start→end time, as many as it likes. Replaces the old single
+    // morning/afternoon/evening enum. Optional: a factory that self-collects
+    // (deliveryPreference = false) has no windows to give.
     @IsOptional()
-    @IsEnum(DeliverySchedule)
-    @IsString()
-    perferredDeliverySchedule: DeliverySchedule;
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => DeliveryTimeSlotDto)
+    deliveryTimeSlots?: DeliveryTimeSlotDto[];
 
 
 }

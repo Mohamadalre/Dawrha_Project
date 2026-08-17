@@ -12,6 +12,9 @@ export enum OwnerType {
     COLLECTOR = 'COLLECTOR',
     INSTITUTIONS = 'INSTITUTIONS',
     FACTORY = 'FACTORY',
+    // A free facility's documents are OPTIONAL, so this owner type exists but a
+    // facility can be submitted for review without any media row of it.
+    EXTERNAL_PARTNER = 'EXTERNAL_PARTNER',
 }
 export enum statusMedia {
     PENDING = 'PENDING',

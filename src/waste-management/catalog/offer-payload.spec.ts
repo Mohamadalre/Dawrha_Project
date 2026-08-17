@@ -63,8 +63,9 @@ describe('offer payload on a material', () => {
     // 50 off a list price of 100 is 50%, whatever the column claims — and the
     // price this buyer pays is the 50 that is left, not a number the offer
     // carries.
-    expect(out.discount_percentage).toBe(50);
-    expect(out.offer_price).toBe(50);
+    expect(out.offer.percentage).toBe(50);
+    expect(out.offer.new_price).toBe(50);
+    expect(out.offer.old_price).toBe(100);
   });
 
   it('ADDS the amount when the offer is a seller’s', () => {
@@ -77,16 +78,16 @@ describe('offer payload on a material', () => {
       PricingTier.INDIVIDUAL,
     );
 
-    expect(out.offers[0].offer_price).toBe(150);
-    expect(out.offers[0].direction).toBe('INCREASE');
+    expect(out.offer.by_condition[0].offer_price).toBe(150);
+    expect(out.offer.by_condition[0].direction).toBe('INCREASE');
   });
 
   it('reports no discount when the material has no price for this buyer', () => {
     // Zero would sort it among genuine small discounts; null says "unknown".
     const out = map([], [offer()]);
 
-    expect(out.discount_percentage).toBeNull();
-    expect(out.offers[0].base_price).toBeNull();
+    expect(out.offer.percentage).toBeNull();
+    expect(out.offer.by_condition[0].base_price).toBeNull();
   });
 
   // ── several grades, several offers ──────────────────────────────────────
@@ -104,9 +105,9 @@ describe('offer payload on a material', () => {
 
     const out = map(prices, offers);
 
-    expect(out.offers).toHaveLength(3);
-    expect(out.offers.map((o: any) => o.condition)).toEqual(['GOOD', 'POOR', 'EXCELLENT']);
-    expect(out.offers.map((o: any) => o.discount_percentage)).toEqual([50, 10, 5]);
+    expect(out.offer.by_condition).toHaveLength(3);
+    expect(out.offer.by_condition.map((o: any) => o.condition)).toEqual(['GOOD', 'POOR', 'EXCELLENT']);
+    expect(out.offer.by_condition.map((o: any) => o.discount_percentage)).toEqual([50, 10, 5]);
   });
 
   it('prices each offer against ITS OWN grade, not the cheapest one', () => {
@@ -119,8 +120,8 @@ describe('offer payload on a material', () => {
 
     // 100 off the 200 excellent price = 50%. Measured against the 50 poor
     // price the same amount would read as 200% — a free material and change.
-    expect(out.offers[0].base_price).toBe(200);
-    expect(out.offers[0].discount_percentage).toBe(50);
+    expect(out.offer.by_condition[0].base_price).toBe(200);
+    expect(out.offer.by_condition[0].discount_percentage).toBe(50);
   });
 
   it('makes the headline the BEST real saving', () => {
@@ -135,8 +136,8 @@ describe('offer payload on a material', () => {
 
     const out = map(prices, offers);
 
-    expect(out.discount_percentage).toBe(80);
-    expect(out.offer_price).toBe(20);
+    expect(out.offer.percentage).toBe(80);
+    expect(out.offer.new_price).toBe(20);
   });
 
   // ── the payload carries only the READER's price ─────────────────────────
@@ -165,8 +166,8 @@ describe('offer payload on a material', () => {
 
     const out = map([price()], [offer({ validUntil: ends })]);
 
-    expect(out.offer_valid_until).toEqual(ends);
-    expect(out.offers[0].valid_until).toEqual(ends);
+    expect(out.offer.expires_at).toEqual(ends);
+    expect(out.offer.by_condition[0].valid_until).toEqual(ends);
   });
 
   it('distinguishes open-ended from ending', () => {
@@ -174,16 +175,19 @@ describe('offer payload on a material', () => {
     // does is worse.
     const out = map([price()], [offer({ validUntil: null })]);
 
-    expect(out.offer_valid_until).toBeNull();
+    expect(out.offer.expires_at).toBeNull();
   });
 
   // ── no offer at all ─────────────────────────────────────────────────────
   it('is quiet when the material carries no offer', () => {
     const out = map([price()], []);
 
-    expect(out.has_offer).toBe(false);
-    expect(out.offers).toEqual([]);
-    expect(out.offer_price).toBeNull();
-    expect(out.offer_valid_until).toBeNull();
+    // No offer → a single null, and NO scattered offer_* keys at all.
+    expect(out.offer).toBeNull();
+    expect(out).not.toHaveProperty('has_offer');
+    expect(out).not.toHaveProperty('offers');
+    expect(out).not.toHaveProperty('offer_price');
+    expect(out).not.toHaveProperty('discount_percentage');
+    expect(out).not.toHaveProperty('offer_valid_until');
   });
 });

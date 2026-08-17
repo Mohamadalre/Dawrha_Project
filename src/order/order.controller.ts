@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   DefaultValuePipe,
@@ -22,11 +23,14 @@ import { Role } from '@src/user/enums/role.enum';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { OrderCheckoutService } from './providers/order-checkout.service';
 import { OrderViewService } from './providers/order-view.service';
+import { DeliveryTripService } from './providers/delivery-trip.service';
 import { BuyerProfileService } from '@src/waste-management/common/providers/buyer-profile.service';
 import {
   CancelOrderDto,
   CheckoutDto,
   FileComplaintDto,
+  ListOrdersQueryDto,
+  PartialDecisionDto,
   RatePartDto,
 } from './dto/order.dto';
 
@@ -47,7 +51,23 @@ export class OrderController {
     private readonly checkout: OrderCheckoutService,
     private readonly view: OrderViewService,
     private readonly buyerProfile: BuyerProfileService,
+    private readonly trips: DeliveryTripService,
   ) {}
+
+  /**
+   * A delivery-cost RANGE (best and worst case) for this buyer, without placing
+   * anything — so they can see what delivery will add before they commit.
+   */
+  @Get('delivery-estimate')
+  async deliveryEstimate(@CurrentUser() user: any) {
+    const profile = await this.buyerProfile.forAccount(user.id, user.role);
+    if (!profile.provinceId) {
+      throw new BadRequestException(
+        'Set your location first — delivery is priced from your governorate',
+      );
+    }
+    return this.trips.estimateDelivery(profile.profileId, profile.provinceId);
+  }
 
   /**
    * Places the order: checks the minimum, freezes the prices, empties the cart
@@ -68,14 +88,17 @@ export class OrderController {
     });
   }
 
-  /** The buyer's orders, newest first. */
+  /**
+   * The buyer's orders, newest first — optionally narrowed to one status
+   * (`?status=REJECTED_AWAITING_BUYER`, `?status=PREPARING`, …) so a factory or
+   * free facility can pull just the orders in a given state.
+   */
   @Get()
   async myOrders(
     @CurrentUser() user: any,
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
-    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query() query: ListOrdersQueryDto,
   ) {
-    return this.view.listMine(user.id, page, limit);
+    return this.view.listMine(user.id, query.page ?? 1, query.limit ?? 10, query.status);
   }
 
   /** One order with every part shown separately — this is where a split is legible. */
@@ -102,6 +125,59 @@ export class OrderController {
     @Body() dto: CancelOrderDto,
   ) {
     return this.checkout.cancel(user.id, orderId, dto.reason);
+  }
+
+  /**
+   * The buyer's decision when the order could not be covered in full: ship what
+   * is available, or cancel.
+   *
+   * 200, not 201: this resolves an existing order rather than creating one. A
+   * 409 comes back if the order is no longer awaiting a decision — the buyer
+   * raced their own cancel, or answered twice.
+   */
+  @Post(':orderId/partial-decision')
+  @HttpCode(HttpStatus.OK)
+  async decidePartial(
+    @CurrentUser() user: any,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @Body() dto: PartialDecisionDto,
+  ) {
+    return this.checkout.respondToPartial(user.id, orderId, dto.accept);
+  }
+
+  /**
+   * The buyer confirms that their split order — refused by the administrator —
+   * is closed. Nothing to re-try: a split is one verdict for all its parts.
+   *
+   * 200: this closes an existing order rather than creating one. A 409 comes
+   * back if the order is not awaiting this confirmation.
+   */
+  @Post(':orderId/confirm-rejection')
+  @HttpCode(HttpStatus.OK)
+  async confirmRejection(
+    @CurrentUser() user: any,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+  ) {
+    return this.checkout.confirmRejection(user.id, orderId);
+  }
+
+  /**
+   * The buyer chooses to CONSOLIDATE a split order: a delivery truck gathers the
+   * far warehouses' parts into the one warehouse nearest them, so they collect
+   * everything from a single place instead of driving to each.
+   *
+   * Offered only for a split, non-delivery order (a factory that chose delivery
+   * is brought its goods; a single-warehouse order has nothing to gather). If
+   * every warehouse has already prepared, gathering starts at once; otherwise it
+   * begins the moment the last one finishes.
+   */
+  @Post(':orderId/consolidate')
+  @HttpCode(HttpStatus.OK)
+  async consolidate(
+    @CurrentUser() user: any,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+  ) {
+    return this.trips.chooseConsolidation(user.id, orderId);
   }
 
   /**

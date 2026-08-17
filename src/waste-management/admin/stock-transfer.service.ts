@@ -5,10 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Product } from '../entities/product.entity';
 import { MaterialCondition } from '../entities/material-condition.entity';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
+import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 import { AuditService } from '@src/waste-management/common/providers/audit.service';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 
@@ -20,6 +21,15 @@ import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
  * write it off and re-receive it — which invents a delivery that never happened
  * — or to leave the stock mislabelled and mispriced.
  *
+ * WHERE THE MOVE HAPPENS is the whole point. Odoo is the sole writer of stock
+ * quantities and the backend only mirrors them. An earlier version moved its own
+ * mirror and then asked for a warehouse re-sync — which re-read Odoo (still
+ * holding the OLD grades, because nothing told it otherwise) and overwrote the
+ * mirror straight back. The re-grade looked done for a second and then silently
+ * reverted. So the move is made in ODOO, over the queue like every other Odoo
+ * write, and the mirror follows the inventory ping Odoo fires. This service only
+ * validates and records the intent.
+ *
  * Three rules, and each exists because of a specific way this goes wrong:
  *
  *   1. Both grades must belong to the SAME material. A grade is unique only
@@ -30,12 +40,13 @@ import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
  *   2. Only UNRESERVED quantity moves. Reserved stock is already promised to an
  *      order that has not shipped, and moving it would leave that order pointing
  *      at a grade its goods are no longer in — the shortage surfacing at
- *      deduction time, after the buyer was told yes.
+ *      deduction time, after the buyer was told yes. The mirror is pre-checked
+ *      here for a fast, clear error; Odoo re-checks authoritatively.
  *
  *   3. The source grade is NOT deleted when it empties. An empty grade is still
  *      a grade this material is sold at; removing it because today's stock ran
  *      out would silently change the material's price sheet and every future
- *      sorting screen.
+ *      sorting screen. (Enforced in Odoo, which owns the rows.)
  */
 @Injectable()
 export class StockTransferService {
@@ -46,9 +57,10 @@ export class StockTransferService {
     private readonly conditionRepo: Repository<MaterialCondition>,
     @InjectRepository(WarehouseInventory)
     private readonly inventoryRepo: Repository<WarehouseInventory>,
+    @InjectRepository(Warehouse)
+    private readonly warehouseRepo: Repository<Warehouse>,
     private readonly audit: AuditService,
     private readonly odooSync: OdooSyncService,
-    private readonly dataSource: DataSource,
   ) {}
 
   async transfer(
@@ -84,102 +96,92 @@ export class StockTransferService {
       this.gradeOfProduct(input.toConditionId, productId, 'destination'),
     ]);
 
-    return this.dataSource.transaction(async (manager) => {
-      const inventoryRepo = manager.getRepository(WarehouseInventory);
-
-      const source = await inventoryRepo.findOne({
-        where: {
-          warehouseId: input.warehouseId,
-          odooProductId: product.odooProductId,
-          conditionCode: from.code,
-        },
-      });
-      if (!source) {
-        throw new NotFoundException(
-          'This warehouse holds no stock of the source grade',
-        );
-      }
-
-      // Only what is NOT promised to an order may move.
-      const held = Number(source.quantity);
-      const reserved = Number(source.reservedQuantity);
-      const movable = Math.max(held - reserved, 0);
-
-      if (input.quantity - movable > 0.0005) {
-        // The sentences are kept whole and free of numbers on purpose: the
-        // error filter translates by exact match on the message, so anything
-        // interpolated into it would reach an Arabic caller in English. The
-        // caller already has the held/reserved figures from the stock listing.
-        throw new ConflictException(
-          reserved > 0
-            ? 'Part of this grade is reserved for orders that have not shipped yet, and only the unreserved quantity can be moved'
-            : 'This warehouse does not hold that much of the source grade',
-        );
-      }
-
-      source.quantity = String(round3(held - input.quantity));
-      await inventoryRepo.save(source);
-
-      let destination = await inventoryRepo.findOne({
-        where: {
-          warehouseId: input.warehouseId,
-          odooProductId: product.odooProductId,
-          conditionCode: to.code,
-        },
-      });
-      if (destination) {
-        destination.quantity = String(
-          round3(Number(destination.quantity) + input.quantity),
-        );
-      } else {
-        destination = inventoryRepo.create({
-          warehouseId: input.warehouseId,
-          odooProductId: product.odooProductId,
-          productName: product.name,
-          conditionCode: to.code,
-          quantity: String(round3(input.quantity)),
-          reservedQuantity: '0',
-        });
-      }
-      await inventoryRepo.save(destination);
-
-      // The SOURCE ROW IS KEPT even at zero. An empty grade is still a grade
-      // this material is sold at; deleting it because today's stock ran out
-      // would change the price sheet and every sorting screen behind the
-      // admin's back.
-
-      await this.audit.record({
-        userId: adminId,
-        action: 'TRANSFER_STOCK_BETWEEN_GRADES',
-        entityType: 'warehouse_inventory',
-        entityId: productId,
-        oldValues: { grade: from.code, quantity: held },
-        newValues: {
-          grade: to.code,
-          moved: input.quantity,
-          warehouseId: input.warehouseId,
-          reason: input.reason ?? null,
-        },
-      });
-
-      // Odoo is the only writer of quantities, so it is told rather than left
-      // to disagree with a mirror that moved without it.
-      await this.odooSync.enqueueSyncWarehouse({
-        warehouseId: input.warehouseId,
-        jobId: `grade-transfer-${Date.now()}`,
-      });
-
-      return {
-        message: 'Stock moved between grades successfully',
-        product_id: productId,
-        warehouse_id: input.warehouseId,
-        from: { condition_id: from.id, code: from.code, remaining: Number(source.quantity) },
-        to: { condition_id: to.id, code: to.code, total: Number(destination.quantity) },
-        moved: round3(input.quantity),
-        reserved_untouched: round3(reserved),
-        reason: input.reason ?? null,
-      };
+    const warehouse = await this.warehouseRepo.findOne({
+      where: { id: input.warehouseId },
     });
+    if (!warehouse) throw new NotFoundException('Warehouse not found');
+    if (!warehouse.odooWarehouseId) {
+      throw new BadRequestException(
+        'This warehouse is not mirrored in Odoo yet, so its stock cannot be moved',
+      );
+    }
+
+    // Pre-check against the mirror for a fast, clear error before anything is
+    // queued. Odoo re-checks authoritatively at apply time — the mirror can lag
+    // it by a sync — so passing here is necessary, not sufficient.
+    const source = await this.inventoryRepo.findOne({
+      where: {
+        warehouseId: input.warehouseId,
+        odooProductId: product.odooProductId,
+        conditionCode: from.code,
+      },
+    });
+    if (!source) {
+      throw new NotFoundException(
+        'This warehouse holds no stock of the source grade',
+      );
+    }
+
+    // Only what is NOT promised to an order may move.
+    const held = Number(source.quantity);
+    const reserved = Number(source.reservedQuantity);
+    const movable = Math.max(held - reserved, 0);
+
+    if (input.quantity - movable > 0.0005) {
+      // The sentences are kept whole and free of numbers on purpose: the error
+      // filter translates by exact match on the message, so anything
+      // interpolated into it would reach an Arabic caller in English. The
+      // caller already has the held/reserved figures from the stock listing.
+      throw new ConflictException(
+        reserved > 0
+          ? 'Part of this grade is reserved for orders that have not shipped yet, and only the unreserved quantity can be moved'
+          : 'This warehouse does not hold that much of the source grade',
+      );
+    }
+
+    // Record the INTENT. The actual quantities move in Odoo; this is the audit
+    // that an admin asked for the move, which is what a later dispute needs.
+    await this.audit.record({
+      userId: adminId,
+      action: 'TRANSFER_STOCK_BETWEEN_GRADES',
+      entityType: 'warehouse_inventory',
+      entityId: productId,
+      oldValues: { grade: from.code, quantity: held },
+      newValues: {
+        grade: to.code,
+        moved: round3(input.quantity),
+        warehouseId: input.warehouseId,
+        reason: input.reason ?? null,
+      },
+    });
+
+    // The move itself: made in Odoo (the sole writer of quantities), over the
+    // queue like every other Odoo write. Odoo keeps the warehouse total
+    // unchanged and fires an inventory ping, so the mirror converges to the
+    // truth through SYNC_WAREHOUSE — the existing channel, so no new reconciler
+    // is owed.
+    await this.odooSync.enqueueTransferStockGrade({
+      warehouseId: input.warehouseId,
+      warehouseOdooId: warehouse.odooWarehouseId,
+      odooProductId: product.odooProductId,
+      fromCondition: from.code,
+      toCondition: to.code,
+      quantity: round3(input.quantity),
+      adminId,
+      reason: input.reason,
+    });
+
+    return {
+      message:
+        'Stock re-grade queued — it is applied in Odoo and the mirror updates on confirmation',
+      product_id: productId,
+      warehouse_id: input.warehouseId,
+      from: { condition_id: from.id, code: from.code, movable_now: round3(movable) },
+      to: { condition_id: to.id, code: to.code },
+      quantity: round3(input.quantity),
+      reserved_untouched: round3(reserved),
+      reason: input.reason ?? null,
+    };
   }
 
   /**

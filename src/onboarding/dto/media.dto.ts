@@ -39,3 +39,10 @@ export class FactoryMediaDto {
     @IsIn([MediaType.LICENSE, MediaType.INDUSTRIAL_REG])
     fileType: MediaType;
 }
+
+/** Free facility: an optional facility licence. */
+export class ExternalPartnerMediaDto {
+    @IsNotEmpty()
+    @IsIn([MediaType.LICENSE])
+    fileType: MediaType;
+}

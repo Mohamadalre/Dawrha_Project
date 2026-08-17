@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
-import { DeliveryQuoteService } from '@src/warehouse/providers/delivery-quote.service';
+import { DeliveryRateService } from '@src/warehouse/providers/delivery-rate.service';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { Order } from '../entities/order.entity';
 import { OrderPart } from '../entities/order-part.entity';
@@ -27,10 +27,18 @@ import {
 import {
   RequiredLine,
   WarehouseSupply,
+  coveringCombinations,
   planAllocation,
+  planForWarehouses,
   shortfallRatio,
 } from './allocation-planner';
+import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 import { DistanceService } from './distance.service';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 
 const LOG_META = { context: 'ORDER_ALLOCATION', channel: 'orders' } as const;
 
@@ -50,6 +58,29 @@ export type AllocationOutcome =
   | { result: 'PARTIAL_NEEDS_BUYER'; missingRatio: number }
   | { result: 'EXHAUSTED' }
   | { result: 'NO_STOCK' };
+
+/**
+ * A plain sentence for an allocation outcome, so a response carries a message a
+ * person can read — not the raw code (`PARTIAL_NEEDS_BUYER`, `NO_STOCK`) that
+ * only the client's own logic understands. The code still travels beside it for
+ * that logic; this is the part the buyer is shown.
+ */
+export function describeAllocation(outcome: AllocationOutcome): string {
+  switch (outcome.result) {
+    case 'ALLOCATED':
+      return outcome.parts > 0
+        ? 'Your order was placed and sent to the warehouse(s) for approval.'
+        : 'Your order was placed and is being processed.';
+    case 'PARTIAL_NEEDS_BUYER':
+      return 'Only part of your order is available in your governorate right now — review the available quantity and choose whether to go ahead or cancel.';
+    case 'NO_STOCK':
+      return 'The items you ordered are currently out of stock in the warehouses that serve your governorate.';
+    case 'EXHAUSTED':
+      return 'Your order could not be arranged automatically after several attempts — an administrator will review it.';
+    default:
+      return 'Your order was received.';
+  }
+}
 
 /**
  * Turns a placed order into work for warehouses.
@@ -75,8 +106,10 @@ export class OrderAllocationService {
     private readonly offerRepo: Repository<OrderPartOffer>,
     @InjectRepository(WarehouseInventory)
     private readonly inventoryRepo: Repository<WarehouseInventory>,
+    @InjectRepository(Warehouse)
+    private readonly warehouseRepo: Repository<Warehouse>,
     private readonly distance: DistanceService,
-    private readonly deliveryQuote: DeliveryQuoteService,
+    private readonly rates: DeliveryRateService,
     private readonly odooSync: OdooSyncService,
   ) {}
 
@@ -91,6 +124,7 @@ export class OrderAllocationService {
   async allocate(
     orderId: string,
     requested?: RequestedLine[],
+    options?: { forcePartial?: boolean },
   ): Promise<AllocationOutcome> {
     const order = await this.orderRepo.findOne({ where: { id: orderId } });
     if (!order) return { result: 'NO_STOCK' };
@@ -125,15 +159,26 @@ export class OrderAllocationService {
     }
 
     // A shortfall the buyer did not pre-agree to is theirs to decide, not ours
-    // to ship quietly.
+    // to ship quietly — unless they are answering that very question now
+    // (`forcePartial`), having been shown exactly what is available.
     const missing = shortfallRatio(plan, required);
     const withinTolerance = missing <= PARTIAL_FULFILMENT_TOLERANCE;
-    if (!plan.fullyCovered && !(order.acceptPartialFulfilment && withinTolerance)) {
+    const forcePartial = options?.forcePartial === true;
+    if (
+      !plan.fullyCovered &&
+      !forcePartial &&
+      !(order.acceptPartialFulfilment && withinTolerance)
+    ) {
       order.status = OrderStatus.NEEDS_CUSTOMER_DECISION;
+      // Freeze the request: the cart is emptied and no parts exist yet, so this
+      // snapshot is the only place the decision endpoint can re-plan from.
+      order.requestedLines = lines;
       await this.orderRepo.save(order);
       return { result: 'PARTIAL_NEEDS_BUYER', missingRatio: missing };
     }
 
+    // Allocation is proceeding, so the pending-decision snapshot is spent.
+    order.requestedLines = null;
     const round = order.allocationRound + 1;
     const byKey = new Map(lines.map((l) => [lineKey(l.odooProductId, l.conditionCode), l]));
     const existingParts = await this.partRepo.count({ where: { orderId } });
@@ -152,6 +197,224 @@ export class OrderAllocationService {
       LOG_META,
     );
     return { result: 'ALLOCATED', parts: plan.parts.length };
+  }
+
+  /**
+   * The alternative warehouse sets an ADMIN may swap a SPLIT order to when they
+   * choose to modify it.
+   *
+   * Returns every set of the SAME number of warehouses as the split itself that
+   * together cover the whole order — never a different size — nearest (least
+   * total distance) first, with the current set excluded and any warehouse that
+   * holds none of the ordered materials dropped. The admin picks one; applying
+   * it is a re-allocation onto exactly those warehouses.
+   */
+  async modificationOptions(orderId: string) {
+    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const parts = await this.partRepo.find({ where: { orderId }, relations: ['lines'] });
+    const live = parts.filter(
+      (p) =>
+        !FAILED_PART_STATUSES.includes(p.status) &&
+        p.status !== OrderPartStatus.CANCELLED,
+    );
+    const currentWarehouses = [...new Set(live.map((p) => p.warehouseId))];
+    const size = currentWarehouses.length;
+
+    const base = {
+      order_id: orderId,
+      order_number: order.orderNumber,
+      split_size: size,
+      is_split: size > 1,
+    };
+    // A single-warehouse order was not split, so there is nothing to swap.
+    if (size < 2) {
+      return { ...base, current: await this.namedWarehouses(currentWarehouses), options: [] };
+    }
+
+    // The whole order, merged from the live parts' lines.
+    const requested = this.requestedFromParts(live);
+    const required: RequiredLine[] = requested.map((l) => ({
+      key: lineKey(l.odooProductId, l.conditionCode),
+      quantity: l.quantity,
+    }));
+
+    const supplies = await this.buildSupplies(order, requested);
+    const combos = coveringCombinations({ required, supplies, size });
+
+    // Never offer the set they already have.
+    const currentKey = [...currentWarehouses].sort().join('|');
+    const alternatives = combos.filter(
+      (c) => [...c.warehouseIds].sort().join('|') !== currentKey,
+    );
+
+    const names = await this.warehouseNameMap([
+      ...new Set([...currentWarehouses, ...alternatives.flatMap((a) => a.warehouseIds)]),
+    ]);
+    const enrich = (ids: string[]) =>
+      ids.map((id) => ({
+        id,
+        name: names.get(id)?.name ?? null,
+        odoo_warehouse_id: names.get(id)?.odoo ?? null,
+      }));
+
+    return {
+      ...base,
+      current: enrich(currentWarehouses),
+      options: alternatives.map((a) => ({
+        warehouses: enrich(a.warehouseIds),
+        total_distance_km: a.totalDistanceKm,
+      })),
+    };
+  }
+
+  /**
+   * Re-routes a SPLIT order onto the exact warehouses the admin chose while
+   * modifying it — the pick from `modificationOptions`.
+   *
+   * Only while the split is still AWAITING_APPROVAL (offered, nothing prepared).
+   * The chosen set must be the SAME size as the current split and must cover the
+   * whole order; otherwise it is refused rather than shipped short. The current
+   * parts are cancelled and their reservations released, and fresh parts are
+   * offered to the chosen warehouses — a new allocation round, exactly as if the
+   * order had landed on them in the first place.
+   */
+  async applyModification(orderId: string, warehouseIds: string[], adminId?: string) {
+    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.status !== OrderStatus.AWAITING_APPROVAL) {
+      throw new ConflictException(
+        `This order can no longer be modified — it is ${order.status}`,
+      );
+    }
+
+    const parts = await this.partRepo.find({ where: { orderId }, relations: ['lines'] });
+    const live = parts.filter(
+      (p) =>
+        !FAILED_PART_STATUSES.includes(p.status) &&
+        p.status !== OrderPartStatus.CANCELLED,
+    );
+    const currentWarehouses = [...new Set(live.map((p) => p.warehouseId))];
+    if (currentWarehouses.length < 2) {
+      throw new BadRequestException('This order is not split — there is nothing to modify');
+    }
+    const chosen = [...new Set(warehouseIds)];
+    if (chosen.length !== currentWarehouses.length) {
+      throw new BadRequestException(
+        `Choose exactly ${currentWarehouses.length} warehouse(s) — the same number the order was split across`,
+      );
+    }
+
+    const requested = this.requestedFromParts(live);
+    const required: RequiredLine[] = requested.map((l) => ({
+      key: lineKey(l.odooProductId, l.conditionCode),
+      quantity: l.quantity,
+    }));
+    const supplies = await this.buildSupplies(order, requested);
+    const plan = planForWarehouses({ required, supplies, warehouseIds: chosen });
+    if (!plan) {
+      throw new BadRequestException(
+        'Those warehouses cannot cover this order — pick a set from the offered options',
+      );
+    }
+
+    // Withdraw the current parts and their offers; release their reservations.
+    const cancelledPartIds: string[] = [];
+    for (const p of live) {
+      p.status = OrderPartStatus.CANCELLED;
+      p.stockReserved = false;
+      await this.partRepo.save(p);
+      cancelledPartIds.push(p.id);
+    }
+    await this.offerRepo.update(
+      { orderId, status: OrderOfferStatus.OFFERED },
+      { status: OrderOfferStatus.WITHDRAWN, respondedAt: new Date() },
+    );
+
+    // Offer fresh parts to the chosen warehouses — a new round.
+    const byKey = new Map(
+      requested.map((l) => [lineKey(l.odooProductId, l.conditionCode), l]),
+    );
+    const round = order.allocationRound + 1;
+    let sequence = await this.partRepo.count({ where: { orderId } });
+    for (const planned of plan.parts) {
+      sequence += 1;
+      await this.createPart(order, planned, byKey, sequence, round);
+    }
+
+    order.allocationRound = round;
+    order.status = OrderStatus.AWAITING_APPROVAL;
+    await this.recalculateTotals(order);
+
+    // Release the old reservations in Odoo — a remote call, so out of the write
+    // path above and best-effort per part.
+    for (const partId of cancelledPartIds) {
+      await this.odooSync.enqueueCancelOrderPart({
+        partId,
+        reason: 'Re-routed to different warehouses by the administrator',
+      });
+    }
+
+    winstonLogger.info(
+      `Order ${order.orderNumber} re-routed by ADMIN ${adminId ?? 'system'} to ${plan.parts.length} warehouse(s)`,
+      LOG_META,
+    );
+    return {
+      message: 'Order re-routed to the chosen warehouses',
+      order_id: orderId,
+      warehouses: await this.namedWarehouses(chosen),
+      parts: plan.parts.length,
+    };
+  }
+
+  /** The whole order as requested lines, merged across the given parts. */
+  private requestedFromParts(parts: OrderPart[]): RequestedLine[] {
+    const merged = new Map<string, RequestedLine>();
+    for (const part of parts) {
+      for (const line of part.lines ?? []) {
+        const key = lineKey(line.odooProductId as number, line.conditionCode ?? null);
+        const existing = merged.get(key);
+        if (existing) {
+          existing.quantity = round3(existing.quantity + Number(line.quantity));
+          continue;
+        }
+        merged.set(key, {
+          productId: line.productId,
+          odooProductId: line.odooProductId as number,
+          productName: line.productName,
+          conditionCode: line.conditionCode ?? null,
+          quantity: Number(line.quantity),
+          unitType: line.unitType,
+          unitPrice: Number(line.unitPrice),
+        });
+      }
+    }
+    return [...merged.values()];
+  }
+
+  private async warehouseNameMap(
+    ids: string[],
+  ): Promise<Map<string, { name: string | null; odoo: number | null }>> {
+    const map = new Map<string, { name: string | null; odoo: number | null }>();
+    if (!ids.length) return map;
+    const rows = await this.warehouseRepo.find({
+      where: { id: In(ids) },
+      select: ['id', 'name', 'odooWarehouseId'],
+    });
+    for (const w of rows) {
+      map.set(w.id, { name: w.name ?? null, odoo: w.odooWarehouseId ?? null });
+    }
+    return map;
+  }
+
+  private async namedWarehouses(ids: string[]) {
+    const names = await this.warehouseNameMap(ids);
+    return ids.map((id) => ({
+      id,
+      name: names.get(id)?.name ?? null,
+      odoo_warehouse_id: names.get(id)?.odoo ?? null,
+    }));
   }
 
   /**
@@ -200,14 +463,15 @@ export class OrderAllocationService {
     }
 
     part.goodsTotal = String(round3(goodsTotal));
-    // Delivery is priced per leg, from the tariff mirror Odoo's admin authors.
+    // Delivery is priced from the ONE rate the backend admin sets (per km, plus
+    // the base fee and the minimum charge) — the same rate the actual trip is
+    // costed at, so the estimate a buyer sees here and the figure they are
+    // charged when it ships speak in the same numbers. This per-part figure
+    // prices the warehouse-to-buyer leg as if delivered alone; the milk-run
+    // trip re-costs it lower once the parts are consolidated onto one truck.
     // A collection order has no leg to price.
     if (order.fulfilmentMode === FulfilmentMode.DELIVERY) {
-      const quote = await this.deliveryQuote.quoteLeg({
-        warehouseId: planned.warehouseId,
-        provinceId: order.provinceId,
-        distanceKm: planned.distanceKm,
-      });
+      const quote = await this.rates.quote(planned.distanceKm);
       part.deliveryCost = String(quote.cost);
     }
     await this.partRepo.save(part);

@@ -29,13 +29,19 @@ export class WasteManagementController {
    * Reachable while still onboarding: a factory / free facility / institution
    * picks the categories it deals in DURING profile completion (PENDING_PROFILE)
    * or while its request is pending (PENDING_APPROVAL), not only once ACTIVE.
+   *
+   * The admin is NOT admitted: this is the buyer's onboarding picker, and the
+   * admin has no onboarding to do — they manage categories on the admin
+   * catalogue (GET /admin/waste/categories), which shows the full list including
+   * inactive ones. Leaving them here would let a screen with no purpose for them
+   * hit a buyer-shaped route.
    */
   @AccountsStatus(
     AccountStatus.ACTIVE,
     AccountStatus.PENDING_PROFILE,
     AccountStatus.PENDING_APPROVAL,
   )
-  @Roles(Role.ADMIN, Role.EXTERNAL_PARTNER, Role.FACTORY, Role.INSTITUTIONS)
+  @Roles(Role.EXTERNAL_PARTNER, Role.FACTORY, Role.INSTITUTIONS)
   @Get('onboarding/waste-categories')
   async findAll(@Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number) {
     const result = await this.wasteManagementService.findAllName(page);

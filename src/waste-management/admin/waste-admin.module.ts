@@ -11,10 +11,12 @@ import { MeasurementUnit } from '../entities/measurement-unit.entity';
 import { MaterialCondition } from '../entities/material-condition.entity';
 import { Offer } from '../entities/offer.entity';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
+import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 import { Account } from '@src/user/entities/account.entity';
 import { WasteCommonModule } from '../common/waste-common.module';
 import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
 import { NotificationModule } from '@src/notification/notification.module';
+import { PlatformSettingsModule } from '@src/platform-settings/platform-settings.module';
 import { AdminCatalogController } from './admin-catalog.controller';
 import { AdminCatalogService } from './admin-catalog.service';
 import { PricingController } from './pricing/pricing.controller';
@@ -36,6 +38,8 @@ import { StockTransferController } from './stock-transfer.controller';
     TypeOrmModule.forFeature([WasteCategory, Product, ProductPricing, ProductPricingHistory, CartItem, MeasurementUnit, MaterialCondition, Offer,
       // Deleting a material has to know whether any is still on a shelf.
       WarehouseInventory,
+      // Grade transfers resolve the warehouse's Odoo id before queuing the move.
+      Warehouse,
       // The expiry sweep notifies every admin that a material's pricing lapsed.
       Account]),
     PermissionsModule,
@@ -43,6 +47,7 @@ import { StockTransferController } from './stock-transfer.controller';
     WasteCommonModule,
     CloudinaryModule,
     NotificationModule,
+    PlatformSettingsModule,
   ],
   controllers: [
     AdminCatalogController,

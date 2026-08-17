@@ -61,7 +61,7 @@ export class OrderSpendingCapService {
         cap: null,
         incoming: round3(incomingGoodsTotal),
         remaining: Infinity,
-        currency: 'JOD',
+        currency: 'SYP',
       };
     }
 

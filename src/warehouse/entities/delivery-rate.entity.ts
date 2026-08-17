@@ -39,17 +39,7 @@ export class DeliveryRate {
   @Column({ name: 'base_fee', type: 'decimal', precision: 12, scale: 3, default: 0 })
   baseFee: string;
 
-  /**
-   * Floor for a single delivery.
-   *
-   * A very short trip still costs a driver, a vehicle and an hour. Without a
-   * floor the nearest buyer is delivered to at a price that does not cover
-   * sending anyone at all.
-   */
-  @Column({ name: 'min_charge', type: 'decimal', precision: 12, scale: 3, default: 0 })
-  minCharge: string;
-
-  @Column({ length: 8, default: 'JOD' })
+  @Column({ length: 8, default: 'SYP' })
   currency: string;
 
   /**

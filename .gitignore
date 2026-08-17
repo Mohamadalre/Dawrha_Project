@@ -1,12 +1,55 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .gitignore — Dawrha backend.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Dependencies ─────────────────────────────────────────────────────────────
 node_modules/
-dist/
-docs/
-postman/
-.env
 .npm
+.pnp
+.pnp.js
+
+# ── Build output ─────────────────────────────────────────────────────────────
+dist/
+build/
+*.tsbuildinfo
+
+# ── Test / coverage ──────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ── Secrets & environment ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+/logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-/logs
-.claude/
-.md
+pnpm-debug.log*
+
+# ── Postman collections & environments ───────────────────────────────────────
+postman/
+*.postman_collection.json
+*.postman_environment.json
+
+# ── Local docs / generated reports (not source) ──────────────────────────────
+docs/
+i18n-report.json
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS junk ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini

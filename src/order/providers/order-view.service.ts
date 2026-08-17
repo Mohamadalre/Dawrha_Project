@@ -18,7 +18,17 @@ import {
   OrderPartStatus,
 } from '../enums/order-part-status.enum';
 import { FulfilmentMode } from '../enums/fulfilment-mode.enum';
-import { ComplaintKind, ComplaintStatus, routeFor } from '../enums/complaint-kind.enum';
+import {
+  ComplaintKind,
+  ComplaintRoute,
+  ComplaintStatus,
+  routeFor,
+} from '../enums/complaint-kind.enum';
+import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
+import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
+import { DeliveryTripService } from './delivery-trip.service';
+import { PointsWalletService } from '@src/points-wallet/points-wallet.service';
+import { winstonLogger } from '@src/core/logger-config/winston.config';
 
 /**
  * What the buyer sees, and the two things only they can do: confirm they
@@ -39,11 +49,20 @@ export class OrderViewService {
     private readonly ratingRepo: Repository<OrderPartRating>,
     @InjectRepository(OrderComplaint)
     private readonly complaintRepo: Repository<OrderComplaint>,
+    @InjectRepository(Warehouse)
+    private readonly warehouseRepo: Repository<Warehouse>,
+    private readonly odooSync: OdooSyncService,
+    private readonly trips: DeliveryTripService,
+    private readonly wallet: PointsWalletService,
   ) {}
 
-  async listMine(accountId: string, page = 1, limit = 10) {
+  async listMine(accountId: string, page = 1, limit = 10, status?: OrderStatus) {
     const [orders, total] = await this.orderRepo.findAndCount({
-      where: { buyerAccountId: accountId },
+      // A status narrows the list to, say, only the buyer's rejected orders;
+      // omitted, they see every order they placed.
+      where: status
+        ? { buyerAccountId: accountId, status }
+        : { buyerAccountId: accountId },
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -74,6 +93,52 @@ export class OrderViewService {
     return {
       message: 'Orders fetched successfully',
       orders: summaries,
+      pagination: buildPagination(total, page, limit),
+    };
+  }
+
+  /**
+   * Every buyer's orders, for the ADMIN — optionally narrowed to one status, so
+   * the admin desk can pull just the rejected orders, just what needs their
+   * attention, and so on. The buyer is named on each row.
+   */
+  async listAll(page = 1, limit = 10, status?: OrderStatus) {
+    const [orders, total] = await this.orderRepo.findAndCount({
+      where: status ? { status } : {},
+      relations: ['buyerAccount'],
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    const rows = await Promise.all(
+      orders.map(async (order) => {
+        const parts = await this.partRepo.find({ where: { orderId: order.id } });
+        const live = parts.filter((p) => !FAILED_PART_STATUSES.includes(p.status));
+        return {
+          order_id: order.id,
+          order_number: order.orderNumber,
+          status: order.status,
+          buyer: {
+            account_id: order.buyerAccountId,
+            name: order.buyerAccount?.name ?? null,
+            role: order.buyerRole,
+          },
+          fulfilment_mode: order.fulfilmentMode,
+          consolidate: order.consolidate,
+          goods_total: Number(order.goodsTotal),
+          grand_total: Number(order.grandTotal),
+          currency: order.currency,
+          warehouse_count: live.length,
+          is_split: live.length > 1,
+          created_at: order.createdAt,
+        };
+      }),
+    );
+
+    return {
+      message: 'Orders fetched successfully',
+      orders: rows,
       pagination: buildPagination(total, page, limit),
     };
   }
@@ -150,12 +215,68 @@ export class OrderViewService {
         is_split: live.length > 1,
         can_cancel: CANCELLABLE.includes(order.status),
         can_confirm_receipt: order.status === OrderStatus.DELIVERED,
+        // Everything the buyer needs to decide on, and act on, consolidation.
+        // For a split order they did NOT consolidate, each part above already
+        // carries its warehouse's location — that IS the "collect from each"
+        // view; this block is the ALTERNATIVE (gather into one) and its state.
+        consolidation: await this.buildConsolidationView(order),
         placed_at: order.createdAt,
         preparing_at: order.preparingAt ?? null,
         delivered_at: order.deliveredAt ?? null,
         completed_at: order.completedAt ?? null,
         parts: detailedParts,
       },
+    };
+  }
+
+  /**
+   * The consolidation panel for the order detail: whether the buyer may choose
+   * it (and what it would cost), the choice they already made, the live "being
+   * gathered" state, and — once gathered — the single warehouse to collect from.
+   */
+  private async buildConsolidationView(order: Order) {
+    const elig = await this.trips.consolidationEligibility(order);
+
+    // The one warehouse to collect from, once gathering is done (or under way).
+    let collectFrom: Record<string, unknown> | null = null;
+    if (
+      order.consolidate &&
+      order.consolidationWarehouseId &&
+      (order.status === OrderStatus.READY_FOR_PICKUP ||
+        order.status === OrderStatus.CONSOLIDATING ||
+        order.status === OrderStatus.DELIVERED ||
+        order.status === OrderStatus.COMPLETED)
+    ) {
+      const wh = await this.warehouseRepo.findOne({
+        where: { id: order.consolidationWarehouseId },
+      });
+      if (wh) {
+        collectFrom = {
+          id: wh.id,
+          name: wh.name,
+          address: wh.address,
+          latitude: wh.latitude,
+          longitude: wh.longitude,
+        };
+      }
+    }
+
+    return {
+      // The buyer may still CHOOSE it: eligible and not already chosen.
+      can_choose: elig.available && !order.consolidate,
+      // Their standing choice.
+      chosen: order.consolidate,
+      // Where it would gather (or is gathering) — the order's warehouse nearest
+      // the buyer.
+      gathering_warehouse_id:
+        order.consolidationWarehouseId ?? elig.consolidation_warehouse_id ?? null,
+      estimated_cost: elig.estimated_cost ?? null,
+      currency: elig.currency ?? order.currency,
+      // A live sentence while a truck is gathering the parts.
+      being_gathered: order.status === OrderStatus.CONSOLIDATING,
+      // The single place to collect from once gathered.
+      collect_from: collectFrom,
+      reason: elig.available ? null : elig.reason ?? null,
     };
   }
 
@@ -177,12 +298,27 @@ export class OrderViewService {
     order.status = OrderStatus.COMPLETED;
     order.completedAt = new Date();
     await this.orderRepo.save(order);
+
+    // Confirming receipt is what earns the buyer their points: the order value
+    // is converted at the admin's per-role rate and credited to their wallet,
+    // and they are told. Best-effort inside the service — the receipt is
+    // confirmed whether or not points could be awarded.
+    const award = await this.wallet.awardForOrder(
+      accountId,
+      order.buyerRole,
+      Number(order.grandTotal),
+      order.orderNumber,
+    );
+
     return {
       message: 'Receipt confirmed',
       order_id: order.id,
       status: order.status,
       grand_total: Number(order.grandTotal),
       currency: order.currency,
+      // What this receipt added to their wallet — null when no rate is set.
+      points_awarded: award?.points ?? 0,
+      points_balance: award?.balance ?? null,
     };
   }
 
@@ -232,6 +368,7 @@ export class OrderViewService {
       );
     }
 
+    const route = routeFor(input.kind);
     const complaint = await this.complaintRepo.save(
       this.complaintRepo.create({
         partId,
@@ -240,7 +377,7 @@ export class OrderViewService {
         kind: input.kind,
         // Stored, not derived on read: changing the routing rules later must
         // not silently move complaints already being worked on.
-        route: routeFor(input.kind),
+        route,
         status: ComplaintStatus.OPEN,
         description: input.description,
         claimedShortfall:
@@ -248,11 +385,43 @@ export class OrderViewService {
       }),
     );
 
+    // A warehouse-routed complaint (shortage / quality) is decided from the
+    // deduction evidence, which lives in Odoo — so the warehouse's manager is
+    // told there. Delivery / billing complaints stay with the platform admin
+    // (they appear on the backend complaints desk). Best-effort: a complaint is
+    // filed here even if the notification cannot be queued.
+    if (route === ComplaintRoute.WAREHOUSE) {
+      await this.notifyWarehouseOfComplaint(complaint.id, part).catch((e) =>
+        winstonLogger.warn(
+          `Complaint ${complaint.id} filed but not sent to the warehouse: ${(e as Error).message}`,
+          { context: 'COMPLAINT', channel: 'orders' },
+        ),
+      );
+    }
+
     return {
       message: 'Complaint filed',
       complaint_id: complaint.id,
       routed_to: complaint.route,
     };
+  }
+
+  /** Queue a notification to the warehouse's manager in Odoo. */
+  private async notifyWarehouseOfComplaint(complaintId: string, part: OrderPart) {
+    const complaint = await this.complaintRepo.findOne({ where: { id: complaintId } });
+    if (!complaint) return;
+    const [warehouse, order] = await Promise.all([
+      this.warehouseRepo.findOne({ where: { id: part.warehouseId } }),
+      this.orderRepo.findOne({ where: { id: part.orderId } }),
+    ]);
+    if (!warehouse?.odooWarehouseId) return; // not mirrored → nothing to notify
+    await this.odooSync.enqueuePushComplaint({
+      complaintId,
+      odooWarehouseId: warehouse.odooWarehouseId,
+      kind: complaint.kind,
+      description: complaint.description,
+      orderNumber: order?.orderNumber ?? '',
+    });
   }
 
   private async mineOrThrow(accountId: string, orderId: string): Promise<Order> {

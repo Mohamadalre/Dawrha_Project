@@ -130,10 +130,8 @@ export class ExternalPartnerOnboardingService extends OnboardingService {
     const externalPartnerMaterial = this.externalPartnerMaterialRepo.create({
       externalPartnerProfile: profile,
       wasteTypes: wasteTypes,
-      averageOrderQuantity: dto.averageOrderQuantity,
-      estimationOrderSchedule: dto.estimationOrderSchedule,
-      deliveryPreference: dto.deliveryPreference,
-      perferredDeliverySchedule: dto.perferredDeliverySchedule,
+      // A free facility gives only its categories and this positive quantity.
+      averageOrderQuantity: String(dto.averageOrderQuantity),
     });
 
     const savedExternalPartnerMaterial = await this.externalPartnerMaterialRepo.save(externalPartnerMaterial);

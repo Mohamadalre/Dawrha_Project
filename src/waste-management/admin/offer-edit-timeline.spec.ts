@@ -80,7 +80,7 @@ describe('offer edit — amount vs percentage', () => {
     );
   });
 
-  const edit = (dto: any) => service.updateOfferAmount('admin-1', 'off-1', dto);
+  const edit = (dto: any) => service.updateOffer('admin-1', 'off-1', dto);
 
   it('edits by AMOUNT — basis AMOUNT, percentage re-derived', async () => {
     const res = await edit({ amount: 30 });

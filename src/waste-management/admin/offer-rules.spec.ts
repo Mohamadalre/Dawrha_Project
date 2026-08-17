@@ -566,7 +566,7 @@ describe('offer validity and amount edits', () => {
   it('extends an offer that is about to lapse', async () => {
     offerRepo.findOne.mockResolvedValue(existing());
 
-    await service.updateOfferValidity('a', 'off-1', {
+    await service.updateOffer('a', 'off-1', {
       valid_until: '2026-12-31T00:00:00Z',
     } as any);
 
@@ -580,7 +580,7 @@ describe('offer validity and amount edits', () => {
     // had an end date could never lose it.
     offerRepo.findOne.mockResolvedValue(existing());
 
-    await service.updateOfferValidity('a', 'off-1', { valid_until: null } as any);
+    await service.updateOffer('a', 'off-1', { valid_until: null } as any);
 
     expect(offerRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({ validUntil: undefined }),
@@ -591,7 +591,7 @@ describe('offer validity and amount edits', () => {
     offerRepo.findOne.mockResolvedValue(existing());
 
     await expect(
-      service.updateOfferValidity('a', 'off-1', {
+      service.updateOffer('a', 'off-1', {
         valid_until: '2025-01-01T00:00:00Z',
       } as any),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -601,7 +601,7 @@ describe('offer validity and amount edits', () => {
     // A window change that left them would keep quoting an expired offer.
     offerRepo.findOne.mockResolvedValue(existing());
 
-    await service.updateOfferValidity('a', 'off-1', { valid_until: null } as any);
+    await service.updateOffer('a', 'off-1', { valid_until: null } as any);
 
     expect(cache.invalidate).toHaveBeenCalledWith('offers', 'products');
   });
@@ -611,7 +611,7 @@ describe('offer validity and amount edits', () => {
     // list price through at the same moment the apps stop discounting it.
     offerRepo.findOne.mockResolvedValue(existing());
 
-    await service.updateOfferValidity('a', 'off-1', { valid_until: null } as any);
+    await service.updateOffer('a', 'off-1', { valid_until: null } as any);
 
     expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: 'p1' });
   });
@@ -622,7 +622,7 @@ describe('offer validity and amount edits', () => {
     // advertise a saving this amount does not give.
     offerRepo.findOne.mockResolvedValue(existing());
 
-    await service.updateOfferAmount('a', 'off-1', { amount: 40 } as any);
+    await service.updateOffer('a', 'off-1', { amount: 40 } as any);
 
     expect(offerRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({ amount: '40', discountPercentage: '40' }),
@@ -633,7 +633,7 @@ describe('offer validity and amount edits', () => {
     offerRepo.findOne.mockResolvedValue(existing());
 
     await expect(
-      service.updateOfferAmount('a', 'off-1', { amount: 100 } as any),
+      service.updateOffer('a', 'off-1', { amount: 100 } as any),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -642,7 +642,7 @@ describe('offer validity and amount edits', () => {
     // in between — long enough for a real order to be priced by it.
     offerRepo.findOne.mockResolvedValue(existing());
 
-    await service.updateOfferAmount('a', 'off-1', {
+    await service.updateOffer('a', 'off-1', {
       amount: 40,
       valid_until: '2026-12-31T00:00:00Z',
     } as any);
@@ -659,7 +659,7 @@ describe('offer validity and amount edits', () => {
     offerRepo.findOne.mockResolvedValue(existing());
 
     await expect(
-      service.updateOfferAmount('a', 'off-1', {
+      service.updateOffer('a', 'off-1', {
         amount: 40,
         valid_until: '2025-01-01T00:00:00Z',
       } as any),
@@ -669,7 +669,7 @@ describe('offer validity and amount edits', () => {
   it('leaves the window alone when only the amount is sent', async () => {
     offerRepo.findOne.mockResolvedValue(existing());
 
-    await service.updateOfferAmount('a', 'off-1', { amount: 40 } as any);
+    await service.updateOffer('a', 'off-1', { amount: 40 } as any);
 
     expect(offerRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({ validUntil: new Date('2026-06-01T00:00:00Z') }),
@@ -679,7 +679,7 @@ describe('offer validity and amount edits', () => {
   it('tells Odoo when the amount moves', async () => {
     offerRepo.findOne.mockResolvedValue(existing());
 
-    await service.updateOfferAmount('a', 'off-1', { amount: 40 } as any);
+    await service.updateOffer('a', 'off-1', { amount: 40 } as any);
 
     expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: 'p1' });
   });

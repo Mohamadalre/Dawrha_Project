@@ -1,8 +1,10 @@
 import {
   Body,
+  ConflictException,
   Controller,
   Get,
   Patch,
+  Post,
   UseGuards,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -13,7 +15,7 @@ import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { Account } from '@src/user/entities/account.entity';
 import { OdooService } from '@src/odoo/odoo.service';
-import { UpdateOdooAdminDto } from './dto/update-odoo-admin.dto';
+import { CreateOdooAdminDto, UpdateOdooAdminDto } from './dto/update-odoo-admin.dto';
 
 /**
  * The Odoo admin account, managed from the backend by the platform admin.
@@ -42,20 +44,46 @@ export class OdooAdminAccountController {
   }
 
   /**
+   * Create an ADDITIONAL Odoo admin account, so the platform can have more than
+   * one. Invite model: Odoo emails the new admin a link to set their own
+   * password — the backend never chooses, sends, or stores an admin secret.
+   */
+  @Post('admins')
+  @Permissions('admin.accounts.manage')
+  async createAdmin(@Body() dto: CreateOdooAdminDto) {
+    try {
+      const created = await this.odoo.createAdminUser({
+        name: dto.name,
+        login: dto.login,
+        email: dto.email,
+        phone: dto.phone,
+      });
+      return {
+        message: 'Odoo admin account created successfully',
+        result: { odoo: created },
+      };
+    } catch (err: any) {
+      // Odoo's unique-login constraint → a clean 409 rather than a raw 500.
+      if (/login|unique|already|exist/i.test(String(err?.message ?? ''))) {
+        throw new ConflictException('An Odoo admin with this login already exists');
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Edit the Odoo admin's name / email / phone from the backend. The same values
    * are mirrored onto the caller's backend admin account, so both sides stay in
    * step. The Odoo write happens first: if it fails, nothing is changed here
    * either, so the two never diverge silently.
+   *
+   * PROFILE ONLY — the login/password are NOT rotated here. Changing the
+   * password from a routine profile edit is intentionally out of scope; the
+   * credentials are the backend's own connection to Odoo.
    */
   @Patch()
   @Permissions('admin.accounts.manage')
   async update(@CurrentUser() user, @Body() dto: UpdateOdooAdminDto) {
-    // Credentials first (login / password): rotating them updates Odoo, the live
-    // connection and .env together, so a following profile write still connects.
-    if (dto.login !== undefined || dto.password !== undefined) {
-      await this.odoo.updateAdminCredentials({ login: dto.login, password: dto.password });
-    }
-
     // Display fields (name / email / phone) — written to Odoo res.users.
     const odoo = await this.odoo.updateConnectedAdminUser({
       name: dto.name,
@@ -64,7 +92,7 @@ export class OdooAdminAccountController {
     });
 
     // Mirror the display fields onto the backend admin account (the caller) so
-    // the two systems stay in step. Credentials are Odoo-only.
+    // the two systems stay in step.
     const account = await this.accountRepo.findOne({ where: { id: user.id } });
     if (account) {
       if (dto.name !== undefined) account.name = dto.name;
@@ -77,11 +105,6 @@ export class OdooAdminAccountController {
       message: 'Odoo admin account updated successfully',
       result: {
         odoo,
-        // Confirms which credentials were rotated, without ever echoing values.
-        credentials_updated: {
-          login: dto.login !== undefined,
-          password: dto.password !== undefined,
-        },
         backend: account
           ? { id: account.id, name: account.name, email: account.email, phone: account.phone ?? '' }
           : null,

@@ -26,6 +26,7 @@ import {
   CategoryNotAccessibleException,
   CategoryNotFoundException,
   MaterialsNotApplicableException,
+  OfferNotFoundException,
   ProductNotFoundException,
 } from '../exceptions/waste.exceptions';
 import { buildPagination, PaginationMeta, PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
@@ -149,6 +150,16 @@ export class CatalogService {
       throw new ProductNotFoundException();
     }
 
+    // Grades are a GRADED-BUYER concern only. A citizen or an institution never
+    // sees a material's grades — even when it has some — so this returns nothing
+    // to show for them, and no grade keys at all.
+    const tier = tierForRole(caller.role);
+    const graded =
+      tier === PricingTier.FACTORY || tier === PricingTier.FREE_FACILITY;
+    if (!graded) {
+      return { product_id: productId, has_conditions: false, conditions: [] };
+    }
+
     const conditions = await this.conditionsService.activeForProduct(productId);
     if (conditions.length === 0) {
       return {
@@ -159,27 +170,11 @@ export class CatalogService {
       };
     }
 
-    const tier = tierForRole(caller.role);
-    const graded =
-      tier === PricingTier.FACTORY || tier === PricingTier.FREE_FACILITY;
-
-    // Per-condition available stock in the buyer's OWN governorate. Empty for a
-    // flat-tier caller — stock-by-grade is a graded-buyer concern.
-    const stock = graded
-      ? await this.conditionAvailabilityInGovernorate(product, caller)
-      : new Map<string, number>();
+    // Per-condition available stock in the buyer's OWN governorate.
+    const stock = await this.conditionAvailabilityInGovernorate(product, caller);
 
     const rows = await Promise.all(
       conditions.map(async (c) => {
-        const base: Record<string, unknown> = {
-          id: c.id,
-          code: c.code,
-          name_en: c.nameEn,
-          name_ar: c.nameAr,
-          sort_order: c.sortOrder,
-        };
-        if (!graded) return base;
-
         // The caller's own price for this grade, offer applied — one helper,
         // shared with the basket and checkout, so the three never disagree.
         const eff = await this.effectivePrice.effectivePrice(
@@ -187,17 +182,29 @@ export class CatalogService {
           caller.role,
           c.code,
         );
+        // The offer as ONE object, or null — no scattered offer_* fields.
+        const offer =
+          eff?.offer && eff.basePrice != null
+            ? {
+                old_price: eff.basePrice,
+                new_price: eff.price,
+                amount: Number(eff.offer.amount),
+                percentage: offerPercentage(eff.basePrice, Number(eff.offer.amount)),
+                currency: 'SYP',
+                expires_at: eff.offer.validUntil ?? null,
+              }
+            : null;
         return {
-          ...base,
+          id: c.id,
+          code: c.code,
+          name_en: c.nameEn,
+          name_ar: c.nameAr,
+          sort_order: c.sortOrder,
           available: stock.get(c.code) ?? 0,
           base_price: eff?.basePrice ?? null,
           price: eff?.price ?? null,
-          has_offer: !!eff?.offer,
-          discount_percentage:
-            eff?.offer && eff.basePrice
-              ? offerPercentage(eff.basePrice, Number(eff.offer.amount))
-              : null,
-          currency: 'JOD',
+          currency: 'SYP',
+          offer,
         };
       }),
     );
@@ -365,7 +372,13 @@ export class CatalogService {
     // role the other's list — the exact bug already fixed on the product list.
     // Stock-gated buyers (factory / free facility) are NOT cached — the list
     // depends on live warehouse stock in their governorate.
-    const useCache = !this.isStockGated(caller);
+    // The ADMIN administers the catalogue, so they see EVERY category — active
+    // or not, and even one whose materials are all unpriced or out of stock.
+    // Hiding those from them would hide exactly the categories they need to go
+    // in and finish. Buyers still get the buyable-only list below.
+    const isAdmin = caller?.role === Role.ADMIN;
+
+    const useCache = !this.isStockGated(caller) && !isAdmin;
     const cacheParts = `${this.scopeFor(caller)}:${query.page}:${query.limit}:${query.search ?? ''}:${query.sort}:${query.order}`;
     if (useCache) {
       const cached = await this.cache.get<CategoryListResult>('categories', cacheParts);
@@ -376,19 +389,21 @@ export class CatalogService {
       ? await this.buyerProfiles.provinceForBuyer(caller!.id, caller!.role)
       : null;
 
-    const qb = this.categoryRepo
-      .createQueryBuilder('c')
-      .where('c.isActive = :active', { active: true })
-      // An empty category is a dead end: the buyer taps it, gets nothing, and
-      // learns only that the catalogue is unfinished. "Empty" means empty FOR
-      // THEM — a category whose materials are all priced for another tier (or,
-      // for a factory / free facility, all out of stock in their governorate)
-      // has nothing in it they could buy, and the emptiness test is the same one
-      // the material list applies, so tapping a category always lands on the
-      // materials that were counted for it.
-      .andWhere(`EXISTS (${this.buyableProductExistsSql(caller, provinceId)})`);
-    this.applyTierParam(qb, caller);
-    if (provinceId) qb.setParameter('stockProvince', provinceId);
+    const qb = this.categoryRepo.createQueryBuilder('c');
+    if (!isAdmin) {
+      qb
+        .where('c.isActive = :active', { active: true })
+        // An empty category is a dead end: the buyer taps it, gets nothing, and
+        // learns only that the catalogue is unfinished. "Empty" means empty FOR
+        // THEM — a category whose materials are all priced for another tier (or,
+        // for a factory / free facility, all out of stock in their governorate)
+        // has nothing in it they could buy, and the emptiness test is the same
+        // one the material list applies, so tapping a category always lands on
+        // the materials that were counted for it.
+        .andWhere(`EXISTS (${this.buyableProductExistsSql(caller, provinceId)})`);
+      this.applyTierParam(qb, caller);
+      if (provinceId) qb.setParameter('stockProvince', provinceId);
+    }
 
     if (query.search) {
       qb.andWhere('c.name ILIKE :search', { search: `%${query.search}%` })
@@ -574,7 +589,10 @@ export class CatalogService {
     // Stock-gated buyers (factory / free facility) are NOT cached — their list
     // depends on live warehouse stock in their governorate.
     const useCache = !this.isStockGated(caller);
-    const cacheParts = `${this.scopeFor(caller)}:${categoryId}:${query.page}:${query.limit}:${query.sort}:${query.order}:${query.price_min ?? ''}:${query.price_max ?? ''}`;
+    // `search` is part of the cache key: two requests for the same category that
+    // differ only by their search term are different result sets, and sharing
+    // one entry would serve the second caller the first's matches.
+    const cacheParts = `${this.scopeFor(caller)}:${categoryId}:${query.page}:${query.limit}:${query.sort}:${query.order}:${query.price_min ?? ''}:${query.price_max ?? ''}:${query.search ?? ''}`;
     if (useCache) {
       const cached = await this.cache.get<ProductListResult>('products', cacheParts);
       if (cached) return cached;
@@ -583,7 +601,13 @@ export class CatalogService {
     const category = await this.categoryRepo.findOne({ where: { id: categoryId } });
     if (!category) throw new CategoryNotFoundException();
 
-    const { items, total } = await this.queryProducts(caller, query, { categoryId });
+    // Search a material by name WITHIN this category — the same substring +
+    // prefix-ranking `queryProducts` gives the all-materials list, so a buyer
+    // can filter a long category down to the material they came for.
+    const { items, total } = await this.queryProducts(caller, query, {
+      categoryId,
+      search: query.search,
+    });
 
     const result = {
       category: this.mapCategory(category),
@@ -757,6 +781,35 @@ export class CatalogService {
         this.mapOffer(o, !caller, bases.get(`${o.productId}:${o.conditionCode ?? ''}`)),
       ),
       pagination: buildPagination(total, query.page, query.limit),
+    };
+  }
+
+  /**
+   * ONE offer by its id — the same role-gated view the offers list gives, for a
+   * single row.
+   *
+   * Every visibility rule the list applies holds here too: audience, role
+   * targeting, the role-specific override, and the active window. An offer the
+   * caller could not see in the list is therefore a 404 here as well, never a
+   * back-door read of a seller offer or another role's targeted one. Priced by
+   * the caller's own role, exactly like each list item.
+   */
+  async getOfferById(caller: Caller | null, offerId: string) {
+    const allowed = await this.allowedCategoryIds(caller);
+    if (allowed && allowed.length === 0) throw new OfferNotFoundException();
+
+    const offer = await this.baseOfferQuery(allowed, true, caller?.role ?? null)
+      .andWhere('o.id = :offerId', { offerId })
+      .getOne();
+    if (!offer) throw new OfferNotFoundException();
+
+    const bases = await this.basePricesForOffers([offer], this.buyingTier(caller));
+    return {
+      offer: this.mapOffer(
+        offer,
+        !caller,
+        bases.get(`${offer.productId}:${offer.conditionCode ?? ''}`),
+      ),
     };
   }
 
@@ -1027,6 +1080,15 @@ export class CatalogService {
       return { items: [] as unknown[], total: 0 };
     }
 
+    // Factories & free facilities buy from stock in their OWN governorate, so
+    // their listing is both gated by it and enriched with the quantity available
+    // there. Resolved once and reused for the WHERE filter and the per-material
+    // quantity below.
+    const stockGated = this.isStockGated(caller);
+    const provinceId = stockGated
+      ? await this.buyerProfiles.provinceForBuyer(caller.id, caller.role)
+      : null;
+
     const qb = this.productRepo
       .createQueryBuilder('p')
       .leftJoinAndSelect('p.category', 'c')
@@ -1066,8 +1128,7 @@ export class CatalogService {
     // the same way). A material never synced to Odoo has no stock lines, so it
     // is correctly excluded here too. This is why the graded-buyer catalogue is
     // NOT cached (see getAllMaterials / getProductsByCategory) — stock is live.
-    if (this.isStockGated(caller)) {
-      const provinceId = await this.buyerProfiles.provinceForBuyer(caller.id, caller.role);
+    if (stockGated) {
       qb.andWhere(
         `EXISTS (
            SELECT 1 FROM warehouse_inventory wi
@@ -1145,6 +1206,13 @@ export class CatalogService {
       this.conditionsService.labelMapFor(products.map((p) => p.id)),
     ]);
 
+    // For a factory / free facility, how much of each material is available in
+    // their governorate's active warehouses — the quantity they can order right
+    // now. Empty for citizens / institutions (not stock-gated).
+    const provinceStock = stockGated
+      ? await this.provinceStockForProducts(products, provinceId)
+      : undefined;
+
     const callerTier = tierForRole(caller.role);
     let items = products.map((p) =>
       this.mapProduct(
@@ -1154,6 +1222,7 @@ export class CatalogService {
         unitLabels,
         callerTier,
         conditionLabels,
+        provinceStock,
       ),
     );
 
@@ -1169,6 +1238,43 @@ export class CatalogService {
     }
 
     return { items, total };
+  }
+
+  /**
+   * Total AVAILABLE quantity (quantity − reserved, floored at 0) of each material
+   * across the buyer's governorate's ACTIVE warehouses, keyed by odooProductId.
+   *
+   * One grouped query for the whole page — the number a factory / free facility
+   * sees next to a material is exactly what it could order there right now, the
+   * same governorate scope the gating and the availability view use. Materials
+   * never synced to Odoo (no `odooProductId`) contribute nothing.
+   */
+  private async provinceStockForProducts(
+    products: Product[],
+    provinceId: string | null,
+  ): Promise<Map<number, number>> {
+    const map = new Map<number, number>();
+    const odooIds = products
+      .map((p) => p.odooProductId)
+      .filter((x): x is number => x != null);
+    if (!odooIds.length) return map;
+
+    const qb = this.inventoryRepo
+      .createQueryBuilder('wi')
+      .innerJoin('wi.warehouse', 'w')
+      .select('wi.odooProductId', 'pid')
+      .addSelect(
+        'SUM(GREATEST(COALESCE(wi.quantity, 0) - COALESCE(wi.reservedQuantity, 0), 0))',
+        'available',
+      )
+      .where('wi.odooProductId IN (:...odooIds)', { odooIds })
+      .andWhere('w.state = :active', { active: WarehouseState.ACTIVE })
+      .groupBy('wi.odooProductId');
+    if (provinceId) qb.andWhere('w.provinceId = :provinceId', { provinceId });
+
+    const rows = await qb.getRawMany<{ pid: number; available: string }>();
+    for (const r of rows) map.set(Number(r.pid), Number(r.available));
+    return map;
   }
 
   /**
@@ -1523,6 +1629,7 @@ export class CatalogService {
     unitLabels?: Map<string, string>,
     callerTier?: PricingTier,
     conditionLabels?: Map<string, string>,
+    provinceStock?: Map<number, number>,
   ) {
     const offers = liveOffers ?? [];
     const tier = callerTier ?? PricingTier.INDIVIDUAL;
@@ -1567,6 +1674,26 @@ export class CatalogService {
           .sort((a, b) => a.price - b.price)
       : undefined;
 
+    // The offer as ONE tidy object, or null — never a spray of `offer_*` fields
+    // across the row. When the material carries no live offer for this reader,
+    // `offer` is null and NO offer keys appear at all. A graded material can hold
+    // one offer per grade; the headline (biggest real saving) fills the object,
+    // and `by_condition` carries the rest only when there is more than one.
+    const headline = offerRows[0];
+    const offer = headline
+      ? {
+          old_price: headline.base_price,
+          new_price: headline.offer_price,
+          amount: headline.amount,
+          percentage: headline.discount_percentage,
+          currency: 'SYP',
+          expires_at: headline.valid_until,
+          // The full per-grade breakdown lives INSIDE the one offer object, so a
+          // graded material's several offers are organised, not scattered.
+          by_condition: offerRows,
+        }
+      : null;
+
     return {
       id: p.id,
       name: p.name,
@@ -1579,17 +1706,21 @@ export class CatalogService {
       // ONLY the caller's own price (see tierHeadlinePrice) — never the whole
       // tier matrix, so a user token can never read a factory's number.
       price: this.tierHeadlinePrice(prices, tier),
-      currency: 'JOD',
-      has_offer: offerRows.length > 0,
-      // The headline offer — biggest real saving — kept flat for callers that
-      // want one number. `offers` below carries the rest.
-      offer_price: offerRows.length ? offerRows[0].offer_price : null,
-      discount_percentage: offerRows.length ? offerRows[0].discount_percentage : null,
-      /** When the headline offer ends; null = open-ended. */
-      offer_valid_until: offerRows.length ? offerRows[0].valid_until : null,
-      /** Every live offer on this material, best saving first. */
-      offers: offerRows,
-      ...(conditionPrices ? { condition_prices: conditionPrices } : {}),
+      currency: 'SYP',
+      // One object when there is an offer, null when there is not.
+      offer,
+      // Grades and their prices only for the graded buyers (factory / free
+      // facility) AND only when the material actually has grades — a citizen or
+      // institution never sees grades, and a graded material with none carries
+      // no `condition_prices` key at all.
+      ...(conditionPrices && conditionPrices.length ? { condition_prices: conditionPrices } : {}),
+      // Quantity available across the buyer's governorate warehouses — factories
+      // and free facilities only. The key is present only for them (provinceStock
+      // is undefined for citizens / institutions), so it never leaks a stock
+      // figure to a role that does not buy from a warehouse.
+      ...(provinceStock
+        ? { province_available: provinceStock.get(p.odooProductId ?? -1) ?? 0 }
+        : {}),
       created_at: p.createdAt,
     };
   }

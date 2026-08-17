@@ -81,7 +81,13 @@ export const ORDER_PART_TRANSITIONS: Record<
     // Collection: nothing more to arrange, so the buyer can come at once.
     OrderPartStatus.READY_FOR_PICKUP,
   ],
-  [OrderPartStatus.DISPATCHED]: [OrderPartStatus.DELIVERED],
+  [OrderPartStatus.DISPATCHED]: [
+    OrderPartStatus.DELIVERED,
+    // Consolidation: a far part the truck carried arrives at the nearest
+    // warehouse and waits there for the buyer — dispatched from its origin, now
+    // ready to collect at the gathering point (not delivered to the buyer).
+    OrderPartStatus.READY_FOR_PICKUP,
+  ],
   // The manager confirms the buyer took it.
   [OrderPartStatus.READY_FOR_PICKUP]: [OrderPartStatus.DELIVERED],
   [OrderPartStatus.DELIVERED]: [],

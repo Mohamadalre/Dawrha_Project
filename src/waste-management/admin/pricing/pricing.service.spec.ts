@@ -84,6 +84,7 @@ describe('PricingService', () => {
       { resettle: jest.fn().mockResolvedValue({ repriced: 0, suspended: 0 }) } as any,
       { find: jest.fn().mockResolvedValue([]) } as any,
       { createNotification: jest.fn(), enqueueNotification: jest.fn() } as any,
+      { defaultCurrency: jest.fn().mockResolvedValue('SYP') } as any,
     );
   });
 
@@ -109,10 +110,10 @@ describe('PricingService', () => {
       // invoice is read from, so a line linked to the wrong grade is money
       // charged for something the buyer did not order.
       expect(result.pricing.factory).toEqual([
-        { pricing_id: 'pp', condition: 'EXCELLENT', condition_id: 'cond-excellent', price: 0.25, currency: 'JOD' },
+        { pricing_id: 'pp', condition: 'EXCELLENT', condition_id: 'cond-excellent', price: 0.25, currency: 'SYP' },
       ]);
       expect(result.pricing.free_facility).toEqual([
-        { pricing_id: 'pp', condition: 'EXCELLENT', condition_id: 'cond-excellent', price: 0.26, currency: 'JOD' },
+        { pricing_id: 'pp', condition: 'EXCELLENT', condition_id: 'cond-excellent', price: 0.26, currency: 'SYP' },
       ]);
     });
 

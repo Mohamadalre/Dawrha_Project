@@ -26,8 +26,8 @@ import { Account } from '@src/user/entities/account.entity';
 import { Role } from '@src/user/enums/role.enum';
 import { NotificationService } from '@src/notification/notification.service';
 import { NotificationType } from '@src/notification/enums/notification-type.enum';
+import { PlatformSettingsService } from '@src/platform-settings/platform-settings.service';
 
-const DEFAULT_CURRENCY = 'JOD';
 
 /**
  * Map key standing in for 'this material has no conditions, this is its single
@@ -101,6 +101,7 @@ export class PricingService {
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
     private readonly notifications: NotificationService,
+    private readonly settings: PlatformSettingsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -153,16 +154,19 @@ export class PricingService {
     for (const tier of Object.values(PricingTier)) {
       await this.archiveCurrent(productId, tier, PricingArchiveReason.UPDATED, adminId);
     }
+    // The currency for these new rows comes from the platform setting, so
+    // changing the platform currency flows here without a code change.
+    const currency = await this.settings.defaultCurrency();
     // Kept as we insert so the response can carry each new row's id per role.
-    const individualRow = await this.insertCurrent(productId, PricingTier.INDIVIDUAL, dto.individual, DEFAULT_CURRENCY, effectiveFrom, null);
-    const companyRow = await this.insertCurrent(productId, PricingTier.COMPANY, dto.company, DEFAULT_CURRENCY, effectiveFrom, null);
+    const individualRow = await this.insertCurrent(productId, PricingTier.INDIVIDUAL, dto.individual, currency, effectiveFrom, null);
+    const companyRow = await this.insertCurrent(productId, PricingTier.COMPANY, dto.company, currency, effectiveFrom, null);
     const factoryRows: ProductPricing[] = [];
     for (const line of factoryLines) {
-      factoryRows.push(await this.insertCurrent(productId, PricingTier.FACTORY, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition, line.conditionId));
+      factoryRows.push(await this.insertCurrent(productId, PricingTier.FACTORY, line.price, currency, effectiveFrom, line.condition, line.conditionId));
     }
     const freeFacilityRows: ProductPricing[] = [];
     for (const line of freeFacilityLines) {
-      freeFacilityRows.push(await this.insertCurrent(productId, PricingTier.FREE_FACILITY, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition, line.conditionId));
+      freeFacilityRows.push(await this.insertCurrent(productId, PricingTier.FREE_FACILITY, line.price, currency, effectiveFrom, line.condition, line.conditionId));
     }
 
     const updatedCarts = await this.repriceActiveCarts(productId, {
@@ -264,6 +268,7 @@ export class PricingService {
       ? new Date(dto.effective_from)
       : new Date();
     const graded = await this.productConditions.hasConditions(productId);
+    const currency = await this.settings.defaultCurrency();
 
     // Flat tiers: one price each, whatever the material.
     const flat: Array<[PricingTier, number | undefined]> = [
@@ -273,7 +278,7 @@ export class PricingService {
     for (const [tier, price] of flat) {
       if (price === undefined) continue;
       await this.archiveCurrent(productId, tier, PricingArchiveReason.UPDATED, adminId);
-      await this.insertCurrent(productId, tier, price, DEFAULT_CURRENCY, effectiveFrom, null);
+      await this.insertCurrent(productId, tier, price, currency, effectiveFrom, null);
       touched.push(tier);
     }
 
@@ -290,7 +295,7 @@ export class PricingService {
       await this.archiveCurrent(productId, tier, PricingArchiveReason.UPDATED, adminId);
       for (const line of normalized) {
         await this.insertCurrent(
-          productId, tier, line.price, DEFAULT_CURRENCY, effectiveFrom, line.condition, line.conditionId);
+          productId, tier, line.price, currency, effectiveFrom, line.condition, line.conditionId);
       }
       linesByTier.set(tier, normalized);
       touched.push(tier);
@@ -415,7 +420,7 @@ export class PricingService {
     }
 
     const effectiveFrom = dto.effective_from ? new Date(dto.effective_from) : new Date();
-    const currency = dto.currency ?? DEFAULT_CURRENCY;
+    const currency = await this.settings.defaultCurrency();
 
     await this.archiveCurrent(productId, tier, PricingArchiveReason.UPDATED, adminId, conditionCode);
     const inserted = await this.insertCurrent(
@@ -607,13 +612,13 @@ export class PricingService {
   async correctPricingRow(
     adminId: string,
     pricingId: string,
-    dto: { price?: number; currency?: string },
+    dto: { price: number },
   ) {
     const row = await this.pricingRepo.findOne({ where: { id: pricingId } });
     if (!row) throw new NotFoundException('Price row not found');
 
-    if (dto.price === undefined && dto.currency === undefined) {
-      throw new BadRequestException('Send a price or a currency to correct');
+    if (dto.price === undefined) {
+      throw new BadRequestException('Send a price to correct');
     }
 
     if (!this.isLive(row.effectiveFrom, row.effectiveUntil)) {
@@ -622,25 +627,21 @@ export class PricingService {
       );
     }
 
-    const before = { price: Number(row.price), currency: row.currency };
-    if (dto.price !== undefined) row.price = String(dto.price);
-    if (dto.currency !== undefined) row.currency = dto.currency;
+    // Currency is never corrected here — it is the central platform setting, not
+    // a per-row value. Only the typed-wrong figure is fixed.
+    const before = { price: Number(row.price) };
+    row.price = String(dto.price);
     await this.pricingRepo.save(row);
 
-    // Carts are re-priced ONLY when the figure moved — a currency correction
-    // changes the label the same number is quoted in, not the number itself, so
-    // there is nothing to re-price and no offer to re-settle. When the price did
-    // move, carts holding this material at the old figure follow it or the buyer
-    // checks out at a number the catalogue no longer shows.
-    let updatedCarts = 0;
-    if (dto.price !== undefined) {
-      updatedCarts = await this.repriceTier(
-        row.productId, row.tier, dto.price, row.conditionCode ?? null,
-      );
-      await this.offerSettlement.resettle(row.productId, adminId);
-    }
-    // Odoo prices from these rows and the catalogue caches them, so either kind
-    // of correction — price or currency — is pushed and the caches dropped.
+    // The figure moved, so carts holding this material at the old figure follow
+    // it (or the buyer checks out at a number the catalogue no longer shows),
+    // and every offer on the material is re-settled against the new base.
+    const updatedCarts = await this.repriceTier(
+      row.productId, row.tier, dto.price, row.conditionCode ?? null,
+    );
+    await this.offerSettlement.resettle(row.productId, adminId);
+    // Odoo prices from these rows and the catalogue caches them, so the
+    // correction is pushed and the caches dropped.
     await this.odooSync.enqueueUpdatePricing({ productId: row.productId });
     await this.audit.record({
       userId: adminId,
@@ -648,10 +649,7 @@ export class PricingService {
       entityType: 'product_pricing',
       entityId: row.id,
       oldValues: before,
-      newValues: {
-        price: dto.price ?? before.price,
-        currency: dto.currency ?? before.currency,
-      },
+      newValues: { price: dto.price },
     });
     // 'offers' too, not only 'products': the offers listing shows each offer's
     // price and percentage DERIVED from the material's base price, so a price
@@ -673,60 +671,9 @@ export class PricingService {
     };
   }
 
-  /**
-   * Re-denominate a material's CURRENT price list — the live rows only.
-   *
-   * A currency change is a label change, not a price change: the figures stay
-   * exactly as they were, quoted now in a different currency. So this edits the
-   * live rows in place — it does NOT archive them, because nothing commercial
-   * moved — and it never touches the history table, so every past row still
-   * reports the currency the order that paid it was actually charged in.
-   *
-   * Omit `tier` to move every live tier together; name one to move just it.
-   */
-  async updateCurrentCurrency(
-    adminId: string,
-    productId: string,
-    currency: string,
-    tier?: PricingTier,
-  ) {
-    const product = await this.productOrThrow(productId);
-
-    const live = await this.liveRows(productId);
-    const target = tier ? live.filter((r) => r.tier === tier) : live;
-    if (!target.length) {
-      throw new BadRequestException(
-        tier
-          ? `This material has no live ${tier} price to re-denominate`
-          : 'This material has no live price to re-denominate',
-      );
-    }
-
-    const before = target[0].currency;
-    for (const r of target) r.currency = currency;
-    await this.pricingRepo.save(target);
-
-    // The figure did not move, so no cart is re-priced and no offer re-settled;
-    // but Odoo and the catalogue both display the currency, so both are told.
-    await this.odooSync.enqueueUpdatePricing({ productId });
-    await this.audit.record({
-      userId: adminId,
-      action: 'UPDATE_PRICING_CURRENCY',
-      entityType: 'product_pricing',
-      entityId: productId,
-      oldValues: { currency: before },
-      newValues: { currency, tier: tier ?? 'ALL', rows: target.length },
-    });
-    await this.cache.invalidate('products', 'offers');
-
-    return {
-      message: 'Pricing currency updated successfully',
-      product_id: productId,
-      tier: tier ? tier.toLowerCase() : 'all',
-      currency,
-      rows_affected: target.length,
-    };
-  }
+  // Per-product currency re-denomination was removed: currency is a single
+  // central setting (PlatformSettingsService), never set per product. See
+  // PATCH /v1/admin/platform-settings.
 
   /**
    * Give the material's live prices an end date.

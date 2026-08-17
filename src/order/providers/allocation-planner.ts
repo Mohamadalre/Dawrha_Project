@@ -1,9 +1,5 @@
 import { FulfilmentMode } from '../enums/fulfilment-mode.enum';
-import {
-  MAX_PARTS_BY_MODE,
-  QUANTITY_EPSILON,
-  SPLIT_PENALTY_KM,
-} from '../order.config';
+import { QUANTITY_EPSILON } from '../order.config';
 
 /**
  * One material+grade the buyer asked for. `key` identifies it across
@@ -44,7 +40,7 @@ export interface Shortfall {
 export interface AllocationPlan {
   parts: PlannedPart[];
   shortfalls: Shortfall[];
-  /** Distance plus the split penalty — the number plans are compared on. */
+  /** Total road distance of the chosen warehouses — the tie-breaker's value. */
   score: number;
   fullyCovered: boolean;
 }
@@ -56,109 +52,185 @@ export interface AllocationPlan {
  * arguments, which is what makes the decision reproducible and testable — you
  * can hand it a scenario and assert the plan, with no fixtures to stand up.
  *
- * The method is deliberately simple, and that is a design choice rather than a
- * shortcut. It builds exactly TWO candidate plans and compares them:
+ * The rule is a STRICT priority order, not a weighted score, because that is
+ * what the business asked for and it is what can be explained to the buyer whose
+ * order got split:
  *
- *   1. the nearest single warehouse that can cover the whole order;
- *   2. a nearest-first fill across several warehouses.
+ *   1. ONE warehouse if any single one can cover the whole order — the NEAREST
+ *      such warehouse. A single warehouse is always preferred over a split, no
+ *      matter how much nearer the split would be: one manager, one trip, one
+ *      invoice.
+ *   2. Otherwise the FEWEST warehouses that together cover it. Two beats three,
+ *      three beats four, and so on — there is NO artificial cap on the number of
+ *      warehouses: an order splits across as many as it takes to cover it.
+ *      Delivery carries the extra trips, and a split PICKUP can be gathered into
+ *      one warehouse by consolidation, so the old per-mode ceiling is gone.
+ *   3. Among splits of that same fewest size, the one with the LEAST total road
+ *      distance — the nearest set.
+ *   4. If nothing can cover it even across every candidate, the best partial
+ *      fill (nearest first), so the buyer can be shown exactly what is available
+ *      and decide — the caller never ships short without asking.
  *
- * A general optimiser over every subset would be exponential, would need a
- * solver, and would produce answers nobody could explain to the buyer whose
- * order got split. Two candidates and one comparison capture the real trade-off
- * and can be justified in a sentence.
+ * Enumerating combinations stays affordable because the candidate list is
+ * already bounded upstream (the distance step keeps only the nearest handful,
+ * MAX_CANDIDATE_WAREHOUSES): the number of subsets over a handful is tiny, so the
+ * exact answer is cheaper than reasoning about a heuristic's blind spots.
  */
 export function planAllocation(params: {
   required: RequiredLine[];
   supplies: WarehouseSupply[];
-  mode: FulfilmentMode;
+  /** Accepted for context; no longer bounds the split. */
+  mode?: FulfilmentMode;
 }): AllocationPlan {
-  const { required, mode } = params;
-  // Nearest first — every strategy below relies on this ordering.
+  const { required } = params;
+  // Nearest first — every step below relies on this ordering.
   const supplies = [...params.supplies].sort((a, b) => a.distanceKm - b.distanceKm);
-  const maxParts = MAX_PARTS_BY_MODE[mode];
+  // No artificial cap: an order may split across as many warehouses as it needs
+  // to be covered, bounded only by how many candidate warehouses there are.
+  const maxParts = supplies.length;
 
-  const single = planSingleWarehouse(required, supplies, mode);
-  const split = planNearestFirst(required, supplies, maxParts, mode);
+  // 1. A single warehouse always wins if one can cover the whole order.
+  const single = planSingleWarehouse(required, supplies);
+  if (single) return single;
 
-  // A plan that covers the order always beats one that does not, however
-  // cheaply it scores — a cheap plan that leaves the buyer short is not a
-  // better outcome, it is a different (worse) one.
-  const candidates = [single, split].filter((p): p is AllocationPlan => p !== null);
-  if (!candidates.length) return emptyPlan(required);
+  // 2 & 3. The fewest warehouses that cover it, nearest set among equals.
+  const split = planFewestParts(required, supplies, maxParts);
+  if (split) return split;
 
-  const covering = candidates.filter((p) => p.fullyCovered);
-  const pool = covering.length ? covering : candidates;
-  return pool.reduce((best, p) => (p.score < best.score ? p : best));
+  // 4. Nothing covers it within the ceiling — the best partial, to hand back.
+  return planPartial(required, supplies, maxParts);
 }
 
 /**
- * The nearest warehouse that can supply EVERY line on its own.
+ * The NEAREST single warehouse that can supply EVERY line on its own.
  *
- * Tried first because one warehouse is nearly always the better outcome: one
- * manager to approve, one trip, one invoice. The scoring below only overrides
- * that when the single option is genuinely far.
+ * `supplies` is nearest-first, so the first that covers is the nearest that
+ * covers.
  */
 function planSingleWarehouse(
   required: RequiredLine[],
   supplies: WarehouseSupply[],
-  mode: FulfilmentMode,
 ): AllocationPlan | null {
-  const covering = supplies.find((s) =>
-    required.every((line) => (s.available.get(line.key) ?? 0) >= line.quantity - QUANTITY_EPSILON),
-  );
+  const covering = supplies.find((s) => combinationCovers(required, [s]));
   if (!covering) return null;
 
   const part: PlannedPart = {
     warehouseId: covering.warehouseId,
     distanceKm: covering.distanceKm,
-    lines: required.map((line) => ({ key: line.key, quantity: line.quantity })),
+    lines: required
+      .filter((line) => line.quantity > QUANTITY_EPSILON)
+      .map((line) => ({ key: line.key, quantity: round3(line.quantity) })),
   };
   return {
     parts: [part],
     shortfalls: [],
-    score: scorePlan([part], mode),
+    score: round3(covering.distanceKm),
     fullyCovered: true,
   };
 }
 
 /**
- * Fill from the nearest warehouses outward, each taking what it can, until the
- * order is covered or the part ceiling is reached.
+ * The smallest set of warehouses that together cover the order, and — among
+ * sets of that same smallest size — the one with the least total distance.
  *
- * One pass over the warehouses with an inner pass over the lines: the work is
- * bounded by candidates × lines, both small, and there is no backtracking to
- * reason about.
+ * Grown one size at a time from two upward: the first size that yields a
+ * covering set is by construction the fewest possible, so the search stops the
+ * moment it finds one.
  */
-function planNearestFirst(
+function planFewestParts(
   required: RequiredLine[],
   supplies: WarehouseSupply[],
   maxParts: number,
-  mode: FulfilmentMode,
 ): AllocationPlan | null {
+  for (let size = 2; size <= maxParts; size++) {
+    let best: { combo: WarehouseSupply[]; totalKm: number } | null = null;
+    for (const combo of combinations(supplies, size)) {
+      if (!combinationCovers(required, combo)) continue;
+      const totalKm = combo.reduce((sum, w) => sum + w.distanceKm, 0);
+      if (!best || totalKm < best.totalKm) best = { combo, totalKm };
+    }
+    if (best) return buildCoveringPlan(required, best.combo);
+  }
+  return null;
+}
+
+/** Does this set of warehouses hold enough of EVERY line, added together? */
+function combinationCovers(
+  required: RequiredLine[],
+  combo: WarehouseSupply[],
+): boolean {
+  return required.every((line) => {
+    if (line.quantity <= QUANTITY_EPSILON) return true;
+    const total = combo.reduce(
+      (sum, w) => sum + (w.available.get(line.key) ?? 0),
+      0,
+    );
+    return total >= line.quantity - QUANTITY_EPSILON;
+  });
+}
+
+/**
+ * Turns a covering set (already known to cover) into parts, filling nearest
+ * first so the closest warehouse in the set carries as much as it can.
+ *
+ * `combo` is in nearest-first order (it was drawn from the sorted list), so a
+ * warehouse can only end up with nothing if the ones before it already covered
+ * everything — which cannot happen for a MINIMAL covering set, so no empty part
+ * is produced. The filter is kept anyway as a cheap guarantee.
+ */
+function buildCoveringPlan(
+  required: RequiredLine[],
+  combo: WarehouseSupply[],
+): AllocationPlan {
   const remaining = new Map(required.map((l) => [l.key, l.quantity]));
   const parts: PlannedPart[] = [];
-
-  for (const supply of supplies) {
-    if (parts.length >= maxParts) break;
+  for (const supply of combo) {
     if (isSatisfied(remaining)) break;
-
     const lines = takeFrom(supply, remaining);
-    if (!lines.length) continue; // this warehouse has nothing we still need
-
+    if (!lines.length) continue;
     parts.push({
       warehouseId: supply.warehouseId,
       distanceKm: supply.distanceKm,
       lines,
     });
   }
+  return {
+    parts,
+    shortfalls: buildShortfalls(required, remaining),
+    score: round3(parts.reduce((sum, p) => sum + p.distanceKm, 0)),
+    fullyCovered: true,
+  };
+}
 
-  if (!parts.length) return null;
-
+/**
+ * Best-effort fill when nothing can cover the order within the ceiling: take
+ * from the nearest warehouses outward until the ceiling is reached, and report
+ * what is still missing. This is what the buyer is shown so they can accept the
+ * available quantity or walk away.
+ */
+function planPartial(
+  required: RequiredLine[],
+  supplies: WarehouseSupply[],
+  maxParts: number,
+): AllocationPlan {
+  const remaining = new Map(required.map((l) => [l.key, l.quantity]));
+  const parts: PlannedPart[] = [];
+  for (const supply of supplies) {
+    if (parts.length >= maxParts) break;
+    if (isSatisfied(remaining)) break;
+    const lines = takeFrom(supply, remaining);
+    if (!lines.length) continue;
+    parts.push({
+      warehouseId: supply.warehouseId,
+      distanceKm: supply.distanceKm,
+      lines,
+    });
+  }
   const shortfalls = buildShortfalls(required, remaining);
   return {
     parts,
     shortfalls,
-    score: scorePlan(parts, mode),
+    score: round3(parts.reduce((sum, p) => sum + p.distanceKm, 0)),
     fullyCovered: shortfalls.length === 0,
   };
 }
@@ -180,20 +252,18 @@ function takeFrom(
   return lines;
 }
 
-/**
- * Distance plus a penalty per EXTRA warehouse.
- *
- * The penalty is what stops the planner splitting an order across three nearby
- * warehouses when one slightly farther warehouse could serve it whole. Every
- * extra part means another manager who must approve, another chance of
- * refusal, another invoice — real costs that distance alone does not express.
- * It is far heavier for self-collection, because there the BUYER makes each
- * extra trip.
- */
-function scorePlan(parts: PlannedPart[], mode: FulfilmentMode): number {
-  const distance = parts.reduce((sum, p) => sum + p.distanceKm, 0);
-  const penalty = Math.max(parts.length - 1, 0) * SPLIT_PENALTY_KM[mode];
-  return round3(distance + penalty);
+/** Every k-sized subset of `items`, preserving the input (nearest-first) order. */
+function* combinations<T>(items: T[], k: number): Generator<T[]> {
+  if (k <= 0 || k > items.length) return;
+  const indices = Array.from({ length: k }, (_, i) => i);
+  while (true) {
+    yield indices.map((i) => items[i]);
+    let pivot = k - 1;
+    while (pivot >= 0 && indices[pivot] === items.length - k + pivot) pivot--;
+    if (pivot < 0) return;
+    indices[pivot]++;
+    for (let i = pivot + 1; i < k; i++) indices[i] = indices[i - 1] + 1;
+  }
 }
 
 function isSatisfied(remaining: Map<string, number>): boolean {
@@ -220,22 +290,78 @@ function buildShortfalls(
     .filter((s) => s.missing > QUANTITY_EPSILON);
 }
 
-function emptyPlan(required: RequiredLine[]): AllocationPlan {
-  return {
-    parts: [],
-    shortfalls: required.map((l) => ({
-      key: l.key,
-      requested: l.quantity,
-      allocated: 0,
-      missing: l.quantity,
-    })),
-    score: Number.POSITIVE_INFINITY,
-    fullyCovered: false,
-  };
-}
-
 function round3(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+/** One alternative set of warehouses the order could be split across instead. */
+export interface CoveringOption {
+  warehouseIds: string[];
+  totalDistanceKm: number;
+}
+
+/**
+ * The plan for a SPECIFIC set of warehouses the admin chose when modifying a
+ * split — not the best set the allocator would pick, but exactly the one they
+ * asked for. Returns null when a chosen warehouse is not a real candidate or the
+ * chosen set does not cover the order (both a refusal, not a silent short-fill).
+ */
+export function planForWarehouses(params: {
+  required: RequiredLine[];
+  supplies: WarehouseSupply[];
+  warehouseIds: string[];
+}): AllocationPlan | null {
+  const wanted = new Set(params.warehouseIds);
+  const chosen = params.supplies.filter((s) => wanted.has(s.warehouseId));
+  // Every chosen warehouse must be a real candidate, and together they must
+  // cover the whole order — the admin cannot swap onto a set that falls short.
+  if (chosen.length !== wanted.size) return null;
+  if (!combinationCovers(params.required, chosen)) return null;
+  return buildCoveringPlan(
+    params.required,
+    [...chosen].sort((a, b) => a.distanceKm - b.distanceKm),
+  );
+}
+
+/**
+ * Every set of EXACTLY `size` warehouses that TOGETHER cover the order, nearest
+ * (least total road distance) first.
+ *
+ * This is the list an administrator is shown when they choose to MODIFY a split
+ * they were handed: the same number of warehouses as the split itself (a
+ * two-warehouse split offers other pairs, a three-warehouse split offers other
+ * triples — never a different size), and only real options — a set is returned
+ * only if it covers every line in full, and a warehouse that holds none of the
+ * ordered materials is dropped before the enumeration so it is never offered.
+ *
+ * Bounded and cheap for the same reason allocation is: the candidate list is
+ * already the nearest handful (MAX_CANDIDATE_WAREHOUSES), so the number of
+ * `size`-sized subsets is tiny.
+ */
+export function coveringCombinations(params: {
+  required: RequiredLine[];
+  supplies: WarehouseSupply[];
+  size: number;
+}): CoveringOption[] {
+  const { required, size } = params;
+
+  // Drop warehouses that hold NONE of the ordered materials — they can never
+  // contribute, so they must never appear in an option.
+  const contributing = params.supplies.filter((s) =>
+    required.some((l) => l.quantity > QUANTITY_EPSILON && (s.available.get(l.key) ?? 0) > QUANTITY_EPSILON),
+  );
+  const supplies = contributing.sort((a, b) => a.distanceKm - b.distanceKm);
+  if (size < 1 || size > supplies.length) return [];
+
+  const options: CoveringOption[] = [];
+  for (const combo of combinations(supplies, size)) {
+    if (!combinationCovers(required, combo)) continue;
+    options.push({
+      warehouseIds: combo.map((w) => w.warehouseId),
+      totalDistanceKm: round3(combo.reduce((sum, w) => sum + w.distanceKm, 0)),
+    });
+  }
+  return options.sort((a, b) => a.totalDistanceKm - b.totalDistanceKm);
 }
 
 /**

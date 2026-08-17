@@ -10,8 +10,13 @@ import {
 } from 'typeorm';
 import { FactoryProfile } from '../profile/factory-profile.entity';
 import { FactoryWasteCategory } from '@src/waste-management/entities/factory-waste-category.entity';
-import { DeliverySchedule } from '@src/user/enums/delivery-schedule.enum';
-import { CollectionFrequeny } from '@src/user/enums/collectionFrequeny.enum';
+
+/** One detailed delivery window: a weekday and a start→end 24h time. */
+export interface DeliveryTimeSlot {
+  day: string;
+  from: string;
+  to: string;
+}
 
 @Entity('factory_materials')
 export class FactoryMaterial {
@@ -27,25 +32,19 @@ export class FactoryMaterial {
   })
   wasteTypes: FactoryWasteCategory[];
 
-  @Column()
+  // Typical order size — a positive number (stored decimal; TypeORM reads it
+  // back as a string).
+  @Column('decimal', { precision: 14, scale: 3 })
   averageOrderQuantity: string;
 
-  @Column({
-    type: 'enum',
-    enum: CollectionFrequeny,
-
-  })
-  estimationOrderSchedule: CollectionFrequeny;
-
+  // Whether the factory wants the order delivered or will collect it itself.
   @Column({ default: false })
   deliveryPreference: boolean;
 
-  @Column({
-    type: 'enum',
-    enum: DeliverySchedule,
-    nullable: true,
-  })
-  perferredDeliverySchedule?: DeliverySchedule;
+  // The detailed windows the factory can receive a delivery in — replaces the
+  // old single morning/afternoon/evening choice. Null when it self-collects.
+  @Column({ type: 'jsonb', nullable: true })
+  deliveryTimeSlots?: DeliveryTimeSlot[] | null;
 
   @CreateDateColumn()
   createdAt: Date;

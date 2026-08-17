@@ -188,4 +188,21 @@ export class CatalogController {
     const result = await this.catalog.searchOffers(user, query);
     return { message: 'Offers fetched successfully', result };
   }
+
+  /**
+   * ONE offer in full, by its id — priced for the caller's role.
+   *
+   * Declared AFTER `offers/search` so the literal segment wins; a non-UUID like
+   * `search` is rejected by the pipe rather than read as an offer id. Role-gated
+   * in the service: an offer the caller could not see in the list is a 404 here.
+   */
+  @Get('offers/:offerId')
+  @Permissions('waste.offers.view')
+  async getOffer(
+    @CurrentUser() user,
+    @Param('offerId', ParseUUIDPipe) offerId: string,
+  ) {
+    const result = await this.catalog.getOfferById(user, offerId);
+    return { message: 'Offer fetched successfully', result };
+  }
 }

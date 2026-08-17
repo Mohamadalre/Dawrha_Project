@@ -54,6 +54,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
+    // The signed-in account's saved language, if the guard ran before the error.
+    const userLang = ctx.getRequest()?.user?.language as string | undefined;
 
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal Server Error';
@@ -79,12 +81,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
         // Translate each validation message individually, then join — otherwise
         // the joined string never matches a translation key.
         message = exceptionResponse.message
-          .map((m: string) => this.translate(m))
+          .map((m: string) => this.translate(m, userLang))
           .join(', ');
       } else if (typeof exceptionResponse === 'object' && exceptionResponse.message) {
         // Handle both array and string message formats
         message = Array.isArray(exceptionResponse.message)
-          ? exceptionResponse.message.map((m: string) => this.translate(m)).join(', ')
+          ? exceptionResponse.message.map((m: string) => this.translate(m, userLang)).join(', ')
           : exceptionResponse.message;
       } else if (typeof exceptionResponse === 'string') {
         // Handle string response messages
@@ -101,7 +103,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     // Send standardized error response (message translated to the request language)
     response.status(statusCode).json({
       success: false,
-      message: this.translate(message),
+      message: this.translate(message, userLang),
       ...(errorCode ? { errorCode } : {}),
       data: null,
       statusCode,
@@ -114,15 +116,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
    * then (for Arabic only) via generic class-validator patterns; otherwise
    * returns the original literal.
    */
-  private translate(message: string): string {
+  private translate(message: string, langOverride?: string): string {
     if (typeof message !== 'string' || !message) return message;
     const i18n = I18nContext.current();
+    // The signed-in account's saved language wins over the header the resolvers
+    // picked; guests fall back to that resolved language.
+    const lang = langOverride ?? i18n?.lang;
     if (i18n) {
       const key = `translation.${message}`;
-      const t = i18n.t(key);
+      const t = langOverride ? i18n.t(key, { lang: langOverride }) : i18n.t(key);
       if (typeof t === 'string' && t !== key) return t;
     }
-    const lang = i18n?.lang;
     if (lang && lang.toLowerCase().startsWith('ar')) {
       return translateValidationPattern(message);
     }

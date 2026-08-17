@@ -10,6 +10,7 @@ import {
   TOKEN_HOLDING_STATUSES,
 } from '@src/auth/decorators/account-status.decorator';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
+import { DataSource } from 'typeorm';
 
 /**
  * Does the token an inactive applicant receives actually open only what it
@@ -21,9 +22,15 @@ import { AccountStatus } from '@src/user/enums/account-status.enum';
  * whole reason issuing these tokens is safe, and it is a wiring property, so it
  * cannot be tested by constructing the guard by hand.
  *
- * No database and no AppModule: two bare controllers standing in for "a route
- * that forgot to declare anything" (the cart, the catalogue — 210 of them) and
- * "a route opened to applicants" (the application, the re-upload).
+ * No AppModule: two bare controllers standing in for "a route that forgot to
+ * declare anything" (the cart, the catalogue — 210 of them) and "a route opened
+ * to applicants" (the application, the re-upload).
+ *
+ * The guard reads the LIVE account status from the database by the token's id —
+ * never from the token's own claim, so a status that changed after the token was
+ * minted (blocked, approved) takes effect at once. A tiny DataSource stub stands
+ * in for that lookup: each test signs a token whose id IS the status it is
+ * exercising, and the stub returns an account carrying exactly that status.
  */
 
 /** Stands in for every route that declares nothing: cart, catalogue, orders. */
@@ -77,8 +84,11 @@ describe('Account status scopes the token (e2e)', () => {
   let app: INestApplication;
   let jwt: JwtService;
 
+  // The id IS the status, so the DataSource stub can return the right account
+  // for whichever status a test is exercising (the guard reads status from the
+  // DB by id, never from the token claim).
   const tokenFor = (accountStatus: AccountStatus) =>
-    jwt.sign({ id: 'acc-1', role: 'COLLECTOR', accountStatus }, { secret: SECRET });
+    jwt.sign({ id: accountStatus, role: 'COLLECTOR', accountStatus }, { secret: SECRET });
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -94,6 +104,20 @@ describe('Account status scopes the token (e2e)', () => {
       providers: [
         Reflector,
         ConfigService,
+        // Stands in for the live account lookup: the account's status IS its id,
+        // which is how each token was signed. An unknown id (a forged token that
+        // never reaches this lookup) is not exercised here.
+        {
+          provide: DataSource,
+          useValue: {
+            getRepository: () => ({
+              findOne: async ({ where }: any) => {
+                const id = where?.id;
+                return id ? { id, accountStatus: id as AccountStatus } : null;
+              },
+            }),
+          },
+        },
         { provide: APP_GUARD, useClass: AccountStatusGuard },
       ],
     }).compile();

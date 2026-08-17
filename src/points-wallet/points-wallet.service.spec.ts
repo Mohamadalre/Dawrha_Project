@@ -16,7 +16,12 @@ describe('PointsWalletService', () => {
     save: jest.fn(async (v) => ({ id: 'w1', ...v })),
   });
 
-  const build = (repo: any) => new PointsWalletService(repo as any);
+  const build = (repo: any, rates?: any, notifications?: any) =>
+    new PointsWalletService(
+      repo as any,
+      rates ?? ({ forRole: jest.fn().mockResolvedValue(null) } as any),
+      notifications ?? ({ createNotification: jest.fn().mockResolvedValue({}) } as any),
+    );
 
   describe('eligibility', () => {
     it('covers exactly the four trading roles', () => {
@@ -93,6 +98,40 @@ describe('PointsWalletService', () => {
       const res = await build(repo).view('acc1', Role.FACTORY);
       expect(repo.save).toHaveBeenCalled();
       expect(res).toMatchObject({ points: 0, currency: 'POINTS' });
+    });
+  });
+
+  describe('awardForOrder', () => {
+    it('converts the order value at the role rate, credits the wallet, notifies', async () => {
+      const repo = makeRepo();
+      // Existing wallet with 5 points; a 3000 order at 1000-per-point earns 3.
+      repo.findOne.mockResolvedValue({ id: 'w1', accountId: 'acc1', points: 5 });
+      const rates = { forRole: jest.fn().mockResolvedValue({ amountPerPoint: '1000' }) };
+      const notifications = { createNotification: jest.fn().mockResolvedValue({}) };
+
+      const res = await build(repo, rates, notifications).awardForOrder('acc1', Role.FACTORY, 3000, 'ORD-1');
+
+      expect(res).toEqual({ points: 3, balance: 8 });
+      expect(repo.save).toHaveBeenCalledWith(expect.objectContaining({ points: 8 }));
+      expect(notifications.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'acc1', args: expect.objectContaining({ points: 3 }) }),
+      );
+    });
+
+    it('awards nothing when no rate is set for the role', async () => {
+      const repo = makeRepo();
+      const rates = { forRole: jest.fn().mockResolvedValue(null) };
+      const res = await build(repo, rates).awardForOrder('acc1', Role.FACTORY, 3000, 'ORD-1');
+      expect(res).toBeNull();
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('awards no points when the order is too small to earn one', async () => {
+      const repo = makeRepo();
+      repo.findOne.mockResolvedValue({ id: 'w1', accountId: 'acc1', points: 2 });
+      const rates = { forRole: jest.fn().mockResolvedValue({ amountPerPoint: '1000' }) };
+      const res = await build(repo, rates).awardForOrder('acc1', Role.FACTORY, 500, 'ORD-1');
+      expect(res).toEqual({ points: 0, balance: 2 });
     });
   });
 });

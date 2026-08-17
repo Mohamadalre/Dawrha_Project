@@ -3,6 +3,7 @@ import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { OnboardingService } from '../onboarding.service';
 import { InformationFactoryDto, WasteFactoryDto } from '../dto/factory-onboarding.dto';
+import { assertValidTimeSlots } from '../dto/delivery-time-slot.dto';
 import { FactoryProfile } from '@src/user/entities/profile/factory-profile.entity';
 import { FactoryMaterial } from '@src/user/entities/material/factory-material.entity';
 import { FactoryWasteCategory } from '@src/waste-management/entities/factory-waste-category.entity';
@@ -138,6 +139,9 @@ export class FactoryOnboardingService extends OnboardingService {
     if (step !== 'materials') {
       throw new ForbiddenException('You cannot add materials data,you must add data from the previous');
     }
+    // A window that ends before it starts is rejected before anything is saved.
+    assertValidTimeSlots(dto.deliveryTimeSlots);
+
     const wasteTypesEntities = await this.checkWasteType(dto.wasteCategoryId);
     const wasteTypes = wasteTypesEntities.map((wt) => {
       const pivot = new FactoryWasteCategory();
@@ -148,10 +152,10 @@ export class FactoryOnboardingService extends OnboardingService {
     const factoryMaterial = this.factoryMaterialRepo.create({
       factoryProfile: profile,
       wasteTypes: wasteTypes,
-      averageOrderQuantity: dto.averageOrderQuantity,
-      estimationOrderSchedule: dto.estimationOrderSchedule,
+      // Stored as a decimal string; the DTO guarantees it is a positive number.
+      averageOrderQuantity: String(dto.averageOrderQuantity),
       deliveryPreference: dto.deliveryPreference,
-      perferredDeliverySchedule: dto.perferredDeliverySchedule,
+      deliveryTimeSlots: dto.deliveryTimeSlots ?? null,
     });
 
     const savedFactoryMaterial = await this.factoryMaterialRepo.save(factoryMaterial);

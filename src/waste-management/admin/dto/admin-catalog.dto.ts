@@ -139,6 +139,20 @@ export class CreateProductDto {
   @IsUUID()
   unit_id: string;
 
+  /**
+   * Weight of ONE unit in kilograms. REQUIRED when the unit is not KG and
+   * ignored when it is (a kilogram already weighs a kilogram). Delivery truck
+   * capacity is measured in kg, so a by-the-piece material cannot be routed
+   * without it. Parsed from text because the form is multipart.
+   */
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === '' || value === null ? undefined : Number(value),
+  )
+  @IsNumber()
+  @Min(0.001)
+  unit_weight_kg?: number;
+
   // Parsed from a string too: these forms are submitted as multipart/form-data
   // (they carry the image FILE), where every field arrives as text — so "true"
   // must become true and "false" false, while an omitted flag stays undefined.
@@ -170,6 +184,19 @@ export class UpdateProductDto {
   @IsOptional()
   @IsUUID()
   unit_id?: string;
+
+  /**
+   * Weight of one unit in kilograms — see {@link CreateProductDto}. On update it
+   * becomes required only when the (new or existing) unit is not KG and the
+   * material has no weight yet; supplying it while the unit is KG is ignored.
+   */
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === '' || value === null ? undefined : Number(value),
+  )
+  @IsNumber()
+  @Min(0.001)
+  unit_weight_kg?: number;
 
   // Parsed from a string too: these forms are submitted as multipart/form-data
   // (they carry the image FILE), where every field arrives as text — so "true"
@@ -361,9 +388,52 @@ export class CreateOfferDto {
   valid_until?: string;
 }
 
-// UpdateOfferDto removed with the general PUT offers/:offerId route — an offer
-// is now edited only through UpdateOfferAmountDto (/amount, with its dates) and
-// UpdateOfferValidityDto (/validity), each re-validating just what it changes.
+/**
+ * Edit an offer through ONE route: its description, its size (amount OR
+ * percentage), and its window. PATCH semantics — send only what changes, and at
+ * least one field is required.
+ *
+ * Rules carried over from the two focused routes this replaces:
+ *  - amount and percentage are MUTUALLY EXCLUSIVE — they disagree the first time
+ *    the price moves, and nothing afterwards could say which the admin meant;
+ *  - the derived discountPercentage is never accepted — only amount/percentage;
+ *  - a percentage is the PROMISE kept across later price edits (its amount is
+ *    recomputed), while an amount freezes the number;
+ *  - valid_until = null CLEARS the end date (open-ended); the window must end
+ *    after it starts.
+ *
+ * The audience and target roles are deliberately NOT editable here: changing who
+ * an offer is for flips which way it moves a price, so it is not folded into a
+ * routine description/size/date edit.
+ */
+export class UpdateOfferDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.001)
+  amount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  @Max(1000)
+  percentage?: number;
+
+  @IsOptional()
+  @IsDateString()
+  valid_from?: string;
+
+  /** `null` removes the end date — the offer becomes open-ended. */
+  @IsOptional()
+  @IsDateString()
+  valid_until?: string | null;
+}
 
 export class CreateConditionDto {
   @Transform(normalizeUnitCode)
@@ -449,91 +519,6 @@ export class UpdateUnitDto {
   )
   @IsBoolean()
   is_active?: boolean;
-}
-
-/**
- * Change only when an offer ends.
- *
- * `null` is meaningful and distinct from omitted: it clears the date and makes
- * the offer open-ended. A DTO that could not express that would leave "runs
- * until further notice" unreachable once a date had ever been set.
- */
-export class UpdateOfferValidityDto {
-  @IsOptional()
-  @IsDateString()
-  valid_until?: string | null;
-
-  /** Moving the start is rarer but belongs with it — both bound the window. */
-  @IsOptional()
-  @IsDateString()
-  valid_from?: string;
-}
-
-/**
- * Change the offer's size — as an AMOUNT or as a PERCENTAGE.
- *
- * Exactly one of `amount` / `percentage` is given, the same rule creation
- * follows: the two disagree the first time a price moves and nothing afterwards
- * could say which the administrator meant. The stored `discountPercentage` is
- * still DERIVED and never accepted — a hand-typed percentage is free to disagree
- * with the two numbers either side of it, so a "biggest discounts" list ranked
- * by it would rank by somebody's arithmetic rather than by the money saved.
- *
- * The difference between the two bases shows up LATER, when the material's price
- * is edited: an AMOUNT offer keeps its amount, a PERCENTAGE offer keeps its
- * percentage and has the amount recomputed. This route sets that basis.
- *
- * Takes effect everywhere the offer is read. Orders already placed keep the
- * price they were quoted — the cart snapshots `unit_price` when the line is
- * created, so a later edit cannot reprice work already committed.
- */
-export class UpdateOfferAmountDto {
-  /**
-   * The new AMOUNT the price moves by.
-   *
-   * Re-validated exactly as on creation: raised past a price it does not make
-   * that price small, it makes it NEGATIVE — which means paying a buyer to
-   * take the material away. Mutually exclusive with `percentage`; the derived
-   * percentage is recomputed from it and never sent.
-   */
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0.001)
-  amount?: number;
-
-  /**
-   * The new size expressed as a PERCENTAGE of the price instead of an amount.
-   *
-   * Mutually exclusive with `amount`. The stored amount is derived from it
-   * against each price the offer touches (the cheapest tier it faces, so it can
-   * never drive one below zero), and — unlike an amount edit — the offer keeps
-   * this percentage as its promise, so a later price change recomputes the
-   * amount rather than freezing it.
-   */
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0.01)
-  @Max(1000)
-  percentage?: number;
-
-  /**
-   * The window, editable in the SAME request as the size.
-   *
-   * They are one decision in practice — "make it 2 off, and run it to the end
-   * of the month" — and splitting them across two calls leaves the offer
-   * briefly live at the new size on the old dates. Both are optional: send only
-   * the size and the window is left exactly as it was.
-   */
-  @IsOptional()
-  @IsDateString()
-  valid_from?: string;
-
-  /** `null` removes the end date — the offer becomes open-ended. */
-  @IsOptional()
-  @IsDateString()
-  valid_until?: string | null;
 }
 
 /**

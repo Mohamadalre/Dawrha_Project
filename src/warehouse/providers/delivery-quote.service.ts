@@ -21,7 +21,7 @@ export interface DeliveryQuote {
 
 const NO_TARIFF: Omit<DeliveryQuote, 'distanceKm'> = {
   cost: 0,
-  currency: 'JOD',
+  currency: 'SYP',
   baseFee: 0,
   ratePerKm: 0,
   tariffId: null,

@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OdooModule } from '@src/odoo/odoo.module';
 import { NotificationModule } from '@src/notification/notification.module';
+import { PlatformSettingsModule } from '@src/platform-settings/platform-settings.module';
 import { SuggestionsModule } from '@src/waste-management/suggestions/suggestions.module';
 import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
 import { Product } from '@src/waste-management/entities/product.entity';
@@ -27,8 +28,12 @@ import { Province } from '@src/user/entities/location/province.entity';
 import { DeliveryTariff } from '@src/warehouse/entities/delivery-tariff.entity';
 import { Order } from '@src/order/entities/order.entity';
 import { OrderPart } from '@src/order/entities/order-part.entity';
+import { OrderPartOffer } from '@src/order/entities/order-part-offer.entity';
+import { DeliveryRateService } from '@src/warehouse/providers/delivery-rate.service';
+import { DeliveryRate } from '@src/warehouse/entities/delivery-rate.entity';
 import { DistanceCache } from '@src/order/entities/distance-cache.entity';
 import { ODOO_SYNC_QUEUE } from './odoo-sync.constants';
+import { ORDER_TASKS_QUEUE } from '@src/order/order-tasks.constants';
 import { OdooSyncService } from './odoo-sync.service';
 import { OdooSyncProcessor } from './odoo-sync.processor';
 import { FleetReconcileService } from './fleet-reconcile.service';
@@ -49,10 +54,15 @@ import { OdooWebhookController } from './odoo-webhook.controller';
   imports: [
     OdooModule,
     NotificationModule,
+    PlatformSettingsModule,
     // The product-suggestion webhook files an Odoo proposal through the same
     // service the app's own suggestion endpoint uses.
     SuggestionsModule,
     BullModule.registerQueue({ name: ODOO_SYNC_QUEUE }),
+    // The order module consumes this one; we only enqueue onto it (start a
+    // consolidation once its last warehouse has prepared) — no dependency on
+    // the order module, just a shared queue name.
+    BullModule.registerQueue({ name: ORDER_TASKS_QUEUE }),
     TypeOrmModule.forFeature([
       WasteCategory,
       Product,
@@ -79,13 +89,24 @@ import { OdooWebhookController } from './odoo-webhook.controller';
       DeliveryTariff,
       Order,
       OrderPart,
+      // Round ledger — read to tell a split rejection (all parts, one verdict)
+      // from a single warehouse's, which re-allocate differently.
+      OrderPartOffer,
       DistanceCache,
+      // Re-pricing a reassigned leg reads the backend-admin delivery rate.
+      DeliveryRate,
     ]),
   ],
   controllers: [OdooWebhookController],
   providers: [
     OdooSyncService,
     OdooSyncProcessor,
+    // Provided directly (its only dependency, the delivery-rate repo, is in
+    // forFeature above) rather than pulled in via WarehouseModule — which
+    // imports THIS module, so importing it back would be a cycle. Stateless, so
+    // a second instance costs nothing. Reassignment re-prices a leg at the SAME
+    // backend-admin rate the rest of delivery uses.
+    DeliveryRateService,
     FleetReconcileService,
     DriverRequestReconcileService,
     DriverStateReconcileService,

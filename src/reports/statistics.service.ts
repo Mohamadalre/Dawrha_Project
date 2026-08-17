@@ -14,6 +14,7 @@ import { Offer } from '@src/waste-management/entities/offer.entity';
 import { ProductSuggestion } from '@src/waste-management/entities/product-suggestion.entity';
 import { TruckType } from '@src/truck/enums/truck-type.enum';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
+import { OdooService } from '@src/odoo/odoo.service';
 
 /**
  * Admin-only reporting/statistics. Pure aggregation over existing tables — owns
@@ -39,6 +40,7 @@ export class StatisticsService {
     @InjectRepository(ProductSuggestion)
     private readonly suggestionRepo: Repository<ProductSuggestion>,
     private readonly odooSync: OdooSyncService,
+    private readonly odoo: OdooService,
   ) {}
 
   /** Single payload combining every section — for the admin dashboard. */
@@ -118,7 +120,19 @@ export class StatisticsService {
       /* stats must not fail because a refresh could not be queued */
     }
 
-    const total = await this.truckRepo.count();
+    // The mirror holds ONLY collection trucks — delivery trucks are Odoo's to
+    // manage and are never stored here. So every mirror figure below (count,
+    // assignment, status) is the COLLECTION fleet, and the delivery count is
+    // read live from Odoo, its master.
+    const collection = await this.truckRepo.count();
+
+    let delivery = 0;
+    try {
+      delivery = await this.odoo.countDeliveryTrucks();
+    } catch {
+      /* Odoo unreachable: report the collection fleet the mirror knows for sure,
+         and leave delivery at 0 rather than failing the whole dashboard. */
+    }
 
     const assignedRow = await this.assignmentRepo
       .createQueryBuilder('a')
@@ -132,29 +146,24 @@ export class StatisticsService {
       .addSelect('COUNT(*)', 'count')
       .groupBy('t.status')
       .getRawMany();
+    // Statuses are the collection fleet's — the only trucks whose status this
+    // backend tracks (a delivery truck has no backend assignment or shift).
     const byStatus: Record<string, number> = {};
     for (const row of statusRows) byStatus[row.status] = Number(row.count);
 
-    const typeRows = await this.truckRepo
-      .createQueryBuilder('t')
-      .select('t.truckType', 'type')
-      .addSelect('COUNT(*)', 'count')
-      .groupBy('t.truckType')
-      .getRawMany();
-    const byType: Record<string, number> = { [TruckType.COLLECTION]: 0, [TruckType.DELIVERY]: 0 };
-    for (const row of typeRows) byType[row.type] = Number(row.count);
-
     return {
-      total,
+      total: collection + delivery,
+      // Assignment and status apply to the collection fleet only.
       assigned_to_drivers: assigned,
-      unassigned: total - assigned,
+      unassigned: collection - assigned,
       by_status: byStatus,
       by_type: {
-        collection: byType[TruckType.COLLECTION] ?? 0,
-        delivery: byType[TruckType.DELIVERY] ?? 0,
+        collection,
+        // Live from Odoo — the backend does not mirror delivery trucks.
+        delivery,
       },
-      // Stated so a reader knows the number is a mirror kept in step with Odoo,
-      // not a figure this service owns.
+      // Collection figures are a mirror kept in step with Odoo; the delivery
+      // count is read live from Odoo, which owns the delivery fleet outright.
       source: 'odoo_mirror',
     };
   }

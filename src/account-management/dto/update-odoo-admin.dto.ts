@@ -1,12 +1,12 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 /**
- * Editable fields of the Odoo admin account.
+ * Editable fields of the Odoo admin account — PROFILE ONLY: name, email, phone.
  *
- * `login` and `password` ARE the credentials the backend authenticates to Odoo
- * with. Changing them here updates Odoo, the running connection AND the `.env`
- * in one step (see OdooService.updateAdminCredentials), so the connection never
- * breaks — send them only when you intend to rotate the credentials.
+ * The credentials (`login` / `password`) are deliberately NOT editable here.
+ * They are how the backend authenticates to Odoo, and this route is for keeping
+ * the admin's contact details in step across the two systems — not a place to
+ * rotate the connection password from a routine profile edit.
  */
 export class UpdateOdooAdminDto {
   @IsOptional()
@@ -23,18 +23,33 @@ export class UpdateOdooAdminDto {
   @IsString()
   @MaxLength(30)
   phone?: string;
+}
 
-  /** The Odoo login (username). Rotating it updates Odoo + connection + .env. */
-  @IsOptional()
+/**
+ * Create an ADDITIONAL Odoo admin account from the backend (invite model).
+ *
+ * No password field — deliberately. The backend creates the account and Odoo
+ * emails the new admin a link to set their OWN password, so no admin secret ever
+ * passes through or is stored on the backend. `login` is the Odoo username and
+ * must be unique.
+ */
+export class CreateOdooAdminDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
-  login?: string;
+  name: string;
 
-  /** The Odoo password. Rotating it updates Odoo + connection + .env. */
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  login: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
   @IsOptional()
   @IsString()
-  @MinLength(4)
-  @MaxLength(100)
-  password?: string;
+  @MaxLength(30)
+  phone?: string;
 }

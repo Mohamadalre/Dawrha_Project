@@ -50,6 +50,7 @@ describe('PricingService.sweepExpiredPricing', () => {
       offerSettlement as any,
       accountRepo as any,
       notifications as any,
+      { defaultCurrency: jest.fn().mockResolvedValue('SYP') } as any,
     );
     return { service, pricingRepo, historyRepo, productRepo, odooSync, cache, offerSettlement, accountRepo, notifications };
   };

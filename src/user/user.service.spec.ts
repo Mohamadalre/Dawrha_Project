@@ -353,17 +353,17 @@ describe('UserService', () => {
   });
 
   describe('app settings', () => {
-    it('returns the most-recent device language and the available list', async () => {
-      deviceRepo.findOne.mockResolvedValue({ language: 'ar' });
-      const res: any = await service.getAppSettings('u1', 'en');
+    it('returns the account\'s SAVED language and the available list', async () => {
+      accountRepo.findOne.mockResolvedValue({ id: 'u1', language: 'ar' });
+      const res: any = await service.getAppSettings('u1');
       expect(res.language).toBe('ar');
       expect(res.available_languages).toEqual(['en', 'ar']);
     });
 
-    it('falls back to the request language when no device is recorded', async () => {
-      deviceRepo.findOne.mockResolvedValue(null);
-      const res: any = await service.getAppSettings('u1', 'ar');
-      expect(res.language).toBe('ar');
+    it('defaults to English when the account has no language yet', async () => {
+      accountRepo.findOne.mockResolvedValue(null);
+      const res: any = await service.getAppSettings('u1');
+      expect(res.language).toBe('en');
     });
   });
 

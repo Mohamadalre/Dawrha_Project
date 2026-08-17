@@ -30,8 +30,7 @@ import {
   CreateUnitDto,
   UpdateCategoryDto,
   UpdateConditionDto,
-  UpdateOfferAmountDto,
-  UpdateOfferValidityDto,
+  UpdateOfferDto,
   OfferTimelineQueryDto,
   UpdateProductDto,
   UpdateUnitDto,
@@ -193,59 +192,28 @@ export class AdminCatalogController {
     return this.adminCatalog.createOffer(user.id, dto);
   }
 
-  // The general "edit the whole offer" route (PUT offers/:offerId) was removed
-  // on purpose. An offer is edited through the two FOCUSED routes below —
-  // `/amount` (with its dates) and `/validity` — which each re-validate exactly
-  // what they touch. The general route required re-sending the audience and the
-  // amount on every edit, where a slip silently rewrote them; deleting it closes
-  // that footgun and leaves one clear way to make each kind of change.
-
   /**
-   * Change ONLY when the offer ends.
+   * Edit an offer through ONE route: its description, its size (amount OR
+   * percentage), and its window — any subset in a single call.
    *
-   * Separate from the general update because it is the common edit and the one
-   * an operator reaches for under time pressure — extending an offer that is
-   * about to lapse. Sending it through the full update means composing a body
-   * that repeats the price and the audience, and a mistake there silently
-   * rewrites them.
-   *
-   * Null clears the date, making the offer open-ended.
-   */
-  @Patch('offers/:offerId/validity')
-  @Permissions('admin.waste.update')
-  async updateOfferValidity(
-    @CurrentUser() user,
-    @Param('offerId', ParseUUIDPipe) offerId: string,
-    @Body() dto: UpdateOfferValidityDto,
-  ) {
-    const result = await this.adminCatalog.updateOfferValidity(user.id, offerId, dto);
-    return { message: 'Offer validity updated successfully', result };
-  }
-
-  /**
-   * Change the AMOUNT the price moves by — and, in the same request, when the
-   * offer runs.
-   *
-   * They travel together because they are one decision in practice ("make it 2
-   * off, and run it to the end of the month"), and split across two calls the
-   * offer is briefly live at the new amount on the old dates — long enough for
-   * a real order to be priced by it. Both dates are optional: send only the
-   * amount and the window is left exactly as it was.
+   * Replaces the former focused routes (`/amount` and `/validity`). PATCH
+   * semantics: only the fields sent change, so an edit cannot silently rewrite
+   * what it did not touch. The audience/target roles are NOT editable here —
+   * changing who an offer is for flips which way it moves a price.
    *
    * Takes effect everywhere the offer is read — the offers list, the material
    * listings, and any cart line added AFTER the change. Orders already placed
-   * keep the price they were quoted: the cart snapshots `unit_price` when the
-   * line is created, so a later edit cannot reprice work already committed.
+   * keep the price they were quoted (the cart snapshots `unit_price` on add).
    */
-  @Patch('offers/:offerId/amount')
+  @Patch('offers/:offerId')
   @Permissions('admin.waste.update')
-  async updateOfferAmount(
+  async updateOffer(
     @CurrentUser() user,
     @Param('offerId', ParseUUIDPipe) offerId: string,
-    @Body() dto: UpdateOfferAmountDto,
+    @Body() dto: UpdateOfferDto,
   ) {
-    const result = await this.adminCatalog.updateOfferAmount(user.id, offerId, dto);
-    return { message: 'Offer amount updated successfully', result };
+    const result = await this.adminCatalog.updateOffer(user.id, offerId, dto);
+    return { message: 'Offer updated successfully', result };
   }
 
   @Delete('offers/:offerId')

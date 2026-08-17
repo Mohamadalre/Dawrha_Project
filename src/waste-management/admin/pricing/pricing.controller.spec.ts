@@ -16,6 +16,7 @@ import { ProductConditionsService } from '@src/waste-management/admin/product-co
 import { OfferSettlementService } from '@src/waste-management/common/providers/offer-settlement.service';
 import { Account } from '@src/user/entities/account.entity';
 import { NotificationService } from '@src/notification/notification.service';
+import { PlatformSettingsService } from '@src/platform-settings/platform-settings.service';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { TransformInterceptor } from '@src/common/interceptors/transform.interceptor';
@@ -103,6 +104,7 @@ describe('PricingController (integration)', () => {
         // The expiry sweep notifies every admin; irrelevant to these route tests.
         { provide: getRepositoryToken(Account), useValue: { find: jest.fn().mockResolvedValue([]) } },
         { provide: NotificationService, useValue: { createNotification: jest.fn(), enqueueNotification: jest.fn() } },
+        { provide: PlatformSettingsService, useValue: { defaultCurrency: jest.fn().mockResolvedValue('SYP') } },
       ],
     })
       .overrideGuard(JwtAuthGuard)

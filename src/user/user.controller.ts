@@ -26,6 +26,7 @@ import { I18nContext } from 'nestjs-i18n';
 import { UserService } from './user.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { SetLanguageDto } from './dto/set-language.dto';
 
 /**
  * Self-service account endpoints. The role is resolved from the JWT, so a single
@@ -115,6 +116,21 @@ export class UserController {
     const lang = I18nContext.current()?.lang;
     const result = await this.userService.getAppSettings(user.id, lang);
     return { message: 'Settings fetched successfully', result };
+  }
+
+  /**
+   * Change the response language. From the next request on, every response is
+   * returned in it — no language header needed.
+   */
+  @AccountsStatus(
+    AccountStatus.ACTIVE,
+    AccountStatus.PENDING_APPROVAL,
+    AccountStatus.NEED_CHANGES,
+    AccountStatus.REJECTED,
+  )
+  @Patch('settings/language')
+  async setLanguage(@CurrentUser() user, @Body() dto: SetLanguageDto) {
+    return this.userService.setLanguage(user.id, dto.language);
   }
 
   /** The devices currently signed in to this account (no secrets). */

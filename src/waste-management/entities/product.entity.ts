@@ -66,6 +66,19 @@ export class Product {
   @Column({ length: 20, default: 'PIECE' })
   unitType: string;
 
+  /**
+   * Weight of ONE unit of this material, in kilograms — the admin's answer,
+   * and visible to the admin ALONE.
+   *
+   * Delivery truck capacity is measured in kilograms, so a material sold by the
+   * piece (or any non-kg unit) cannot be loaded onto a route until its weight is
+   * known. Null means the material is already measured in kilograms, where one
+   * unit IS one kilogram and no conversion is needed. Never surfaced to buyers:
+   * it is a logistics figure, not a catalogue one.
+   */
+  @Column({ name: 'unit_weight_kg', type: 'decimal', precision: 12, scale: 3, nullable: true })
+  unitWeightKg?: string | null;
+
   @Column({ default: true })
   isActive: boolean;
 

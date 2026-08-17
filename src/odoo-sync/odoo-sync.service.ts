@@ -19,6 +19,9 @@ import {
   PushShiftChangePayload,
   PushTruckProblemPayload,
   ShiftChangeDecisionPayload,
+  TransferStockGradePayload,
+  PushDeliveryTripPayload,
+  PushComplaintPayload,
   ODOO_JOB_OPTIONS,
   ODOO_JOBS,
   ODOO_SYNC_QUEUE,
@@ -147,20 +150,58 @@ export class OdooSyncService {
   }
 
   /**
+   * Re-grade unreserved stock in Odoo. A write, so it goes through the queue
+   * like every other Odoo write — the mirror updates from the inventory ping
+   * Odoo fires, not from this call.
+   */
+  enqueueTransferStockGrade(payload: TransferStockGradePayload) {
+    return this.queue.add(
+      ODOO_JOBS.TRANSFER_STOCK_GRADE,
+      payload,
+      this.opts(ODOO_JOBS.TRANSFER_STOCK_GRADE),
+    );
+  }
+
+  /**
+   * Push a planned delivery trip to Odoo. Keyed by the backend trip id so a
+   * re-dispatch updates the same Odoo trip instead of making a second.
+   */
+  enqueuePushDeliveryTrip(payload: PushDeliveryTripPayload) {
+    return this.queue.add(ODOO_JOBS.PUSH_DELIVERY_TRIP, payload, {
+      ...this.opts(ODOO_JOBS.PUSH_DELIVERY_TRIP),
+      jobId: `push-delivery-trip-${payload.trip.backend_trip_id}`,
+    });
+  }
+
+  /** Notify a warehouse's manager in Odoo of a warehouse-routed complaint. */
+  enqueuePushComplaint(payload: PushComplaintPayload) {
+    return this.queue.add(ODOO_JOBS.PUSH_COMPLAINT, payload, {
+      ...this.opts(ODOO_JOBS.PUSH_COMPLAINT),
+      jobId: `push-complaint-${payload.complaintId}`,
+    });
+  }
+
+  /**
    * A warehouse decision coming back from Odoo. The jobId keys on the part AND
    * the event, so a webhook Odoo retried does not apply the same decision
    * twice — approving an order once is not the same as approving it twice when
    * the second approval races a rejection.
    */
   enqueueOrderEvent(payload: OrderEventPayload) {
-    return this.queue.add(
-      ODOO_JOBS.APPLY_ORDER_EVENT,
-      payload,
-      {
-        ...this.opts(ODOO_JOBS.APPLY_ORDER_EVENT),
-        jobId: `order-event-${payload.partId}-${payload.event}`,
-      },
-    );
+    // Most events are idempotent per (part, event), so that keys the job and a
+    // webhook Odoo retried does not apply the same decision twice. A
+    // reassignment is the exception: the SAME part can be re-routed more than
+    // once, to different warehouses, and each is a distinct move — so the
+    // destination is folded into the key, or the second reassignment would be
+    // silently dropped as a duplicate of the first.
+    const jobId =
+      payload.event === 'reassigned'
+        ? `order-event-${payload.partId}-reassigned-${payload.warehouseOdooId ?? 'x'}`
+        : `order-event-${payload.partId}-${payload.event}`;
+    return this.queue.add(ODOO_JOBS.APPLY_ORDER_EVENT, payload, {
+      ...this.opts(ODOO_JOBS.APPLY_ORDER_EVENT),
+      jobId,
+    });
   }
 
   enqueueSyncCondition(payload: SyncConditionPayload) {

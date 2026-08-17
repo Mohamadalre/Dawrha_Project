@@ -1,5 +1,3 @@
-import { FulfilmentMode } from './enums/fulfilment-mode.enum';
-
 /**
  * Every tunable of the ordering flow, in one place.
  *
@@ -31,34 +29,16 @@ export const MAX_ALLOCATION_ROUNDS = 3;
 export const PARTIAL_FULFILMENT_TOLERANCE = 0.05;
 
 /**
- * Most warehouses an order may be split across, per fulfilment mode.
+ * How many warehouses an order may split across is NOT capped.
  *
- * Delivery and collection are not comparable here. With delivery the company
- * absorbs the extra trips; with collection the BUYER drives to every site, so a
- * three-way split turns one errand into three. A free facility — which never
- * gets delivery — may not even own a suitable vehicle, which is why the pickup
- * ceiling is deliberately tight.
+ * There was once a per-mode ceiling (delivery 3, pickup 2), on the reasoning
+ * that a split PICKUP made the buyer drive to every site. That reasoning no
+ * longer holds: a split order can be CONSOLIDATED into the one warehouse nearest
+ * the buyer (for factories and free facilities alike), and delivery has always
+ * carried the extra trips itself. So an order now splits across as many
+ * warehouses as it takes to cover it — bounded only by MAX_CANDIDATE_WAREHOUSES,
+ * which limits the candidate pool for cost/compute reasons, not the split.
  */
-export const MAX_PARTS_BY_MODE: Record<FulfilmentMode, number> = {
-  [FulfilmentMode.DELIVERY]: 3,
-  [FulfilmentMode.PICKUP]: 2,
-};
-
-/**
- * Penalty, in "equivalent kilometres", charged per EXTRA warehouse when
- * comparing plans.
- *
- * This is what stops the allocator from cheerfully splitting an order across
- * three near warehouses when one slightly farther warehouse could serve it
- * whole. Every extra part is another manager who must approve, another chance
- * of refusal, another invoice — costs that distance alone does not express.
- *
- * Much heavier for collection, for the same reason the part ceiling is lower.
- */
-export const SPLIT_PENALTY_KM: Record<FulfilmentMode, number> = {
-  [FulfilmentMode.DELIVERY]: 15,
-  [FulfilmentMode.PICKUP]: 60,
-};
 
 /**
  * How many nearest warehouses are considered at all. Bounds the work and,

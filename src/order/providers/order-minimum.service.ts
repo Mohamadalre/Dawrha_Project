@@ -53,7 +53,7 @@ export class OrderMinimumService {
       goodsTotal,
       required,
       shortfall: round3(shortfall),
-      currency: minimum?.currency ?? 'JOD',
+      currency: minimum?.currency ?? 'SYP',
     };
   }
 

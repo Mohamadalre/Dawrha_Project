@@ -104,6 +104,33 @@ describe('checkout prices each line at the effective (offer) price', () => {
     expect(effectivePrice.effectivePrice).not.toHaveBeenCalled();
   });
 
+  it('an admin-built line (no unit) takes the unit from the product itself', async () => {
+    // The admin types product + quantity + grade; the unit is not theirs to
+    // pick, so the line falls back to the product's own unit.
+    const productRepo = {
+      find: jest.fn(async () => [
+        { id: PRODUCT, name: 'PET', odooProductId: 42, unitType: 'KG' },
+      ]),
+    };
+    const svc = new OrderCheckoutService(
+      {} as any, {} as any, {} as any, {} as any, {} as any,
+      productRepo as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any,
+      { assertSellable: jest.fn(async () => 10) } as any,
+      { effectivePrice: jest.fn(async () => ({ basePrice: 10, offer: null, price: 10 })) } as any,
+      {} as any,
+    );
+
+    const [line] = await lines(
+      svc,
+      [{ productId: PRODUCT, quantity: 5, conditionCode: 'GOOD' }], // no unitType
+      Role.FACTORY,
+    );
+
+    expect(line.unitType).toBe('KG');
+    expect(line.quantity).toBe(5);
+  });
+
   it('prices against the buyer’s role and the line’s grade', async () => {
     const { svc, effectivePrice } = build({
       base: 10,

@@ -50,6 +50,22 @@ export class DeliveryTrip {
   @Column({ name: 'order_id', type: 'uuid' })
   orderId: string;
 
+  /**
+   * A CONSOLIDATION run, not a delivery to the buyer.
+   *
+   * Same milk run, same delivery truck — but it ends at a WAREHOUSE (the one
+   * nearest the buyer, `destinationWarehouseId`) instead of the buyer's door,
+   * gathering the far warehouses' parts there so the buyer collects everything
+   * from one place. The last leg is warehouse→warehouse, and there is no leg to
+   * the buyer, so the cost is the inter-warehouse route only.
+   */
+  @Column({ name: 'is_consolidation', default: false })
+  isConsolidation: boolean;
+
+  /** Where a consolidation run ends (the gathering warehouse). Null for delivery. */
+  @Column({ name: 'destination_warehouse_id', type: 'uuid', nullable: true })
+  destinationWarehouseId?: string | null;
+
   /** Human reference the driver and the buyer both quote. */
   @Column({ length: 32, unique: true })
   tripNumber: string;

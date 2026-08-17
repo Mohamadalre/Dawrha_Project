@@ -26,7 +26,6 @@ import {
   CorrectPricingDto,
   PriceHistoryQueryDto,
   SetPricingExpiryDto,
-  UpdateCurrentCurrencyDto,
 } from './dto/pricing-admin.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -67,24 +66,9 @@ export class PricingController {
   ) {
     return this.pricingService.updatePricingTable(user.id, productId, dto);
   }
-  /**
-   * Re-denominate the CURRENT price list — live rows only, history untouched.
-   *
-   * Declared BEFORE `:productId/pricing/:tier`, or `/currency` would be captured
-   * as a tier value and rejected by the enum pipe. Omit `tier` in the body to
-   * move every live tier together.
-   */
-  @Patch(':productId/pricing/currency')
-  @Permissions('admin.pricing.manage')
-  async updateCurrency(
-    @CurrentUser() user,
-    @Param('productId', ParseUUIDPipe) productId: string,
-    @Body() dto: UpdateCurrentCurrencyDto,
-  ) {
-    return this.pricingService.updateCurrentCurrency(
-      user.id, productId, dto.currency, dto.tier,
-    );
-  }
+  // NOTE: there is no per-product "change currency" route. Currency is a single
+  // central setting (PATCH /v1/admin/platform-settings); a price is never
+  // re-denominated per product, tier, or row.
 
   /** Edit a single tier's price (e.g. only FACTORY). */
   @Patch(':productId/pricing/:tier')
@@ -237,7 +221,6 @@ export class PricingController {
   ) {
     return this.pricingService.correctPricingRow(user.id, pricingId, {
       price: dto.price,
-      currency: dto.currency,
     });
   }
 

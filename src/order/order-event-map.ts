@@ -61,11 +61,19 @@ export function resolvePartStatus(
  * may set off the moment the goods reach the output zone. A delivery order
  * instead waits for the manager to confirm it left with a carrier — which is
  * why only PICKUP auto-advances here.
+ *
+ * A CONSOLIDATION order is the exception among collections: its far parts must
+ * be GATHERED into the nearest warehouse before the buyer collects, so they
+ * stay in the output zone (prepared, not yet ready) until the consolidation
+ * trip has run. It is the trip's completion — not preparation — that makes a
+ * consolidation part READY_FOR_PICKUP.
  */
 export function autoAdvanceAfterPreparation(
   status: OrderPartStatus,
   mode: FulfilmentMode,
+  consolidate = false,
 ): OrderPartStatus | null {
   if (status !== OrderPartStatus.IN_OUTPUT_ZONE) return null;
+  if (consolidate) return null;
   return mode === FulfilmentMode.PICKUP ? OrderPartStatus.READY_FOR_PICKUP : null;
 }

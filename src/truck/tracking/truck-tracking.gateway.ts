@@ -130,10 +130,19 @@ export class TruckTrackingGateway
     const errors = await validate(dto, { whitelist: true });
     if (errors.length) return { status: 'error', message: 'Invalid location payload' };
 
-    // Authorisation: a collector may only report for the truck assigned to them.
+    // Authorisation AND liveness in one gate: a collector may report ONLY while
+    // actively operating this truck — i.e. an OPEN handover exists (he pressed
+    // "pick up"). A truck that is merely assigned but not yet picked up is not
+    // tracked, which is the whole point: tracking runs only when the driver has
+    // received/started the truck. Admins may report on behalf of any truck.
     if (user.role === Role.COLLECTOR) {
-      const isDriver = await this.tracking.isDriverOfTruck(user.id, dto.truckId);
-      if (!isDriver) return { status: 'error', message: 'Not assigned to this truck' };
+      const holding = await this.tracking.hasActiveHandover(user.id, dto.truckId);
+      if (!holding) {
+        return {
+          status: 'error',
+          message: 'Pick up the truck before tracking starts',
+        };
+      }
     } else if (user.role !== Role.ADMIN) {
       return { status: 'error', message: 'Forbidden' };
     }
@@ -176,8 +185,34 @@ export class TruckTrackingGateway
 
   private emitStopped(truckId: string, reason: StopReason, log: unknown): void {
     const payload = { truckId, reason, location: log };
-    this.server.to(this.room(truckId)).emit('truck:stopped', payload);
-    this.server.to('admins').emit('truck:stopped', payload);
+    this.server?.to(this.room(truckId)).emit('truck:stopped', payload);
+    this.server?.to('admins').emit('truck:stopped', payload);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Session boundaries, driven by the handover flow (pickup / dropoff)
+  // ---------------------------------------------------------------------------
+  /**
+   * The driver picked the truck up: tracking is now live for it. Tell the admin
+   * dashboards so a truck appears on the map the moment its session starts, even
+   * before the first GPS ping arrives.
+   */
+  announceSessionStarted(info: {
+    truckId: string;
+    driverId?: string | null;
+    plateNumber?: string | null;
+  }): void {
+    this.server?.to('admins').emit('truck:session', { ...info, status: 'started' });
+  }
+
+  /**
+   * The driver handed the truck back: end the live session. Persists the last
+   * known position as a stop and notifies subscribers the truck is no longer
+   * tracked. Safe to call even if the truck never emitted a location.
+   */
+  async endSession(truckId: string, reason: StopReason): Promise<void> {
+    const log = await this.tracking.finalizeStop(truckId, reason);
+    this.emitStopped(truckId, reason, log);
   }
 
   // ---------------------------------------------------------------------------

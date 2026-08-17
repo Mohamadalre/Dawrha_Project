@@ -13,7 +13,6 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  Length,
   Min,
   MaxLength,
 } from 'class-validator';
@@ -38,17 +37,8 @@ export class SetDeliveryRateDto {
   @Min(0)
   base_fee?: number;
 
-  /** Floor for one delivery — a short trip still costs a driver and a vehicle. */
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  min_charge?: number;
-
-  @IsOptional()
-  @IsString()
-  @Length(3, 8)
-  currency?: string;
+  // Currency is not accepted per rate: it comes from the central platform
+  // setting (PATCH /v1/admin/platform-settings).
 
   @IsOptional()
   @IsString()
@@ -69,16 +59,8 @@ export class UpdateDeliveryRateDto {
   @Min(0)
   base_fee?: number;
 
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  min_charge?: number;
-
-  @IsOptional()
-  @IsString()
-  @Length(3, 8)
-  currency?: string;
+  // Currency is not accepted per rate: it comes from the central platform
+  // setting (PATCH /v1/admin/platform-settings).
 
   @IsOptional()
   @IsString()
@@ -133,7 +115,7 @@ export class DeliveryRateController {
    * What a given distance costs at the current rate.
    *
    * Exposed so the admin can check the effect of a change before committing to
-   * it, rather than working it out on paper and discovering the floor later.
+   * it, rather than working the cost out on paper.
    */
   @Get('quote')
   @Permissions('admin.delivery.rate.view')

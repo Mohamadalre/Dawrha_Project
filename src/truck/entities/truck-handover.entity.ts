@@ -71,9 +71,28 @@ export class TruckHandover {
   @Column({ name: 'picked_up_at', type: 'timestamptz', nullable: true })
   pickedUpAt?: Date | null;
 
+  /**
+   * WHERE the truck was picked up — the driver's GPS at the moment he pressed
+   * "Pick up", sent by the app. Durable, unlike the live Redis trail: the
+   * question "where did this session start, and when?" must always answer from
+   * the database. Null when the app did not send a fix.
+   */
+  @Column({ name: 'pickup_lat', type: 'decimal', precision: 10, scale: 7, nullable: true })
+  pickupLat?: string | null;
+
+  @Column({ name: 'pickup_lng', type: 'decimal', precision: 10, scale: 7, nullable: true })
+  pickupLng?: string | null;
+
   /** When he pressed "Hand over". */
   @Column({ name: 'dropped_off_at', type: 'timestamptz', nullable: true })
   droppedOffAt?: Date | null;
+
+  /** WHERE the truck was handed back — the driver's GPS at dropoff. */
+  @Column({ name: 'dropoff_lat', type: 'decimal', precision: 10, scale: 7, nullable: true })
+  dropoffLat?: string | null;
+
+  @Column({ name: 'dropoff_lng', type: 'decimal', precision: 10, scale: 7, nullable: true })
+  dropoffLng?: string | null;
 
   /** Notes he must record before handing the truck back. */
   @Column({ name: 'dropoff_reason', type: 'text', nullable: true })

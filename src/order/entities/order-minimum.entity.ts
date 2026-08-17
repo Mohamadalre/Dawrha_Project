@@ -37,7 +37,7 @@ export class OrderMinimum {
   @Column({ type: 'decimal', precision: 14, scale: 3, default: 0 })
   minOrderValue: string;
 
-  @Column({ default: 'JOD' })
+  @Column({ default: 'SYP' })
   currency: string;
 
   @Column({ default: true })

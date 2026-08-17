@@ -152,12 +152,12 @@ export class CartService {
         subtotal,
         is_offer: isOffer,
         offer_id: offer?.id ?? '',
-        currency: 'JOD',
+        currency: 'SYP',
       },
       cart_summary: {
         total_items: summary.total_items,
         total_price: summary.total,
-        currency: 'JOD',
+        currency: 'SYP',
         can_proceed_to_checkout: summary.can_checkout,
       },
     };
@@ -290,7 +290,7 @@ export class CartService {
       discount: 0,
       tax: 0,
       total: +subtotal.toFixed(3),
-      currency: 'JOD',
+      currency: 'SYP',
       can_checkout: items.length > 0,
     };
   }

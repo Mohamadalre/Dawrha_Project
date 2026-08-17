@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
@@ -19,13 +19,10 @@ import { AddMyCategoriesDto } from './dto/add-my-categories.dto';
 export class MyCategoriesController {
   constructor(private readonly service: MyCategoriesService) {}
 
-  /** The caller's own selected categories (id + name). */
-  @Get('my-categories/list')
-  @Permissions('waste.materials.view')
-  async list(@CurrentUser() user) {
-    const result = await this.service.list(user);
-    return { message: 'My categories fetched successfully', result };
-  }
+  // The GET `my-categories/list` route was removed — it duplicated
+  // `GET /v1/waste/my-categories` (CatalogController.getMyCategories), which is
+  // the single route for viewing the caller's selected categories. The service's
+  // `list()` stays: the add route below returns it.
 
   /** Add one or more categories to the caller's own list. */
   @Post('my-categories')

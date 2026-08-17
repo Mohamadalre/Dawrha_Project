@@ -114,6 +114,7 @@ export class OdooWebhookController {
       outputZone: dto.output_zone,
       handoverType: dto.handover_type,
       rejectReason: dto.approval_reject_reason,
+      warehouseOdooId: dto.warehouse_odoo_id,
     });
     return { message: 'Order event queued', result: { queued: 1 } };
   }

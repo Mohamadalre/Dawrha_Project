@@ -934,15 +934,26 @@ describe('AccountManagementService — reviewing an application', () => {
     });
   });
 
-  describe('self-service (a buyer reading its OWN account)', () => {
-    it('refuses a role that is not a factory or free facility', async () => {
-      // Citizens and institutions have no reviewed application to show here.
+  describe('self-service (an applicant reading its OWN account)', () => {
+    it('refuses a role with no onboarding application (citizen / admin)', async () => {
       await expect(
         service.getOwnAccountDetails('acc1', Role.CITIZEN),
       ).rejects.toBeInstanceOf(ForbiddenException);
       await expect(
-        service.getOwnLocation('acc1', Role.COLLECTOR),
+        service.getOwnLocation('acc1', Role.ADMIN),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets an INSTITUTION and a DRIVER past the gate to their own lookup', async () => {
+      // Both now have a self-service view: they pass the role gate and reach the
+      // profile lookup (which 404s here only because no profile row is mocked).
+      profileRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.getOwnAccountDetails('acc1', Role.INSTITUTIONS),
+      ).rejects.not.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.getOwnLocation('acc1', Role.COLLECTOR),
+      ).rejects.not.toBeInstanceOf(ForbiddenException);
     });
 
     it('lets a FACTORY past the gate to its own profile lookup', async () => {

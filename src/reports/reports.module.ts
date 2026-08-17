@@ -12,6 +12,7 @@ import { ProductSuggestion } from '@src/waste-management/entities/product-sugges
 import { StatisticsService } from './statistics.service';
 import { StatisticsController } from './statistics.controller';
 import { OdooSyncModule } from '@src/odoo-sync/odoo-sync.module';
+import { OdooModule } from '@src/odoo/odoo.module';
 
 /**
  * Admin-only reports & statistics. Read-only aggregation across existing tables.
@@ -31,6 +32,8 @@ import { OdooSyncModule } from '@src/odoo-sync/odoo-sync.module';
     PermissionsModule,
     // Odoo is the fleet master; the truck stats queue a refresh from it.
     OdooSyncModule,
+    // Delivery trucks live only in Odoo, so the delivery figure is read live.
+    OdooModule,
   ],
   controllers: [StatisticsController],
   providers: [StatisticsService],

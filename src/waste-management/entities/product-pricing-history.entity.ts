@@ -40,7 +40,7 @@ export class ProductPricingHistory {
   @Column({ type: 'decimal', precision: 12, scale: 3 })
   price: string;
 
-  @Column({ default: 'JOD' })
+  @Column({ default: 'SYP' })
   currency: string;
 
   /** When this price originally became effective. */
