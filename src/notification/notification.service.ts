@@ -121,6 +121,7 @@ export class NotificationService {
     const [items, total] = await qb.getManyAndCount();
 
     return {
+      message:'Fetch notifications sussccufully',
       items,
       total,
       page: query.page,
@@ -128,17 +129,21 @@ export class NotificationService {
     };
   }
 
-  async countUnread(userId: string): Promise<number> {
-    return this.notificationRepository.count({
+  async countUnread(userId: string){
+    const data = await this.notificationRepository.count({
       where: {
         userId,
         isRead: false,
         deletedAt: IsNull(),
       },
     });
+    return {
+      message:'The number of unread notifications has been retrieved',
+      unread_count:data
+    }
   }
 
-  async getNotificationById(userId: string, id: string): Promise<Notification> {
+  async getNotificationById(userId: string, id: string) : Promise<Notification> {
     const notification = await this.notificationRepository.findOne({
       where: { id, userId },
     });

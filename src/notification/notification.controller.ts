@@ -56,7 +56,7 @@ export class NotificationController {
     @CurrentUser() user: Account,
     @Param('id', new ParseUUIDPipe()) id: string,
   ) {
-    return this.notificationService.getNotificationById(user.id, id);
+    return {message:'Fetch notification successfully', ...await this.notificationService.getNotificationById(user.id, id) };
   }
 
 
