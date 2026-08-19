@@ -7,10 +7,27 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Type } from 'class-transformer';
+import { IsInt, IsOptional, Max, Min } from 'class-validator';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { TruckTrackingService } from './truck-tracking.service';
+
+/**
+ * How many history points to return. A validated positive integer, not a raw
+ * query string: `?limit=abc` (→ NaN) or `?limit=-5` used to reach the service
+ * untouched. `@Type` coerces the query string to a number so the whole app's
+ * pagination inputs are numbers, never strings.
+ */
+class HistoryQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  limit: number = 50;
+}
 
 /**
  * REST fallback so the admin dashboard can read the latest position / active
@@ -40,9 +57,9 @@ export class TruckTrackingController {
   @Permissions('admin.trucks.view')
   async history(
     @Param('truckId', ParseUUIDPipe) truckId: string,
-    @Query('limit') limit?: string,
+    @Query() query: HistoryQueryDto,
   ) {
-    const result = await this.tracking.getHistory(truckId, limit ? Number(limit) : 50);
+    const result = await this.tracking.getHistory(truckId, query.limit);
     return { message: 'Truck history fetched successfully', result };
   }
 

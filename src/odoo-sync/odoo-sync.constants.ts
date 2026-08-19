@@ -7,6 +7,8 @@ export const ODOO_JOBS = {
   DELETE_CATEGORY: 'delete-category-from-odoo',
   SYNC_PRODUCT: 'sync-product-to-odoo',
   DELETE_PRODUCT: 'delete-product-from-odoo',
+  /** REVERSE: mirror a product master-field edit made IN Odoo back to the backend. */
+  SYNC_PRODUCT_FROM_ODOO: 'sync-product-from-odoo',
   UPDATE_PRICING: 'update-product-pricing',
   CREATE_WAREHOUSE: 'create-warehouse-to-odoo',
   SYNC_WAREHOUSE: 'sync-warehouse-from-odoo',
@@ -49,6 +51,7 @@ export const ODOO_JOB_OPTIONS: Record<string, { attempts: number; backoff: numbe
   [ODOO_JOBS.DELETE_CATEGORY]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.SYNC_PRODUCT]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.DELETE_PRODUCT]: { attempts: 3, backoff: 5000 },
+  [ODOO_JOBS.SYNC_PRODUCT_FROM_ODOO]: { attempts: 2, backoff: 5000 },
   [ODOO_JOBS.UPDATE_PRICING]: { attempts: 2, backoff: 2000 },
   [ODOO_JOBS.CREATE_WAREHOUSE]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.SYNC_WAREHOUSE]: { attempts: 2, backoff: 10000 },

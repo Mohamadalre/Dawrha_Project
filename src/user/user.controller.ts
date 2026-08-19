@@ -21,7 +21,7 @@ import { AccountsStatus } from '@src/auth/decorators/account-status.decorator';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { imageMemoryStorage } from '@src/common/config/multer/image-memory.config';
-import { LocationDto } from '@src/onboarding/dto/location.dto';
+import { AddLocationDto } from './dto/add-location.dto';
 import { I18nContext } from 'nestjs-i18n';
 import { UserService } from './user.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -185,7 +185,7 @@ export class UserController {
   }
 
   @Post('locations')
-  async addLocation(@CurrentUser() user, @Body() dto: LocationDto) {
+  async addLocation(@CurrentUser() user, @Body() dto: AddLocationDto) {
     return this.userService.addLocation(user.id, user.role, dto);
   }
 

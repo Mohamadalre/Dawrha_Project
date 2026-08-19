@@ -430,7 +430,9 @@ export class CatalogService {
       categories: rows.map((c) => this.mapCategory(c, counts.get(c.id) ?? 0)),
       pagination: buildPagination(total, query.page, query.limit),
     };
-    if (useCache) await this.cache.set('categories', cacheParts, result);
+    // Never cache an empty listing — a transient empty catalogue pinned for the
+    // TTL is what made the default page show nothing until it aged out.
+    if (useCache && total > 0) await this.cache.set('categories', cacheParts, result);
     return result;
   }
 
@@ -496,7 +498,7 @@ export class CatalogService {
       products: rows.map((p) => this.mapProductForGuest(p, unitLabels, offerFlags)),
       pagination: buildPagination(total, query.page, query.limit),
     };
-    await this.cache.set('products', cacheParts, result);
+    if (total > 0) await this.cache.set('products', cacheParts, result);
     return result;
   }
 
@@ -614,7 +616,7 @@ export class CatalogService {
       products: items,
       pagination: buildPagination(total, query.page, query.limit),
     };
-    if (useCache) await this.cache.set('products', cacheParts, result);
+    if (useCache && total > 0) await this.cache.set('products', cacheParts, result);
     return result;
   }
 
@@ -669,7 +671,7 @@ export class CatalogService {
       products: items,
       pagination: buildPagination(total, query.page, query.limit),
     };
-    if (useCache) await this.cache.set('products', cacheParts, result);
+    if (useCache && total > 0) await this.cache.set('products', cacheParts, result);
     return result;
   }
 
@@ -731,11 +733,11 @@ export class CatalogService {
     const bases = await this.basePricesForOffers(rows, this.buyingTier(caller));
     const result = {
       offers: rows.map((o) =>
-        this.mapOffer(o, !caller, bases.get(`${o.productId}:${o.conditionCode ?? ''}`)),
+        this.mapOffer(o, !caller, bases.get(`${o.productId}:${o.conditionCode ?? ''}`), this.showsConditions(caller)),
       ),
       pagination: buildPagination(total, query.page, query.limit),
     };
-    await this.cache.set('offers', cacheParts, result);
+    if (total > 0) await this.cache.set('offers', cacheParts, result);
     return result;
   }
 
@@ -778,7 +780,7 @@ export class CatalogService {
     const bases = await this.basePricesForOffers(rows, this.buyingTier(caller));
     return {
       offers: rows.map((o) =>
-        this.mapOffer(o, !caller, bases.get(`${o.productId}:${o.conditionCode ?? ''}`)),
+        this.mapOffer(o, !caller, bases.get(`${o.productId}:${o.conditionCode ?? ''}`), this.showsConditions(caller)),
       ),
       pagination: buildPagination(total, query.page, query.limit),
     };
@@ -1154,8 +1156,12 @@ export class CatalogService {
       });
     }
     if (filters.search) {
-      qb.andWhere('p.name ILIKE :search', { search: `%${filters.search}%` })
-        .setParameter('prefixSearch', `${filters.search}%`);
+      // Search matches the MATERIAL name OR its CATEGORY name, so typing
+      // "plastic" finds both the material called plastic and everything filed
+      // under a Plastic category. `c` is the joined category alias above.
+      qb.andWhere('(p.name ILIKE :search OR c.name ILIKE :search)', {
+        search: `%${filters.search}%`,
+      }).setParameter('prefixSearch', `${filters.search}%`);
     }
 
     // Price range filter — correct pagination via EXISTS on current tier price.
@@ -1634,15 +1640,25 @@ export class CatalogService {
     const offers = liveOffers ?? [];
     const tier = callerTier ?? PricingTier.INDIVIDUAL;
 
-    // Every live offer, each with the grade it applies to and when it ends.
-    // A graded material can carry one per condition, and the buyer needs all of
-    // them: which grade is discounted is the whole decision.
+    // Grades are a FACTORY / FREE_FACILITY concept only. A citizen or institution
+    // must not see a condition anywhere — not a value, not even a null key — so
+    // this flag gates every grade-shaped field below (offer breakdown included).
+    const isGradedTier =
+      tier === PricingTier.FACTORY || tier === PricingTier.FREE_FACILITY;
+
+    // Every live offer for this reader. The per-grade fields (`condition`,
+    // `condition_label`) travel ONLY for graded buyers; for a citizen /
+    // institution the row carries just the money, with no condition key at all.
     const offerRows = offers
       .map((o) => ({
-        condition: o.conditionCode ?? null,
-        condition_label: o.conditionCode
-          ? (conditionLabels?.get(o.conditionCode) ?? o.conditionCode)
-          : null,
+        ...(isGradedTier
+          ? {
+              condition: o.conditionCode ?? null,
+              condition_label: o.conditionCode
+                ? (conditionLabels?.get(o.conditionCode) ?? o.conditionCode)
+                : null,
+            }
+          : {}),
         // Both numbers, and the amount between them. An offer is a CHANGE of
         // price: showing only the new figure answers "what does it cost" while
         // losing "what did it cost", which is what makes the change legible.
@@ -1658,13 +1674,10 @@ export class CatalogService {
       }))
       .sort((a, b) => (b.discount_percentage ?? -1) - (a.discount_percentage ?? -1));
 
-    const bestOffer = offers[0];
     // Factories / free facilities buy by grade: expose each condition of the
     // product with its own price for THEIR tier.
-    const isGradedTier =
-      callerTier === PricingTier.FACTORY || callerTier === PricingTier.FREE_FACILITY;
     const conditionPrices = isGradedTier
-      ? this.liveRows(prices, callerTier)
+      ? this.liveRows(prices, tier)
           .filter((r) => r.conditionCode)
           .map((r) => ({
             condition: r.conditionCode,
@@ -1674,12 +1687,14 @@ export class CatalogService {
           .sort((a, b) => a.price - b.price)
       : undefined;
 
-    // The offer as ONE tidy object, or null — never a spray of `offer_*` fields
-    // across the row. When the material carries no live offer for this reader,
-    // `offer` is null and NO offer keys appear at all. A graded material can hold
-    // one offer per grade; the headline (biggest real saving) fills the object,
-    // and `by_condition` carries the rest only when there is more than one.
+    // The offer as ONE tidy object — and ONLY when there is one. `has_offer` is
+    // the boolean the caller asked for (does this material carry an offer?); the
+    // `offer` object appears solely when it is true, never as a null placeholder.
+    // A graded material can hold one offer per grade; the headline (biggest real
+    // saving) fills the object, and `by_condition` carries the per-grade list
+    // only for graded buyers with more than one.
     const headline = offerRows[0];
+    const hasOffer = !!headline;
     const offer = headline
       ? {
           old_price: headline.base_price,
@@ -1688,27 +1703,30 @@ export class CatalogService {
           percentage: headline.discount_percentage,
           currency: 'SYP',
           expires_at: headline.valid_until,
-          // The full per-grade breakdown lives INSIDE the one offer object, so a
-          // graded material's several offers are organised, not scattered.
-          by_condition: offerRows,
+          // The per-grade breakdown lives INSIDE the one offer object, and ONLY
+          // for graded buyers (factory / free facility) — a citizen or
+          // institution never sees a per-condition list, not even for one grade.
+          ...(isGradedTier ? { by_condition: offerRows } : {}),
         }
-      : null;
+      : undefined;
 
     return {
       id: p.id,
       name: p.name,
       description: p.description ?? null,
       image: p.imageURL ?? null,
-      category_id: p.categoryId,
-      category_name: p.category?.name ?? null,
+      // The category as one object — id AND name together — so the client needs
+      // no second lookup and no flat `category_*` pair scattered across the row.
+      category: { id: p.categoryId, name: p.category?.name ?? null },
       unit_type: p.unitType,
       unit_label: unitLabels?.get(p.unitType) ?? p.unitType,
       // ONLY the caller's own price (see tierHeadlinePrice) — never the whole
       // tier matrix, so a user token can never read a factory's number.
       price: this.tierHeadlinePrice(prices, tier),
       currency: 'SYP',
-      // One object when there is an offer, null when there is not.
-      offer,
+      // The flag is always present; the object only when there is an offer.
+      has_offer: hasOffer,
+      ...(offer ? { offer } : {}),
       // Grades and their prices only for the graded buyers (factory / free
       // facility) AND only when the material actually has grades — a citizen or
       // institution never sees grades, and a graded material with none carries
@@ -1780,39 +1798,57 @@ export class CatalogService {
     return byKey;
   }
 
-  private mapOffer(o: Offer, isGuest = false, basePrice?: number | null) {
+  private mapOffer(
+    o: Offer,
+    isGuest = false,
+    basePrice?: number | null,
+    showCondition = false,
+  ) {
     return {
       offer_id: o.id,
-      product_id: o.productId,
-      product_name: o.product?.name ?? null,
-      product_image: o.product?.imageURL ?? null,
+      // The material as one object — id AND name together — instead of a flat
+      // pair, matching the catalogue's product shape.
+      product: {
+        id: o.productId,
+        name: o.product?.name ?? null,
+        image: o.product?.imageURL ?? null,
+      },
       ...(isGuest
         ? { requires_login: true }
         : {
-            // The offer holds an AMOUNT, not a final price — one offer reaches
-            // two roles priced differently, so a single stored price could only
-            // ever have been right for one of them. `base_price` and
-            // `offer_price` are filled in by the caller that knows the reader's
-            // own tier; the amount and its direction are true regardless.
-            amount: Number(o.amount),
-            direction:
-              o.audience === OfferAudience.SELLERS ? 'INCREASE' : 'DECREASE',
-            discount_percentage: Number(o.discountPercentage),
-            ...(basePrice != null
-              ? {
-                  base_price: basePrice,
-                  offer_price: priceAfterOffer(
-                    basePrice, Number(o.amount), o.audience,
-                  ),
-                }
-              : {}),
+            // The pricing of the offer, grouped in one nested object rather than
+            // sprayed across the row: the amount, its direction, the real saving,
+            // and — when the reader's tier is known — the before/after prices.
+            pricing: {
+              amount: Number(o.amount),
+              direction:
+                o.audience === OfferAudience.SELLERS ? 'INCREASE' : 'DECREASE',
+              discount_percentage: Number(o.discountPercentage),
+              ...(basePrice != null
+                ? {
+                    base_price: basePrice,
+                    offer_price: priceAfterOffer(
+                      basePrice, Number(o.amount), o.audience,
+                    ),
+                  }
+                : {}),
+            },
           }),
       audience: o.audience,
-      condition: o.conditionCode ?? null,
+      // Grade is a factory / free-facility concept only: a citizen or institution
+      // never sees a condition on an offer, not even a null key.
+      ...(showCondition ? { condition: o.conditionCode ?? null } : {}),
       description: o.description ?? null,
       valid_from: o.validFrom,
       valid_until: o.validUntil ?? null,
     };
+  }
+
+  /** Does this caller buy BY GRADE (factory / free facility)? Guests do not. */
+  private showsConditions(caller: Caller | null): boolean {
+    if (!caller) return false;
+    const t = tierForRole(caller.role);
+    return t === PricingTier.FACTORY || t === PricingTier.FREE_FACILITY;
   }
 
   private emptyList(key: 'categories' | 'offers', page: number, limit: number) {

@@ -146,6 +146,7 @@ describe('OdooSyncProcessor', () => {
       userDeviceRepo,
       mediaRepo,
       rates,
+      { invalidate: jest.fn().mockResolvedValue(undefined) } as any, // catalog cache
     );
   });
 

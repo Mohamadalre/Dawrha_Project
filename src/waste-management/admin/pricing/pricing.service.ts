@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Product } from '@src/waste-management/entities/product.entity';
 import { ProductPricing } from '@src/waste-management/entities/product-pricing.entity';
 import { ProductPricingHistory } from '@src/waste-management/entities/product-pricing-history.entity';
@@ -476,17 +476,27 @@ export class PricingService {
    * withdrawn and the material is suspended — rather than showing a material
    * with no prices and leaving the warehouse to guess.
    */
-  async deletePricing(adminId: string, productId: string) {
+  async deletePricing(adminId: string, productId: string, tiers?: PricingTier[]) {
     const product = await this.productOrThrow(productId);
 
+    // No tiers (or empty) means withdraw EVERY role's price (full suspension).
+    // A specific set withdraws only those roles, leaving the material sellable
+    // to the ones still priced.
+    const targetTiers =
+      tiers && tiers.length > 0 ? tiers : (Object.values(PricingTier) as PricingTier[]);
+
     let archived = 0;
-    for (const tier of Object.values(PricingTier)) {
+    for (const tier of targetTiers) {
       const rows = await this.archiveCurrent(productId, tier, PricingArchiveReason.DELETED, adminId);
       archived += rows.length;
     }
 
     if (archived === 0) {
-      throw new BadRequestException('Product has no active pricing to delete');
+      throw new BadRequestException(
+        tiers && tiers.length > 0
+          ? 'None of the chosen roles have an active price to delete'
+          : 'Product has no active pricing to delete',
+      );
     }
 
     await this.audit.record({
@@ -690,7 +700,7 @@ export class PricingService {
     adminId: string,
     productId: string,
     effectiveUntil: Date,
-    tier?: PricingTier,
+    tiers?: PricingTier[],
   ) {
     const product = await this.productOrThrow(productId);
 
@@ -700,8 +710,11 @@ export class PricingService {
       );
     }
 
+    // No tiers (or an empty list) means "all roles". A specific set expires only
+    // those roles/tiers and leaves the rest sellable.
+    const scoped = tiers && tiers.length > 0;
     const rows = await this.pricingRepo.find({
-      where: tier ? { productId, tier } : { productId },
+      where: scoped ? { productId, tier: In(tiers) } : { productId },
     });
     const live = rows.filter((r) => this.isLive(r.effectiveFrom, r.effectiveUntil));
     if (!live.length) {
@@ -726,7 +739,7 @@ export class PricingService {
       action: 'EXPIRE_PRICING',
       entityType: 'product_pricing',
       entityId: productId,
-      newValues: { tier: tier ?? 'ALL', effectiveUntil },
+      newValues: { tiers: scoped ? tiers : 'ALL', effectiveUntil },
     });
     // 'offers' too, not only 'products': the offers listing shows each offer's
     // price and percentage DERIVED from the material's base price, so a price
@@ -738,7 +751,7 @@ export class PricingService {
     return {
       message: 'Pricing expiry set successfully',
       product_id: productId,
-      tier: tier ? tier.toLowerCase() : 'all',
+      tiers: scoped ? tiers!.map((t) => t.toLowerCase()) : 'all',
       effective_until: effectiveUntil,
       rows_affected: live.length,
     };

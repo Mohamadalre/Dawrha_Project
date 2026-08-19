@@ -4,7 +4,6 @@ import { seedProvince } from './province-seed';
 import { seedPermissions } from './permissions-seed';
 import { seedInstitutionTypes } from './institution-type-seed';
 import { seedUnits } from './unit-seed';
-import { seedConditions } from './condition-seed';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 
 async function run() {
@@ -28,7 +27,11 @@ async function run() {
     // (SYNC_FLEET). Any locally-seeded shift would be a phantom the driver
     // pickers must never show.
     await seedUnits(AppDataSource);
-    await seedConditions(AppDataSource);
+    // NOTE: material conditions (grades) are intentionally NOT seeded. They are
+    // per-product, not a global list (see material-condition.entity.ts): a
+    // material starts ungraded and the admin adds the grades it actually has via
+    // POST /api/v1/admin/waste/conditions. A global seed both contradicts that
+    // design and violates the NOT-NULL product_id column, so it is removed.
 
     winstonLogger.info('Seed completed successfully', {
       context: 'SeedRunner',

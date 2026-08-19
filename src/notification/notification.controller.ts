@@ -43,7 +43,14 @@ export class NotificationController {
     @CurrentUser() user: Account,
     @Query() query: NotificationQueryDto,
   ) {
-    return this.notificationService.findUserNotifications(user.id, query);
+    // The reader's saved language localises the notification content, so the
+    // in-app list comes back in their language with no header (same rule the
+    // response envelope already follows).
+    return this.notificationService.findUserNotifications(
+      user.id,
+      query,
+      (user as any).language,
+    );
   }
 
   @Get('unread-count')
@@ -56,7 +63,11 @@ export class NotificationController {
     @CurrentUser() user: Account,
     @Param('id', new ParseUUIDPipe()) id: string,
   ) {
-    return this.notificationService.getNotificationById(user.id, id);
+    return this.notificationService.getNotificationById(
+      user.id,
+      id,
+      (user as any).language,
+    );
   }
 
 

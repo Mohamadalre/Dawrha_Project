@@ -377,6 +377,12 @@ describe('CatalogService', () => {
     // so the per-tier caching is asserted on a tier that actually caches.
     cache.get.mockResolvedValue(null);
     assigned.getAssignedCategoryIds.mockResolvedValue(null);
+    // A NON-empty result, so caching actually happens: an empty listing is
+    // deliberately never cached (a transient empty catalogue must not be pinned
+    // for the TTL), so the cache key can only be asserted on a populated list.
+    const qb = makeQb();
+    qb.getManyAndCount.mockResolvedValue([[{ id: 'c1', name: 'Plastic' }], 1]);
+    categoryRepo.createQueryBuilder.mockReturnValueOnce(qb);
 
     await service.getCategories(
       { id: 'u1', role: Role.CITIZEN },
@@ -779,8 +785,9 @@ describe('CatalogService', () => {
         { id: 'u1', role: Role.FACTORY },
         { page: 1, limit: 10, active_only: true, sort: 'discount' } as any,
       );
-      expect(buyer.offers[0].offer_price).toBe(7.5);
-      expect(buyer.offers[0].discount_percentage).toBe(20);
+      // Offer pricing is grouped under `pricing` now.
+      expect(buyer.offers[0].pricing.offer_price).toBe(7.5);
+      expect(buyer.offers[0].pricing.discount_percentage).toBe(20);
     });
 
     it('prices each offer against ITS OWN material, not another’s', async () => {
@@ -817,10 +824,10 @@ describe('CatalogService', () => {
       const byId = Object.fromEntries(res.offers.map((o: any) => [o.offer_id, o]));
       // A against 200 → 140 left; B against 10 → 8 left. A base of 10 for A
       // (the cross-material leak) would give 0 here.
-      expect(byId.oA.base_price).toBe(200);
-      expect(byId.oA.offer_price).toBe(140);
-      expect(byId.oB.base_price).toBe(10);
-      expect(byId.oB.offer_price).toBe(8);
+      expect(byId.oA.pricing.base_price).toBe(200);
+      expect(byId.oA.pricing.offer_price).toBe(140);
+      expect(byId.oB.pricing.base_price).toBe(10);
+      expect(byId.oB.pricing.offer_price).toBe(8);
     });
 
     it('constrains a buyer’s offers to the BUYERS audience', async () => {

@@ -59,6 +59,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     // `language` is read FRESH from the account (not the token) so a language
     // change in settings takes effect on the very next request, no re-login.
-    return { id: account.id, role: payload.role, email: account.email, accountStatus: account.accountStatus, language: account.language, jti: payload.jti };
+    // `deviceId` comes from the token: it identifies which device this request's
+    // token was issued to, so a handler can audit or scope per-device actions.
+    return { id: account.id, role: payload.role, email: account.email, accountStatus: account.accountStatus, language: account.language, deviceId: payload.deviceId, jti: payload.jti };
   }
 }

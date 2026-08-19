@@ -11,9 +11,12 @@ import { Role } from '@src/user/enums/role.enum';
 import { Cart } from '../entities/cart.entity';
 import { CartItem } from '../entities/cart-item.entity';
 import { Product } from '../entities/product.entity';
+import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
+import { WarehouseState } from '@src/warehouse/enums/warehouse-state.enum';
 import { UnitsService } from '../common/providers/units.service';
 import { ConditionsService } from '../common/providers/conditions.service';
 import { EffectivePriceService } from '../common/providers/effective-price.service';
+import { BuyerProfileService } from '../common/providers/buyer-profile.service';
 import {
   ConditionRequiredException,
   ProductNotFoundException,
@@ -41,7 +44,40 @@ export class CartService {
     // direction. The basket must not compute that itself: a second copy of the
     // sign is how a catalogue that subtracts ends up beside a basket that adds.
     private readonly effectivePrice: EffectivePriceService,
+    // For the stock guard: a factory / free facility may only basket what its
+    // governorate's warehouses actually hold, so the basket reads live stock and
+    // the buyer's province the same way the catalogue availability does.
+    @InjectRepository(WarehouseInventory)
+    private readonly inventoryRepo: Repository<WarehouseInventory>,
+    private readonly buyerProfiles: BuyerProfileService,
   ) {}
+
+  /**
+   * The quantity of a material (optionally of ONE grade) a stock-gated buyer can
+   * actually order right now: the sum of (quantity − reserved), floored at zero,
+   * across the ACTIVE warehouses in their own governorate. Grade-specific when a
+   * condition is given, so a factory adding "excellent" is checked against the
+   * excellent stock, not the material's total.
+   */
+  private async availableInProvince(
+    odooProductId: number,
+    provinceId: string | null,
+    conditionCode: string | null,
+  ): Promise<number> {
+    const qb = this.inventoryRepo
+      .createQueryBuilder('wi')
+      .innerJoin('wi.warehouse', 'w')
+      .select(
+        'COALESCE(SUM(GREATEST(COALESCE(wi.quantity,0) - COALESCE(wi.reservedQuantity,0), 0)), 0)',
+        'available',
+      )
+      .where('wi.odooProductId = :pid', { pid: odooProductId })
+      .andWhere('w.state = :active', { active: WarehouseState.ACTIVE });
+    if (provinceId) qb.andWhere('w.provinceId = :provinceId', { provinceId });
+    if (conditionCode) qb.andWhere('wi.conditionCode = :cc', { cc: conditionCode });
+    const row = await qb.getRawOne<{ available: string }>();
+    return Number(row?.available ?? 0);
+  }
 
   // ---------------------------------------------------------------------------
   // Add product
@@ -95,6 +131,26 @@ export class CartService {
     const offer = effective.offer;
     const isOffer = !!offer;
 
+    // Stock guard — factories / free facilities only. They buy FROM a warehouse,
+    // so they may not basket more than their governorate actually holds (of the
+    // chosen grade, when the material is graded). Citizens / institutions SELL to
+    // us, so there is nothing to check. Refused before the line is written.
+    const buysFromWarehouse =
+      caller.role === Role.FACTORY || caller.role === Role.EXTERNAL_PARTNER;
+    if (buysFromWarehouse) {
+      const provinceId = await this.buyerProfiles.provinceForBuyer(caller.id, caller.role);
+      const available = product.odooProductId
+        ? await this.availableInProvince(product.odooProductId, provinceId, conditionCode)
+        : 0;
+      if (dto.quantity > available) {
+        throw new BadRequestException(
+          conditionCode
+            ? 'The requested quantity of this grade is more than your governorate warehouses have in stock'
+            : 'The requested quantity is more than your governorate warehouses have in stock',
+        );
+      }
+    }
+
     const cart = await this.getOrCreateCart(caller.id);
 
     // One line per (material, grade). Adding the SAME material again is not a
@@ -144,15 +200,18 @@ export class CartService {
       // Surfaced so the caller can see, per line, whether an offer was applied
       // and at what unit — the same figures the invoice will carry.
       item: {
-        product_id: product.id,
-        condition_id: dto.condition_id ?? '',
+        // The material as one object — id AND name — not a bare id.
+        product: { id: product.id, name: product.name },
+        condition_id: dto.condition_id ?? null,
         quantity: dto.quantity,
         unit_type: product.unitType,
         unit_price: unitPrice,
         subtotal,
-        is_offer: isOffer,
-        offer_id: offer?.id ?? '',
         currency: 'SYP',
+        // The offer as one nested object when applied, and a boolean either way —
+        // never a scattered is_offer / offer_id pair.
+        has_offer: isOffer,
+        ...(isOffer ? { offer: { id: offer!.id, applied: true } } : {}),
       },
       cart_summary: {
         total_items: summary.total_items,
@@ -212,19 +271,30 @@ export class CartService {
 
     const summary = await this.buildSummary(cart.id, caller.role, items);
 
+    // Grade only for graded buyers (factory / free facility).
+    const gradedRole =
+      caller.role === Role.FACTORY || caller.role === Role.EXTERNAL_PARTNER;
+
     return {
       cart_id: cart.id,
       items: items.map((it) => ({
         item_id: it.id,
-        product_id: it.productId,
-        product_name: it.product?.name ?? null,
-        product_image: it.product?.imageURL ?? null,
+        // The material as one object, matching the catalogue and the add reply.
+        product: {
+          id: it.productId,
+          name: it.product?.name ?? null,
+          image: it.product?.imageURL ?? null,
+        },
         quantity: Number(it.quantity),
         unit_type: it.unitType,
-        condition: it.conditionCode ?? null,
+        // Grade only for graded buyers (factory / free facility) who actually
+        // chose one — a citizen / institution line carries no condition key.
+        ...(gradedRole && it.conditionCode ? { condition: it.conditionCode } : {}),
         unit_price: Number(it.unitPrice),
         subtotal: Number(it.subtotal),
-        is_offer: it.isOffer,
+        // Offer as one nested object when applied, plus the boolean either way.
+        has_offer: it.isOffer,
+        ...(it.isOffer ? { offer: { id: it.offerId ?? null, applied: true } } : {}),
       })),
       summary,
     };

@@ -599,6 +599,21 @@ export class AdminCatalogService {
       }
     }
 
+    // A material that still carries a LIVE price list cannot be deleted.
+    //
+    // `product_pricing` has an onDelete: RESTRICT foreign key, so deleting a
+    // priced material otherwise fails deep in the database with a raw constraint
+    // error the caller cannot read — instead of the clean, translated refusal
+    // every other guard here gives. Withdrawing the price list first (DELETE
+    // /pricing) archives it to history and suspends the material, which is the
+    // deliberate step a permanent delete should follow, not skip.
+    const livePriceRows = await this.pricingRepo.count({ where: { productId: id } });
+    if (livePriceRows > 0) {
+      throw new ConflictException(
+        'This material still has a live price list — withdraw its pricing first, then delete it',
+      );
+    }
+
     if (product.odooProductId) {
       await this.odooSync.enqueueDeleteProduct({ odooProductId: product.odooProductId });
     }

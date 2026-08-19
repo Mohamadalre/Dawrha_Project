@@ -130,6 +130,24 @@ export class AccountManagementController {
   }
 
   /**
+   * ONLY the archived (soft-deleted) accounts — the recycle bin.
+   *
+   * `GET /accounts` hides archived rows and `include_archived=true` mixes them
+   * with the live ones; neither shows the archived set on its own, which is what
+   * an admin reviewing deletions actually wants. Still filterable by `role` /
+   * `status` and paginated.
+   */
+  @Get('accounts/archived')
+  @Permissions('admin.accounts.view')
+  async listArchivedAccounts(@Query() query: AccountsByRoleQueryDto) {
+    const result = await this.accountManagementService.listAccounts({
+      ...query,
+      only_archived: true,
+    });
+    return { message: 'Archived accounts fetched successfully', result };
+  }
+
+  /**
    * Delete an account — a SOFT ARCHIVE: the email/phone stay claimed, the data
    * is kept for audit, login answers "account not found", and any token it
    * holds stops working at once. Refused for admins, already-deleted accounts,

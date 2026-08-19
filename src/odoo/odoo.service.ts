@@ -268,6 +268,20 @@ export class OdooService {
     await this.callKw('recycle.product', 'write', [[odooId], values]);
   }
 
+  /**
+   * Reads a product's master fields from Odoo — for the REVERSE sync, where an
+   * edit made on the Odoo screen is mirrored back to the backend. Only the
+   * fields the backend is willing to accept from Odoo travel (the name); pricing
+   * and existence stay the backend's to own.
+   */
+  async fetchProductInfo(odooId: number): Promise<{ name: string } | null> {
+    const rows = await this.callKw<any[]>('recycle.product', 'read', [
+      [odooId],
+      ['name'],
+    ]);
+    return rows?.[0] ? { name: rows[0].name } : null;
+  }
+
   async deleteProduct(odooId: number): Promise<void> {
     await this.callKw('recycle.product', 'unlink', [[odooId]]);
   }
@@ -451,7 +465,10 @@ export class OdooService {
         email: values.email ?? false,
         phone: values.phone ?? false,
         // (6, 0, ids) REPLACES the user's groups with exactly this set.
-        groups_id: [[6, 0, [groupId]]],
+        // Odoo 19 renamed res.users.groups_id → group_ids (the groups system
+        // was refactored); the old name raises "Invalid field 'groups_id'",
+        // which is what made every additional-admin creation fail.
+        group_ids: [[6, 0, [groupId]]],
       },
     ]);
     if (!id) throw new InternalServerErrorException('Odoo did not return a user id');
@@ -937,6 +954,9 @@ export class OdooService {
         'year',
         'plate_number',
         'max_payload_kg',
+        // Bed dimensions authored in Odoo, mirrored onto the backend truck row.
+        'length_m',
+        'width_m',
         'warehouse_id',
         'is_active',
         'truck_type',

@@ -39,7 +39,7 @@ import { Province } from './entities/location/province.entity';
 import { UserDevice } from '@src/auth/entities/user-device.entity';
 import { Not, IsNull } from 'typeorm';
 import { Language } from '@src/common/enums/language.enum';
-import { LocationDto } from '@src/onboarding/dto/location.dto';
+import { AddLocationDto } from './dto/add-location.dto';
 import { UserCacheService } from './providers/user-cache.service';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
@@ -487,6 +487,7 @@ export class UserService {
   private mapLocation(loc: Location) {
     return {
       id: loc.id,
+      name: loc.name ?? null,
       address: loc.address ?? null,
       description: loc.DesscriptLocation ?? null,
       coordinates: loc.coordinates?.coordinates ?? null,
@@ -505,7 +506,7 @@ export class UserService {
   }
 
   /** Adds a new location for the current citizen (same fields as onboarding). */
-  async addLocation(accountId: string, role: Role, dto: LocationDto) {
+  async addLocation(accountId: string, role: Role, dto: AddLocationDto) {
     this.assertCitizen(role);
 
     const province = await this.provinceRepo.findOne({ where: { id: dto.provinceId } });
@@ -514,10 +515,29 @@ export class UserService {
     const profile = await this.getOrCreateCitizenProfile(accountId);
     const [lng, lat] = dto.coordinates;
 
+    // A label is the citizen's own name for the place, so it must be unique
+    // among THEIR locations — otherwise the checkout picker shows two "Home"s
+    // and they cannot tell which pin is which. Checked case-insensitively here
+    // for a clean message; a partial unique index is the last-line guarantee.
+    const name = dto.name?.trim();
+    if (name) {
+      const clash = await this.locationRepo
+        .createQueryBuilder('l')
+        .where('l.cititzen_profile_id = :pid', { pid: profile.id })
+        .andWhere('LOWER(l.name) = LOWER(:name)', { name })
+        .getExists();
+      if (clash) {
+        throw new BadRequestException(
+          'You already have a location with this name — choose a different name',
+        );
+      }
+    }
+
     const location = await this.locationRepo.save(
       this.locationRepo.create({
         cititzenProfile: profile,
         province,
+        name: name || undefined,
         address: dto.address,
         DesscriptLocation: dto.descriptionAddress,
         coordinates: { type: 'Point', coordinates: [lng, lat] },

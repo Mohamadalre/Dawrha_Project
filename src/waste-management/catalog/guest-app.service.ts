@@ -208,7 +208,14 @@ export class GuestAppService {
       })),
       pagination: buildPagination(total, query.page, query.limit),
     };
-    await this.cache.set('categories', cacheKey, result);
+    // Never cache an EMPTY catalogue. An empty result is almost always a
+    // transient startup state (data not seeded / synced yet); pinning it for the
+    // 12h TTL is exactly how "the default page (limit 10) shows nothing while
+    // other limits work" happened — the empty page was cached before any data
+    // arrived through a path that does not bump the version (a seed, a migration,
+    // an out-of-band insert). Skipping the write costs one cheap query while the
+    // catalogue is empty and makes the first real data appear immediately.
+    if (total > 0) await this.cache.set('categories', cacheKey, result);
     return result;
   }
 
@@ -252,7 +259,9 @@ export class GuestAppService {
       products: await this.mapProducts(audience, rows),
       pagination: buildPagination(total, query.page, query.limit),
     };
-    await this.cache.set('products', cacheKey, result);
+    // Same guard as `categories`: an empty list is a transient state, never
+    // worth pinning for the TTL. See the note there.
+    if (total > 0) await this.cache.set('products', cacheKey, result);
     return result;
   }
 

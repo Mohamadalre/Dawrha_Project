@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsDateString,
   IsEnum,
   IsInt,
@@ -22,10 +23,35 @@ export class SetPricingExpiryDto {
   @IsDateString()
   effective_until: string;
 
-  /** Omit to expire every tier together. */
+  /**
+   * Which buyer roles/tiers the expiry applies to. Omit (or send an empty list)
+   * to expire EVERY tier together — the "all roles" case. `tier` is kept for
+   * backward compatibility with the old single-tier callers; when both are sent,
+   * `tiers` wins.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsEnum(PricingTier, { each: true })
+  tiers?: PricingTier[];
+
+  /** @deprecated use `tiers`. Omit to expire every tier together. */
   @IsOptional()
   @IsEnum(PricingTier)
   tier?: PricingTier;
+}
+
+/**
+ * Withdraw (archive) a material's price list — optionally only for some roles.
+ *
+ * Omit `tiers` (or send an empty list) to withdraw EVERY tier at once (the
+ * material is then fully suspended). Name specific tiers to withdraw only those,
+ * leaving the material sellable to the roles still priced.
+ */
+export class DeletePricingDto {
+  @IsOptional()
+  @IsArray()
+  @IsEnum(PricingTier, { each: true })
+  tiers?: PricingTier[];
 }
 
 /**
