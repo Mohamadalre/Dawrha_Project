@@ -56,6 +56,7 @@
 | GET/PATCH `dispatch-config` | `collection.dispatch.manage` | إعدادات محرّك التوزيع (صف singleton: أوزان، نوافذ، حدود دمج، **rebalance_min** → يعيد جدولة كرون الـ rebalance). |
 | GET `reports/collection/daily?date` · `reports/collection/requests` · `reports/collection/routes` | `admin.reports.view` | ملخص اليوم / سجلّ الطلبات / سجلّ المسارات (COMPLETED فقط). |
 
+
 ## 9. الإشعارات — `/api/notifications` (بلا نسخة)
 GET (query) · `unread-count` · `:id` · PATCH `:id/read` · `read-all` · DELETE `:id` · `clear-all`.
 
