@@ -5,6 +5,9 @@ export const validationSchema = Joi.object({
     .valid('development', 'production', 'test')
     .default('development'),
   PORT: Joi.number(),
+  // Comma-separated CORS allow-list (e.g. "https://app.dawrha.com,https://admin.dawrha.com").
+  // Optional: when unset, any origin is reflected for local development.
+  CORS_ORIGINS: Joi.string().allow('', null).optional(),
   DB_HOST: Joi.string().required(),
   DB_PORT: Joi.number(),
   DB_USERNAME: Joi.string().required(),
@@ -27,7 +30,9 @@ export const validationSchema = Joi.object({
   ODOO_DB: Joi.string().required(),
   ODOO_USERNAME: Joi.string().required(),
   ODOO_PASSWORD: Joi.string().required(),
-  ODOO_GROUP_ID: Joi.number().required(),
+  // No ODOO_GROUP_ID: the admin group is resolved at runtime from its stable
+  // external id (base.group_system), so no numeric id is configured — it would
+  // go stale on every fresh Odoo database.
   // Shared secret for the inbound Odoo→backend inventory webhook. Optional:
   // when unset the webhook endpoint refuses requests (503).
   ODOO_WEBHOOK_SECRET: Joi.string().min(32).optional(),

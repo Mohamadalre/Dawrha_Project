@@ -477,14 +477,25 @@ export class OdooSyncProcessor extends WorkerHost {
     return map;
   }
 
-  /** All currently-effective pricing rows of a product for a given tier. */
+  /**
+   * All currently-effective pricing rows of a product for a given tier —
+   * EXCLUDING those on a deactivated grade.
+   *
+   * A deactivated grade is hidden everywhere a buyer looks, and Odoo's price
+   * sheet is one of those places: leaving its price here would show the grade,
+   * struck through or not, on the sorter's and the buyer's Odoo view while the
+   * apps hide it. The ungraded row (null condition) always stays — it is the
+   * material's plain price, not a grade.
+   */
   private async livePricingRows(productId: string, tier: PricingTier) {
     return this.pricingRepo
       .createQueryBuilder('pp')
+      .leftJoin('pp.condition', 'c')
       .where('pp.productId = :productId', { productId })
       .andWhere('pp.tier = :tier', { tier })
       .andWhere('pp.effectiveFrom <= NOW()')
       .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())')
+      .andWhere('(pp.conditionId IS NULL OR c.isActive = true)')
       .getMany();
   }
 
@@ -2220,6 +2231,20 @@ export class OdooSyncProcessor extends WorkerHost {
         condition.odooSyncStatus = OdooSyncStatus.FAILED;
         await this.conditionRepo.save(condition);
       }
+    }
+
+    // Any of the four catalogue branches above may have DELETED a category /
+    // product / unit / condition (compensation for a create that never reached
+    // Odoo) or flipped its sync status — a change the cached catalogue must not
+    // keep serving. Drop the catalogue cache whenever the failed job was a
+    // catalogue one, exactly as the admin CRUD and the reverse-sync do.
+    if (
+      job.name === ODOO_JOBS.SYNC_CATEGORY ||
+      job.name === ODOO_JOBS.SYNC_PRODUCT ||
+      job.name === ODOO_JOBS.SYNC_UNIT ||
+      job.name === ODOO_JOBS.SYNC_CONDITION
+    ) {
+      await this.cache.invalidate('categories', 'products', 'offers');
     }
 
     if (job.name === ODOO_JOBS.CREATE_WAREHOUSE) {

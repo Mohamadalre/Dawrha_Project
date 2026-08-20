@@ -6,6 +6,7 @@ import { ConfigModule } from '@nestjs/config';
 import { WarehouseModule } from '@src/warehouse/warehouse.module';
 import { OdooSyncModule } from '@src/odoo-sync/odoo-sync.module';
 import { OdooModule } from '@src/odoo/odoo.module';
+import { PlatformSettingsModule } from '@src/platform-settings/platform-settings.module';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { Order } from './entities/order.entity';
@@ -96,6 +97,8 @@ import { PointsWalletModule } from '@src/points-wallet/points-wallet.module';
     OdooSyncModule,
     // Reading a delivery truck's driver during dispatch is a live RPC lookup.
     OdooModule,
+    // The ONE central currency the min/max constraints stamp on new rows.
+    PlatformSettingsModule,
     PermissionsModule,
     // Supplies SellabilityService: a line may not be ordered without a live
     // price for the buyer's tier.

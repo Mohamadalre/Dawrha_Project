@@ -3,7 +3,6 @@ import {
   IsEnum,
   IsNumber,
   IsOptional,
-  IsString,
   Min,
 } from 'class-validator';
 import { SpendingCapPeriod } from '../enums/spending-cap-period.enum';
@@ -18,9 +17,10 @@ export class UpsertOrderMinimumDto {
   @Min(0)
   min_order_value: number;
 
-  @IsOptional()
-  @IsString()
-  currency?: string;
+  // Currency is NOT taken here. Every priced figure in the system reads the ONE
+  // central platform currency (PlatformSettingsService.defaultCurrency, editable
+  // by the admin), so a currency change is one edit that moves everything at
+  // once — never a per-row value that can drift.
 
   @IsOptional()
   @IsBoolean()
@@ -37,9 +37,8 @@ export class UpsertSpendingCapDto {
   @IsEnum(SpendingCapPeriod)
   period: SpendingCapPeriod;
 
-  @IsOptional()
-  @IsString()
-  currency?: string;
+  // Currency is NOT taken here — it comes from the central platform currency
+  // (see UpsertOrderMinimumDto).
 
   @IsOptional()
   @IsBoolean()

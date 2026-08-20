@@ -71,6 +71,7 @@ describe('PricingController (integration)', () => {
           useValue: {
             validateActiveCode: jest.fn(async (c: string) => String(c).toUpperCase()),
             labelMapFor: jest.fn(async () => new Map()),
+            sortOrderMapFor: jest.fn(async () => new Map()),
           },
         },
         {
@@ -145,13 +146,11 @@ describe('PricingController (integration)', () => {
     expect(res.body.data.pricing.individual).toMatchObject({ price: 0.3 });
     expect(res.body.data.pricing.company).toMatchObject({ price: 0.27 });
     expect(res.body.data.pricing.factory[0]).toMatchObject({
-      condition: 'EXCELLENT',
-      condition_id: 'cond-EXCELLENT',
+      condition: { id: 'cond-EXCELLENT', code: 'EXCELLENT' },
       price: 0.25,
     });
     expect(res.body.data.pricing.free_facility[0]).toMatchObject({
-      condition: 'EXCELLENT',
-      condition_id: 'cond-EXCELLENT',
+      condition: { id: 'cond-EXCELLENT', code: 'EXCELLENT' },
       price: 0.26,
     });
     expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: PRODUCT_ID });

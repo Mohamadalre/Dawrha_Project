@@ -56,13 +56,18 @@ export class DeliveryRate {
   @Column({ name: 'effective_from', type: 'timestamptz' })
   effectiveFrom: Date;
 
-  /** Set when a newer rate replaced this one. */
+  /**
+   * When this rate STOPPED being in force — stamped the moment a newer rate
+   * replaced it, whether by setting a new one or by editing this one.
+   *
+   * This is the whole point of keeping superseded rows: `effective_from` →
+   * `effective_until` is the window a rate was actually quoted in, so a delivery
+   * priced at any past date can always be explained by the one row whose window
+   * contains it. The active row has this null (it has not ended yet); every
+   * other row carries the exact instant it was closed.
+   */
   @Column({ name: 'effective_until', type: 'timestamptz', nullable: true })
   effectiveUntil?: Date | null;
-
-  /** Why the rate changed — fuel, wages, a seasonal decision. */
-  @Column({ type: 'text', nullable: true })
-  note?: string;
 
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdBy?: string;

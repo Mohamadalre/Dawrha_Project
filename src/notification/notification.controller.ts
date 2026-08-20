@@ -14,6 +14,7 @@ import {
   AccountsStatus,
   TOKEN_HOLDING_STATUSES,
 } from '@src/auth/decorators/account-status.decorator';
+import { I18nContext } from 'nestjs-i18n';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { Account } from '@src/user/entities/account.entity';
 import { NotificationService } from './notification.service';
@@ -46,16 +47,28 @@ export class NotificationController {
     // The reader's saved language localises the notification content, so the
     // in-app list comes back in their language with no header (same rule the
     // response envelope already follows).
-    return this.notificationService.findUserNotifications(
+    const result = await this.notificationService.findUserNotifications(
       user.id,
       query,
       (user as any).language,
     );
+    return { message: 'Notifications fetched successfully', result };
   }
 
   @Get('unread-count')
   async getUnreadCount(@CurrentUser() user: Account) {
-    return this.notificationService.countUnread(user.id);
+    const count = await this.notificationService.countUnread(user.id);
+    // The count is part of the sentence ("You have N unread…"), so it is
+    // interpolated into the translated message here — the response interceptor
+    // only looks up whole keys and cannot inject an argument. The reader's saved
+    // language wins over any header, exactly like everywhere else.
+    const lang = (user as any).language ?? I18nContext.current()?.lang;
+    const message =
+      I18nContext.current()?.t(
+        'translation.You have {count} unread notification(s), fetched successfully',
+        { args: { count }, lang },
+      ) ?? `You have ${count} unread notification(s), fetched successfully`;
+    return { message, result: { count } };
   }
 
   @Get(':id')
@@ -63,11 +76,12 @@ export class NotificationController {
     @CurrentUser() user: Account,
     @Param('id', new ParseUUIDPipe()) id: string,
   ) {
-    return this.notificationService.getNotificationById(
+    const result = await this.notificationService.getNotificationById(
       user.id,
       id,
       (user as any).language,
     );
+    return { message: 'Notification fetched successfully', result };
   }
 
 

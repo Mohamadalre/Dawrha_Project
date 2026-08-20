@@ -28,6 +28,7 @@ describe('Points award on order receipt (scenario)', () => {
     const stageRepo = { find: jest.fn().mockResolvedValue([]) };
     const wallet = new PointsWalletService(
       walletRepo as any, rates, notifications as any, stageRepo as any,
+      { previousRanks: jest.fn().mockResolvedValue(new Map()), refreshBaseline: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     const order: any = {

@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { CatalogService } from './catalog.service';
+import { ConditionsNotForRoleException } from '../exceptions/waste.exceptions';
 import { Role } from '@src/user/enums/role.enum';
 import { PricingTier } from '../enums/pricing-tier.enum';
 import { OfferAudience } from '../enums/offer-audience.enum';
@@ -58,6 +59,7 @@ describe('CatalogService', () => {
         ['p1:EXCELLENT', 'ممتازة'],
         ['UNGRADED', 'غير مفروزة'],
       ])),
+      sortOrderMapFor: jest.fn(async () => new Map([['p1:EXCELLENT', 1]])),
       activeForProduct: jest.fn(async () => []),
       hasConditions: jest.fn(async () => false),
     };
@@ -166,20 +168,46 @@ describe('CatalogService', () => {
       expect(effectivePrice.effectivePrice).toHaveBeenCalledWith('p1', Role.FACTORY, 'EXCELLENT');
     });
 
-    it('hides grades entirely from a flat-tier caller (citizen), even when the material has them', async () => {
+    it('OMITS a grade that has no price for this tier — an unpriced grade is not offered', async () => {
       productRepo.findOne.mockResolvedValue({ id: 'p1', categoryId: 'c1', odooProductId: 5 });
       assigned.getAssignedCategoryIds.mockResolvedValue(null);
       conditionsService.activeForProduct.mockResolvedValue([
         { id: 'ce', code: 'EXCELLENT', nameEn: 'Excellent', nameAr: 'ممتاز', sortOrder: 1 },
+        { id: 'cg', code: 'GOOD', nameEn: 'Good', nameAr: 'جيد', sortOrder: 2 },
       ]);
+      buyerProfiles.provinceForBuyer.mockResolvedValue('pv1');
+      const invQb = makeQb();
+      invQb.getMany.mockResolvedValue([]);
+      inventoryRepo.createQueryBuilder.mockReturnValue(invQb);
+      // EXCELLENT is priced; GOOD returns no effective price (null) → hidden.
+      effectivePrice.effectivePrice.mockImplementation(
+        async (_p: string, _r: string, code: string) =>
+          code === 'EXCELLENT' ? { basePrice: 10, offer: null, price: 10 } : null,
+      );
 
-      const res: any = await service.getConditions({ id: 'u2', role: Role.CITIZEN }, 'p1');
+      const res: any = await service.getConditions(FACTORY_CALLER, 'p1');
 
-      // Grades are a graded-buyer concern: a citizen sees none, and no price is
-      // even looked up.
-      expect(res.has_conditions).toBe(false);
-      expect(res.conditions).toEqual([]);
+      expect(res.conditions).toHaveLength(1);
+      expect(res.conditions[0].code).toBe('EXCELLENT');
+      expect(res.conditions.some((c: any) => c.code === 'GOOD')).toBe(false);
+    });
+
+    it('REFUSES the grades route entirely for a flat-tier caller (citizen)', async () => {
+      // Grades are a graded-buyer concern: the route is not a citizen's at all,
+      // so it throws rather than returning an empty list — a citizen/institution
+      // client must not be able to build a grade UI around data it never gets.
+      // Nothing is even looked up (the role check is first).
+      await expect(
+        service.getConditions({ id: 'u2', role: Role.CITIZEN }, 'p1'),
+      ).rejects.toBeInstanceOf(ConditionsNotForRoleException);
+      expect(productRepo.findOne).not.toHaveBeenCalled();
       expect(effectivePrice.effectivePrice).not.toHaveBeenCalled();
+    });
+
+    it('REFUSES the grades route for an institution caller too', async () => {
+      await expect(
+        service.getConditions({ id: 'u3', role: Role.INSTITUTIONS }, 'p1'),
+      ).rejects.toBeInstanceOf(ConditionsNotForRoleException);
     });
   });
 

@@ -7,6 +7,8 @@ import { NotificationService } from '@src/notification/notification.service';
 import { NotificationType } from '@src/notification/enums/notification-type.enum';
 import { PointsWallet } from './entities/points-wallet.entity';
 import { PointsRateService } from './points-rate.service';
+import { LeaderboardSnapshotService } from './leaderboard-snapshot.service';
+import { deriveTrend } from './leaderboard-trend';
 import { Stage } from '@src/stages/entities/stage.entity';
 
 /**
@@ -36,6 +38,7 @@ export class PointsWalletService {
     private readonly notifications: NotificationService,
     @InjectRepository(Stage)
     private readonly stageRepo: Repository<Stage>,
+    private readonly snapshots: LeaderboardSnapshotService,
   ) {}
 
   /**
@@ -65,6 +68,13 @@ export class PointsWalletService {
 
       const wallet = await this.ensureForAccount(accountId, role);
       if (!wallet) return null;
+
+      // Capture the standings BEFORE this award so the leaderboard trend reflects
+      // exactly the movement this points change causes — the user who climbs
+      // rises, whoever they overtake drops — the instant it happens, not a day
+      // later. Best-effort: it must never hold up (or fail) the actual award.
+      await this.snapshots.refreshBaseline().catch(() => undefined);
+
       wallet.points += points;
       await this.walletRepo.save(wallet);
 
@@ -194,18 +204,35 @@ export class PointsWalletService {
     const stageName = (pts: number): string | null =>
       stages.find((s) => pts >= s.minPoints && pts <= s.maxPoints)?.name ?? null;
 
-    const leaderboard = rows.map((w, i) => ({
-      rank: offset + i + 1,
-      account_id: w.accountId,
-      name: w.account?.name ?? null,
-      points: w.points,
-      // The user's stage — its NAME only, as requested.
-      stage: stageName(w.points),
-    }));
+    // The BASELINE rank of everyone on this page (and the caller), from the last
+    // daily snapshot — so each row can say whether the user climbed, slipped or
+    // held since then. One query for the whole page.
+    const pageAccountIds = rows.map((w) => w.accountId);
+    if (callerAccountId) pageAccountIds.push(callerAccountId);
+    const previousRanks = await this.snapshots.previousRanks(pageAccountIds);
+
+    const leaderboard = rows.map((w, i) => {
+      const rank = offset + i + 1;
+      // trend: UP (climbed) / DOWN (slipped) / SAME (held or first appearance),
+      // measured against the user's rank at the last daily snapshot.
+      const { trend, rank_change } = deriveTrend(rank, previousRanks.get(w.accountId));
+      return {
+        rank,
+        account_id: w.accountId,
+        name: w.account?.name ?? null,
+        points: w.points,
+        // The user's stage — its NAME only, as requested.
+        stage: stageName(w.points),
+        trend,
+        rank_change,
+      };
+    });
 
     // The caller's own standing — null unless they are an ACTIVE CITIZEN (no
     // wallet, or a non-citizen role, means they are not on this leaderboard).
-    let me: { rank: number; points: number; stage: string | null } | null = null;
+    let me:
+      | { rank: number; points: number; stage: string | null; trend: string; rank_change: number }
+      | null = null;
     if (callerAccountId) {
       const mine = await this.walletRepo
         .createQueryBuilder('w')
@@ -224,10 +251,14 @@ export class PointsWalletService {
           .andWhere('w.points = :pts', { pts: mine.points })
           .andWhere('w.createdAt < :createdAt', { createdAt: mine.createdAt })
           .getCount();
+        const myRank = ahead + tiedAhead + 1;
+        const myTrend = deriveTrend(myRank, previousRanks.get(callerAccountId));
         me = {
-          rank: ahead + tiedAhead + 1,
+          rank: myRank,
           points: mine.points,
           stage: stageName(mine.points),
+          trend: myTrend.trend,
+          rank_change: myTrend.rank_change,
         };
       }
     }

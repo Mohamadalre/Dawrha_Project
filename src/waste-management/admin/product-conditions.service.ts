@@ -9,6 +9,8 @@ import { DataSource, Repository } from 'typeorm';
 import { MaterialCondition } from '../entities/material-condition.entity';
 import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
+import { ProductPricingHistory } from '../entities/product-pricing-history.entity';
+import { PricingArchiveReason } from '../enums/pricing-archive-reason.enum';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { Offer } from '../entities/offer.entity';
 import { OdooSyncStatus } from '../enums/odoo-sync-status.enum';
@@ -40,6 +42,9 @@ export class ProductConditionsService {
     private readonly productRepo: Repository<Product>,
     @InjectRepository(ProductPricing)
     private readonly pricingRepo: Repository<ProductPricing>,
+    // A grade's live price is archived here before it is deleted with the grade.
+    @InjectRepository(ProductPricingHistory)
+    private readonly pricingHistoryRepo: Repository<ProductPricingHistory>,
     // Deleting a grade has to know whether any of it is still on a shelf.
     @InjectRepository(WarehouseInventory)
     private readonly inventoryRepo: Repository<WarehouseInventory>,
@@ -87,6 +92,23 @@ export class ProductConditionsService {
     if (clash) {
       throw new ConflictException(
         `This material already has a "${dto.code}" condition`,
+      );
+    }
+
+    // Names must be unique within the material too — two grades sharing a name
+    // (in either language) are indistinguishable to everyone who reads the list,
+    // even when their codes differ. Case-insensitive so "Good" and "good" clash.
+    const nameClash = await this.conditionRepo
+      .createQueryBuilder('c')
+      .where('c.productId = :productId', { productId })
+      .andWhere(
+        '(LOWER(c.nameEn) = LOWER(:nameEn) OR LOWER(c.nameAr) = LOWER(:nameAr))',
+        { nameEn: dto.name_en.trim(), nameAr: dto.name_ar.trim() },
+      )
+      .getOne();
+    if (nameClash) {
+      throw new ConflictException(
+        'This material already has a condition with that name',
       );
     }
 
@@ -186,18 +208,15 @@ export class ProductConditionsService {
   ) {
     const condition = await this.conditionOrThrow(conditionId, expectedProductId);
 
-    // Deactivating a grade that still carries a live price would strand that
-    // price: the material would be priced for a grade nobody can order.
-    if (dto.is_active === false && condition.isActive) {
-      const priced = await this.pricingRepo.count({
-        where: { productId: condition.productId, conditionCode: condition.code },
-      });
-      if (priced > 0) {
-        throw new ConflictException(
-          'This condition still has a price — remove it from the price list first',
-        );
-      }
-    }
+    // Deactivating a grade HIDES it, it does not strand it. An inactive grade
+    // keeps its price row (so reactivating restores exactly what it was) but
+    // drops out of every buyer catalogue and out of Odoo's price sheet — only
+    // the admin still sees it. So a price is NOT a reason to refuse the toggle;
+    // the visibility everywhere else is what changes, and the Odoo push below
+    // is what makes the price disappear there. (Pricing an INACTIVE grade is
+    // blocked at the pricing route, so this can never activate a hidden price.)
+    const activeChanged =
+      dto.is_active !== undefined && dto.is_active !== condition.isActive;
 
     if (dto.name_en !== undefined) condition.nameEn = dto.name_en;
     if (dto.name_ar !== undefined) condition.nameAr = dto.name_ar;
@@ -207,31 +226,40 @@ export class ProductConditionsService {
 
     await this.afterChange(adminId, 'UPDATE_PRODUCT_CONDITION', saved.id, dto);
     await this.odooSync.enqueueSyncCondition({ conditionId: saved.id });
+    // Activating or deactivating a grade changes whether its price belongs on
+    // the Odoo sheet, so rewrite it — the push filters inactive grades out.
+    if (activeChanged) {
+      await this.odooSync.enqueueUpdatePricing({ productId: saved.productId });
+    }
     return { message: 'Condition updated successfully', condition: this.map(saved) };
   }
 
   /**
-   * Removes a grade. Refused while it is priced or holds stock — deleting it
-   * would leave both pointing at a grade that no longer exists.
+   * Removes a grade.
+   *
+   * STOCK is the one hard blocker — and it is checked across EVERY warehouse,
+   * not one. A grade with material still on any shelf cannot be deleted:
+   * deleting it would leave real, physical stock labelled with a grade that no
+   * longer exists — the warehouse can see it, the system cannot name it, and no
+   * order can be raised to clear it. Reaching zero means selling it or moving it
+   * to another grade (the transfer route exists precisely for the second).
+   *
+   * Its PRICE and OFFERS are NOT a blocker: they only ever pointed at this
+   * grade, so they come down WITH it in one transaction. The live price is
+   * archived to history first (the admin can still review what it was), and any
+   * offer row is deleted (a cart that referenced it has its `offer_id` set null
+   * by the FK). Placed orders are untouched — every order line froze the code,
+   * the name and the price at checkout and reads none of these rows again.
    */
   async remove(adminId: string, conditionId: string, expectedProductId?: string) {
     const condition = await this.conditionOrThrow(conditionId, expectedProductId);
 
-    // A grade that still holds STOCK cannot be deleted.
-    //
-    // This was checked only against the PRICE LIST, so a grade with a warehouse
-    // full of material could be removed the moment its price was withdrawn —
-    // leaving real, physical stock labelled with a grade that no longer exists.
-    // The warehouse can see it, the system cannot name it, and no order can be
-    // raised to clear it.
-    //
-    // Reaching zero means selling it or moving it to another grade, and the
-    // transfer route exists precisely so the second is possible without
-    // inventing a delivery.
     const product = await this.productRepo.findOne({
       where: { id: condition.productId },
     });
     if (product?.odooProductId) {
+      // SUM across ALL warehouse_inventory rows for this material + grade — no
+      // warehouse filter, so a grade held in any single warehouse blocks it.
       const held = await this.inventoryRepo
         .createQueryBuilder('i')
         .select('COALESCE(SUM(i.quantity), 0)', 'total')
@@ -252,36 +280,58 @@ export class ProductConditionsService {
       }
     }
 
-    const priced = await this.pricingRepo.count({
-      where: { productId: condition.productId, conditionCode: condition.code },
-    });
-    if (priced > 0) {
-      throw new ConflictException(
-        'This condition is still priced — remove it from the price list first',
-      );
-    }
+    // No stock: take the grade, its live price (archived first) and its offers
+    // down together, atomically, and renumber the survivors 1..n.
+    let hadLivePrice = false;
+    await this.dataSource.transaction(async (manager) => {
+      const pricingRepo = manager.getRepository(ProductPricing);
+      const historyRepo = manager.getRepository(ProductPricingHistory);
+      const offerRepo = manager.getRepository(Offer);
+      const condRepo = manager.getRepository(MaterialCondition);
 
-    // A grade that is being OFFERED cannot be deleted either.
-    //
-    // This was missing: stock and the price list were checked, offers were not,
-    // so deleting a grade left every offer on it pointing at a code that no
-    // longer existed — still listed, still inside its dates, and silently
-    // unable to match anything ever again.
-    //
-    // The foreign key now refuses this at the database, which is the guarantee
-    // that holds for code paths nobody has written yet. This check exists so
-    // the admin is told WHY in a sentence they can act on, instead of a raw
-    // constraint violation.
-    const offered = await this.offerRepo.count({
-      where: { conditionId: condition.id },
-    });
-    if (offered > 0) {
-      throw new ConflictException(
-        'This condition is used by a live offer — end or delete the offer first',
-      );
-    }
+      const livePrices = await pricingRepo.find({
+        where: { productId: condition.productId, conditionId: condition.id },
+      });
+      if (livePrices.length) {
+        hadLivePrice = true;
+        await historyRepo.save(
+          livePrices.map((p) =>
+            historyRepo.create({
+              productId: p.productId,
+              tier: p.tier,
+              conditionCode: p.conditionCode,
+              price: p.price,
+              currency: p.currency,
+              effectiveFrom: p.effectiveFrom,
+              archivedReason: PricingArchiveReason.DELETED,
+              archivedBy: adminId,
+            }),
+          ),
+        );
+        await pricingRepo.remove(livePrices);
+      }
 
-    await this.conditionRepo.delete(conditionId);
+      // Offers point at the grade by id (FK RESTRICT), so they must go before
+      // the grade. A cart line that used one has its offer_id nulled by the FK.
+      await offerRepo.delete({ conditionId: condition.id });
+
+      await condRepo.delete(conditionId);
+
+      // Renumber what is left so the sequence stays 1..n with no hole.
+      const rest = await condRepo.find({
+        where: { productId: condition.productId },
+        order: { sortOrder: 'ASC' },
+      });
+      rest.forEach((c, i) => (c.sortOrder = i + 1));
+      if (rest.length) await condRepo.save(rest);
+    });
+
+    // Odoo cleanup. Rewrite the price sheet FIRST so the deleted grade's price
+    // row leaves it (Odoo keys that row by code, not by a link to the grade),
+    // THEN unlink the grade record so it also leaves the sorter's grade list.
+    if (product?.odooProductId && hadLivePrice) {
+      await this.odooSync.enqueueUpdatePricing({ productId: condition.productId });
+    }
     if (condition.odooConditionId) {
       await this.odooSync.enqueueDeleteCondition({
         odooConditionId: condition.odooConditionId,
@@ -291,14 +341,6 @@ export class ProductConditionsService {
       productId: condition.productId,
       code: condition.code,
     });
-
-    // Renumber what is left so the sequence stays 1..n with no hole.
-    const rest = await this.conditionRepo.find({
-      where: { productId: condition.productId },
-      order: { sortOrder: 'ASC' },
-    });
-    rest.forEach((c, i) => (c.sortOrder = i + 1));
-    if (rest.length) await this.conditionRepo.save(rest);
 
     return { message: 'Condition deleted successfully' };
   }

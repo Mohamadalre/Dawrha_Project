@@ -55,26 +55,26 @@ describe('OdooAdminAccountController', () => {
 
       const res = await ctrl.createAdmin({
         name: 'Second Admin',
-        login: 'newadmin',
         email: 'second@x.com',
       } as any);
 
+      // The email is used as BOTH the Odoo login and the contact email.
       expect(odoo.createAdminUser).toHaveBeenCalledWith({
         name: 'Second Admin',
-        login: 'newadmin',
+        login: 'second@x.com',
         email: 'second@x.com',
         phone: undefined,
       });
       expect(res.result.odoo).toEqual({ id: 7, login: 'newadmin' });
     });
 
-    it('maps a duplicate login to a clean 409', async () => {
+    it('maps a duplicate email to a clean 409', async () => {
       const { ctrl } = build({
         createAdminUser: jest.fn().mockRejectedValue(new Error('The login must be unique')),
       });
 
       await expect(
-        ctrl.createAdmin({ name: 'Dup', login: 'admin' } as any),
+        ctrl.createAdmin({ name: 'Dup', email: 'admin@x.com' } as any),
       ).rejects.toBeInstanceOf(ConflictException);
     });
   });

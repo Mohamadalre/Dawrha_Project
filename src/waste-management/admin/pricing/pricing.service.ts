@@ -206,6 +206,10 @@ export class PricingService {
     // institution / each factory grade / each free-facility grade) — the id the
     // admin needs to later correct or expire that exact row. Same shape the GET
     // current-pricing route returns, built from the rows just inserted.
+    const [labels, sortOrders] = await Promise.all([
+      this.conditions.labelMapFor([productId]),
+      this.conditions.sortOrderMapFor([productId]),
+    ]);
     const flatRow = (row: ProductPricing) => ({
       pricing_id: row.id,
       price: Number(row.price),
@@ -213,8 +217,10 @@ export class PricingService {
     });
     const gradedRow = (row: ProductPricing) => ({
       pricing_id: row.id,
-      condition_id: row.conditionId ?? null,
-      condition: row.conditionCode ?? null,
+      // The grade as one object (id, code, name, sort order) — the same shape
+      // every pricing view returns, so the write echo matches the read exactly.
+      condition: this.gradeObject(
+        productId, row.conditionId, row.conditionCode, labels, sortOrders),
       price: Number(row.price),
       currency: row.currency,
     });
@@ -385,6 +391,16 @@ export class PricingService {
           dto.condition_id,
           productId,
         );
+        // An INACTIVE grade cannot be priced. Pricing is how a grade becomes
+        // sellable, so pricing a deactivated one would quietly bring it back
+        // from behind the admin-only veil — the code path below already refuses
+        // this (it matches against ACTIVE codes only), and this closes the same
+        // door for the id path. Reactivate the grade first, THEN price it.
+        if (!condition.isActive) {
+          throw new BadRequestException(
+            'This condition is inactive — reactivate it before setting a price',
+          );
+        }
         if (dto.condition && dto.condition.trim().toUpperCase() !== condition.code) {
           // Refused rather than resolved by precedence: either could have been
           // the caller's intent, and quietly picking one is how a grade gets
@@ -420,11 +436,25 @@ export class PricingService {
     }
 
     const effectiveFrom = dto.effective_from ? new Date(dto.effective_from) : new Date();
+    // Optional end date, set at add-time. Refused if it is already past (a price
+    // dead on arrival) or not after the start — a window that never opens.
+    let effectiveUntil: Date | null = null;
+    if (dto.effective_until) {
+      effectiveUntil = new Date(dto.effective_until);
+      if (effectiveUntil.getTime() <= Date.now()) {
+        throw new BadRequestException(
+          'The expiry date must be in the future — back-dating it would un-price orders that were already placed',
+        );
+      }
+      if (effectiveUntil.getTime() <= effectiveFrom.getTime()) {
+        throw new BadRequestException('The expiry date must be after the start date');
+      }
+    }
     const currency = await this.settings.defaultCurrency();
 
     await this.archiveCurrent(productId, tier, PricingArchiveReason.UPDATED, adminId, conditionCode);
     const inserted = await this.insertCurrent(
-      productId, tier, dto.price, currency, effectiveFrom, conditionCode, conditionId,
+      productId, tier, dto.price, currency, effectiveFrom, conditionCode, conditionId, effectiveUntil,
     );
 
     const updatedCarts = await this.repriceTier(productId, tier, dto.price, conditionCode);
@@ -537,6 +567,28 @@ export class PricingService {
    * Current prices: single numbers for INDIVIDUAL/COMPANY, per-condition arrays
    * for FACTORY/FREE_FACILITY (null / empty when unpriced).
    */
+  /**
+   * One grade as a tidy object — id, code, name AND the admin-arranged sort
+   * order together — or null for a flat/ungraded row. The single shape every
+   * pricing view returns a grade in, so no two of them disagree on how a grade
+   * looks or scatter it across three sibling keys.
+   */
+  private gradeObject(
+    productId: string,
+    conditionId: string | null | undefined,
+    conditionCode: string | null | undefined,
+    labels: Map<string, string>,
+    sortOrders: Map<string, number>,
+  ) {
+    if (!conditionCode) return null;
+    return {
+      id: conditionId ?? null,
+      code: conditionCode,
+      name: labels.get(`${productId}:${conditionCode}`) ?? conditionCode,
+      sort_order: sortOrders.get(`${productId}:${conditionCode}`) ?? null,
+    };
+  }
+
   async getCurrentPricing(productId: string) {
     const product = await this.productOrThrow(productId);
 
@@ -544,7 +596,10 @@ export class PricingService {
 
     // Grades belong to the material, so their names are resolved per material —
     // two materials may both have a "GOOD" and they are different grades.
-    const labels = await this.conditions.labelMapFor([productId]);
+    const [labels, sortOrders] = await Promise.all([
+      this.conditions.labelMapFor([productId]),
+      this.conditions.sortOrderMapFor([productId]),
+    ]);
 
     // The flat tiers (citizen / institution) as a ROW, not a bare number, so the
     // caller gets the pricing-row id it needs to edit or correct that exact row —
@@ -582,17 +637,21 @@ export class PricingService {
         .filter((r) => r.tier === tier)
         .map((r) => ({
           pricing_id: r.id,
-          condition_id: r.conditionId ?? null,
-          condition: r.conditionCode ?? null,
-          condition_name:
-            (r.conditionCode
-              ? labels.get(`${productId}:${r.conditionCode}`)
-              : null) ?? null,
+          // The grade as ONE object (or null), the same shape every pricing
+          // view uses — no scattered condition_id / condition / condition_name.
+          condition: this.gradeObject(
+            productId, r.conditionId, r.conditionCode, labels, sortOrders),
           price: Number(r.price),
           currency: r.currency,
           effective_from: r.effectiveFrom,
           effective_until: r.effectiveUntil ?? null,
-        }));
+        }))
+        // In the admin's arranged grade order, flat/ungraded row (null) last.
+        .sort(
+          (a, b) =>
+            (a.condition?.sort_order ?? Number.MAX_SAFE_INTEGER) -
+            (b.condition?.sort_order ?? Number.MAX_SAFE_INTEGER),
+        );
 
     return {
       product_id: productId,
@@ -865,7 +924,10 @@ export class PricingService {
   ) {
     const product = await this.productOrThrow(productId);
 
-    const labels = await this.conditions.labelMapFor([productId]);
+    const [labels, sortOrders] = await Promise.all([
+      this.conditions.labelMapFor([productId]),
+      this.conditions.sortOrderMapFor([productId]),
+    ]);
 
     // ── What was in force ON A GIVEN DAY ───────────────────────────────
     //
@@ -885,10 +947,11 @@ export class PricingService {
     const shape = (r: any, archived: boolean) => ({
       pricing_id: r.id,
       status: archived ? 'ARCHIVED' : 'LIVE',
-      condition_id: r.conditionId ?? null,
-      condition: r.conditionCode ?? null,
-      condition_name:
-        (r.conditionCode ? labels.get(`${productId}:${r.conditionCode}`) : null) ?? null,
+      // The grade as ONE object — id, code, name and sort order together — for
+      // a graded (factory / free-facility) row, or null for a flat one. The
+      // same shape every pricing view uses.
+      condition: this.gradeObject(
+        productId, r.conditionId, r.conditionCode, labels, sortOrders),
       price: Number(r.price),
       // The currency the price is QUOTED in. Copied onto each row rather than
       // read from a setting, so a row always reports the currency it was
@@ -1064,11 +1127,15 @@ export class PricingService {
     });
     if (!row) throw new NotFoundException('Price not found');
 
-    const history = await this.historyRepo.find({
-      where: { productId: row.productId, tier: row.tier },
-      order: { archivedAt: 'DESC' },
-      take: 10,
-    });
+    const [history, labels, sortOrders] = await Promise.all([
+      this.historyRepo.find({
+        where: { productId: row.productId, tier: row.tier },
+        order: { archivedAt: 'DESC' },
+        take: 10,
+      }),
+      this.conditions.labelMapFor([row.productId]),
+      this.conditions.sortOrderMapFor([row.productId]),
+    ]);
 
     return {
       message: 'Price fetched successfully',
@@ -1078,8 +1145,10 @@ export class PricingService {
           ? { id: row.product.id, name: row.product.name }
           : { id: row.productId },
         tier: row.tier,
-        // Null means the material has no conditions: this is its plain price.
-        condition: row.conditionCode ?? null,
+        // The grade as one object (id, code, name, sort order), or null for a
+        // flat/ungraded price — the same shape every pricing view uses.
+        condition: this.gradeObject(
+          row.productId, row.conditionId, row.conditionCode, labels, sortOrders),
         price: Number(row.price),
         currency: row.currency,
         effective_from: row.effectiveFrom,
@@ -1088,14 +1157,16 @@ export class PricingService {
         created_at: row.createdAt,
       },
       // The timeline the admin reviews: what this tier used to cost, why it
-      // changed, and who changed it.
+      // changed, and who changed it. Archived rows keep no grade id, so the
+      // object carries the code/name/order it was labelled with, id null.
       history: history.map((h) => ({
         price: Number(h.price),
-        condition: h.conditionCode ?? null,
+        condition: this.gradeObject(
+          row.productId, null, h.conditionCode, labels, sortOrders),
         currency: h.currency,
         effective_from: h.effectiveFrom,
         // A history row has no end date of its own: it was superseded, and
-        //  is exactly when it stopped applying.
+        // archived_at is exactly when it stopped applying.
         reason: h.archivedReason,
         archived_by: h.archivedBy ?? null,
         archived_at: h.archivedAt,
@@ -1105,7 +1176,11 @@ export class PricingService {
 
   /** The live price table of a material, in the shape the admin screen shows. */
   async livePricingView(productId: string) {
-    const rows = await this.liveRows(productId);
+    const [rows, labels, sortOrders] = await Promise.all([
+      this.liveRows(productId),
+      this.conditions.labelMapFor([productId]),
+      this.conditions.sortOrderMapFor([productId]),
+    ]);
     const flat = (tier: PricingTier) =>
       rows.find((r) => r.tier === tier && !r.conditionCode);
     const graded = (tier: PricingTier) =>
@@ -1113,9 +1188,16 @@ export class PricingService {
         .filter((r) => r.tier === tier)
         .map((r) => ({
           pricing_id: r.id,
-          condition: r.conditionCode ?? null,
+          // Same grade object as every other pricing view (id, code, name, order).
+          condition: this.gradeObject(
+            productId, r.conditionId, r.conditionCode, labels, sortOrders),
           price: Number(r.price),
-        }));
+        }))
+        .sort(
+          (a, b) =>
+            (a.condition?.sort_order ?? Number.MAX_SAFE_INTEGER) -
+            (b.condition?.sort_order ?? Number.MAX_SAFE_INTEGER),
+        );
 
     return {
       individual: flat(PricingTier.INDIVIDUAL)
@@ -1231,6 +1313,7 @@ export class PricingService {
     effectiveFrom: Date,
     conditionCode: string | null,
     conditionId: string | null = null,
+    effectiveUntil: Date | null = null,
   ): Promise<ProductPricing> {
     return this.pricingRepo.save(
       this.pricingRepo.create({
@@ -1245,7 +1328,10 @@ export class PricingService {
         price: String(price),
         currency,
         effectiveFrom,
-        effectiveUntil: undefined,
+        // Optional end date set AT creation: the price is live from
+        // `effectiveFrom` until this instant, then swept to history by the
+        // expiry job. Null means open-ended (the usual case).
+        effectiveUntil: effectiveUntil ?? undefined,
       }),
     );
   }

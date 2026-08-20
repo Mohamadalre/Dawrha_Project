@@ -122,7 +122,6 @@ export class OdooService {
   // working.
   private username: string;
   private password: string;
-  private readonly groupId: number;
 
   constructor(
     private readonly httpService: HttpService,
@@ -133,7 +132,10 @@ export class OdooService {
     this.db = this.configService.get<string>('ODOO_DB')!;
     this.username = this.configService.get<string>('ODOO_USERNAME')!;
     this.password = this.configService.get<string>('ODOO_PASSWORD')!;
-    this.groupId = this.configService.get<number>('ODOO_GROUP_ID')!;
+    // NOTE: no ODOO_GROUP_ID. The admin group is resolved at runtime from its
+    // stable external id (`base.group_system`) in createAdminUser — a numeric
+    // group id changes with every fresh Odoo database, so hard-configuring one
+    // meant re-editing .env after every rebuild. The xmlid never changes.
   }
 
   // ---------------------------------------------------------------------------

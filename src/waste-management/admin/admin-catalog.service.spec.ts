@@ -15,8 +15,10 @@ describe('AdminCatalogService', () => {
   let units: any;
   let conditionRepo: any;
   let pricingRepo: any;
+  let historyRepo: any;
   let offerRepo: any;
   let conditionsService: any;
+  let orderLineRepo: any;
 
   beforeEach(() => {
     categoryRepo = {
@@ -32,7 +34,7 @@ describe('AdminCatalogService', () => {
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
       count: jest.fn().mockResolvedValue(0),
     };
-    cartItemRepo = { count: jest.fn().mockResolvedValue(0) };
+    cartItemRepo = { count: jest.fn().mockResolvedValue(0), update: jest.fn() };
     // Deleting a material has to know whether any is still on a shelf.
     inventoryRepo = {
       createQueryBuilder: jest.fn(() => ({
@@ -74,9 +76,18 @@ describe('AdminCatalogService', () => {
       save: jest.fn((x) => Promise.resolve({ id: 'cond1', ...x })),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
     };
-    pricingRepo = { count: jest.fn().mockResolvedValue(0) };
+    pricingRepo = {
+      count: jest.fn().mockResolvedValue(0),
+      find: jest.fn().mockResolvedValue([]),
+      remove: jest.fn(),
+    };
+    // Deleting a material archives its live price rows here first.
+    historyRepo = { save: jest.fn(), create: jest.fn((x) => x) };
     offerRepo = { findOne: jest.fn(), create: jest.fn((x) => x), save: jest.fn((x) => Promise.resolve({ id: 'o1', ...x })), delete: jest.fn() };
     conditionsService = { invalidate: jest.fn() };
+    // Order-line repo: the delete guard counts orders on a material. Default
+    // zero so deletes proceed; a test overrides it to prove the refusal.
+    orderLineRepo = { count: jest.fn().mockResolvedValue(0) };
 
     service = new AdminCatalogService(
       categoryRepo,
@@ -93,9 +104,23 @@ describe('AdminCatalogService', () => {
       units,
       conditionsService,
       { deleteByUrl: jest.fn(), deleteFile: jest.fn(), publicIdFromUrl: jest.fn(() => null) } as any,
-      // Offer creation writes several rows in one transaction; nothing in this
-      // suite creates one, so a stub that simply runs the callback is enough.
-      { transaction: jest.fn(async (cb: any) => cb({ getRepository: () => offerRepo })) } as any,
+      // Transactions (offer creation, material delete) ask for a repo per
+      // entity — route each to its mock so the cascade delete can be asserted.
+      {
+        transaction: jest.fn(async (cb: any) =>
+          cb({
+            getRepository: (entity: any) => {
+              const name = entity?.name ?? '';
+              if (name === 'Product') return productRepo;
+              if (name === 'ProductPricing') return pricingRepo;
+              if (name === 'ProductPricingHistory') return historyRepo;
+              if (name === 'MaterialCondition') return conditionRepo;
+              return offerRepo;
+            },
+          }),
+        ),
+      } as any,
+      orderLineRepo,
     );
   });
 
@@ -252,6 +277,26 @@ describe('AdminCatalogService', () => {
       await service.updateProduct('a1', 'p1', { name: 'Y' } as any);
       expect(productRepo.save.mock.calls[0][0].unitWeightKg).toBe('12.5');
     });
+
+    it('pushes a UNIT change into every basket line holding the material', async () => {
+      // Load returns a PIECE material; switching to KG must update baskets.
+      productRepo.findOne.mockResolvedValue({
+        id: 'p1', name: 'X', unitType: 'PIECE', unitWeightKg: '12.5',
+      });
+      await service.updateProduct('a1', 'p1', { unit_id: 'u-kg' } as any);
+      expect(cartItemRepo.update).toHaveBeenCalledWith(
+        { productId: 'p1' },
+        { unitType: 'KG' },
+      );
+    });
+
+    it('does NOT touch baskets when the unit is unchanged', async () => {
+      productRepo.findOne.mockImplementation(async ({ where }: any) =>
+        where?.name ? null : { id: 'p1', name: 'X', unitType: 'PIECE', unitWeightKg: '12.5' },
+      );
+      await service.updateProduct('a1', 'p1', { name: 'Y' } as any);
+      expect(cartItemRepo.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('deleteProduct', () => {
@@ -299,10 +344,50 @@ describe('AdminCatalogService', () => {
       expect(productRepo.delete).toHaveBeenCalledWith('p1');
     });
 
+    it('cascades its pricing, offers and grades when no stock and no orders', async () => {
+      productRepo.findOne.mockResolvedValue({ id: 'p1', name: 'PET', odooProductId: 10 });
+      cartItemRepo.count.mockResolvedValue(0);
+      orderLineRepo.count.mockResolvedValue(0);
+      inventoryRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ total: '0' }),
+      });
+      pricingRepo.find.mockResolvedValue([
+        { productId: 'p1', tier: 'FACTORY', conditionCode: 'GOOD', price: '3', currency: 'SYP', effectiveFrom: new Date() },
+      ]);
+
+      await service.deleteProduct('a1', 'p1');
+
+      expect(historyRepo.save).toHaveBeenCalled();       // price archived
+      expect(pricingRepo.remove).toHaveBeenCalled();      // then removed
+      expect(offerRepo.delete).toHaveBeenCalledWith({ productId: 'p1' });
+      expect(conditionRepo.delete).toHaveBeenCalledWith({ productId: 'p1' });
+      expect(productRepo.delete).toHaveBeenCalledWith('p1');
+      expect(odooSync.enqueueDeleteProduct).toHaveBeenCalledWith({ odooProductId: 10 });
+    });
+
     it('refuses when the product is in active carts', async () => {
       productRepo.findOne.mockResolvedValue({ id: 'p1' });
       cartItemRepo.count.mockResolvedValue(2);
       await expect(service.deleteProduct('a1', 'p1')).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    /**
+     * A material with order history can never be erased — the order line is a
+     * frozen receipt (RESTRICT foreign key). The admin is told to deactivate it
+     * instead, and nothing reaches the database or Odoo.
+     */
+    it('refuses when the material has orders in its history', async () => {
+      productRepo.findOne.mockResolvedValue({ id: 'p1', name: 'PET', odooProductId: 10 });
+      cartItemRepo.count.mockResolvedValue(0);
+      orderLineRepo.count.mockResolvedValue(4);
+
+      await expect(service.deleteProduct('a1', 'p1')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(productRepo.delete).not.toHaveBeenCalled();
+      expect(odooSync.enqueueDeleteProduct).not.toHaveBeenCalled();
     });
   });
 });

@@ -7,7 +7,6 @@ import { PlatformSettingsService } from '@src/platform-settings/platform-setting
 export interface DeliveryRateInput {
   rate_per_km: number;
   base_fee?: number;
-  note?: string;
 }
 
 /**
@@ -84,7 +83,6 @@ export class DeliveryRateService {
           ratePerKm: String(input.rate_per_km),
           baseFee: String(input.base_fee ?? 0),
           currency,
-          note: input.note,
           isActive: true,
           effectiveFrom: now,
           createdBy: adminId,
@@ -97,38 +95,62 @@ export class DeliveryRateService {
   }
 
   /**
-   * Correct the CURRENT rate in place.
+   * Edit the current rate — VERSIONED, never in place.
    *
-   * Separate from `set` on purpose. Setting a new rate is a business decision
-   * with a date; this is fixing a typo in the one that is already in force, and
-   * conflating them would either fill the history with corrections or let a
-   * real change quietly rewrite the past.
+   * An edit is still a change to what deliveries are quoted at, so it is
+   * recorded on the timeline exactly like setting a new rate: the row being
+   * edited is CLOSED with `effective_until` stamped to the edit time, and a new
+   * active row opens carrying the corrected figures from that instant on. The
+   * expiry timestamp is the whole point — the history then reads "this rate was
+   * in force from X until the edit at Y", so a delivery priced at any past date
+   * is always explained by the one row whose window contains it, and no past
+   * quote is ever silently rewritten.
+   *
+   * Differs from `set` only in the input: `set` states a brand-new rate in full,
+   * while an edit merges the supplied fields over the rate currently in force.
    */
   async update(id: string, input: Partial<DeliveryRateInput>, adminId: string) {
     const rate = await this.rateRepo.findOne({ where: { id } });
     if (!rate) throw new NotFoundException('Delivery rate not found');
     if (!rate.isActive) {
       throw new BadRequestException(
-        'Only the rate currently in force can be corrected — a superseded rate is what deliveries were actually quoted at',
+        'Only the rate currently in force can be edited — a superseded rate is what deliveries were actually quoted at',
       );
     }
 
     const merged: DeliveryRateInput = {
       rate_per_km: input.rate_per_km ?? Number(rate.ratePerKm),
       base_fee: input.base_fee ?? Number(rate.baseFee),
-      note: input.note ?? rate.note,
     };
     this.assertSane(merged);
 
-    // A correction fixes the typed figure only — currency is the central
-    // platform setting and is left exactly as it is.
-    rate.ratePerKm = String(merged.rate_per_km);
-    rate.baseFee = String(merged.base_fee ?? 0);
-    rate.note = merged.note;
-    rate.updatedBy = adminId;
-    await this.rateRepo.save(rate);
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(DeliveryRate);
+      const now = new Date();
 
-    return { message: 'Delivery rate updated successfully', result: this.shape(rate) };
+      // Close the version being edited — its expiry is the edit time, so the
+      // timeline records exactly when it stopped being in force.
+      await repo.update(
+        { id: rate.id },
+        { isActive: false, effectiveUntil: now, updatedBy: adminId },
+      );
+
+      // The corrected figures open a new active version from the edit instant.
+      // Currency is the central platform setting — carried over, never re-typed.
+      return repo.save(
+        repo.create({
+          ratePerKm: String(merged.rate_per_km),
+          baseFee: String(merged.base_fee ?? 0),
+          currency: rate.currency,
+          isActive: true,
+          effectiveFrom: now,
+          createdBy: rate.createdBy ?? adminId,
+          updatedBy: adminId,
+        }),
+      );
+    });
+
+    return { message: 'Delivery rate updated successfully', result: this.shape(saved) };
   }
 
   /**
@@ -168,7 +190,6 @@ export class DeliveryRateService {
       is_active: r.isActive,
       effective_from: r.effectiveFrom,
       effective_until: r.effectiveUntil ?? null,
-      note: r.note ?? null,
       created_at: r.createdAt,
     };
   }

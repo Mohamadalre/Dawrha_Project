@@ -148,6 +148,28 @@ export class ConditionsService {
     return map;
   }
 
+  /**
+   * `productId:code` → the grade's sort order, for a set of materials at once.
+   *
+   * The order the admin arranged their grades in is part of a grade's identity
+   * to a buyer — it is how "best" sits above "good" on their screen — so every
+   * catalogue view that lists grades ships it alongside the label. Keyed by the
+   * (material, code) pair for the same reason the labels are: a code is unique
+   * only inside its own material.
+   */
+  async sortOrderMapFor(productIds: string[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (!productIds.length) return map;
+
+    const rows = await this.conditionRepo.find({
+      where: { productId: In(productIds) },
+    });
+    for (const row of rows) {
+      map.set(`${row.productId}:${row.code}`, row.sortOrder);
+    }
+    return map;
+  }
+
   /** Called by the admin write-side after any grade mutation. */
   invalidate(productId?: string): void {
     if (productId) this.byProduct.delete(productId);

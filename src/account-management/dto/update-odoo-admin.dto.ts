@@ -65,14 +65,19 @@ export class CreateOdooAdminDto {
   @MaxLength(100)
   name: string;
 
-  @IsString()
+  /**
+   * The new admin's EMAIL — and it is all that is needed.
+   *
+   * In Odoo the sign-in username (`res.users.login`) and the contact email are
+   * two fields, but for an admin they are the same thing in practice: the email
+   * is what they type to sign into the Odoo page AND where the "set your
+   * password" invite is sent. So the backend asks for one email and uses it as
+   * both — one fact to enter, and the two Odoo fields can never drift apart.
+   */
+  @IsEmail()
   @IsNotEmpty()
   @MaxLength(100)
-  login: string;
-
-  @IsOptional()
-  @IsEmail()
-  email?: string;
+  email: string;
 
   @IsOptional()
   @IsString()

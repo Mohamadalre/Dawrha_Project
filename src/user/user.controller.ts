@@ -22,7 +22,6 @@ import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { imageMemoryStorage } from '@src/common/config/multer/image-memory.config';
 import { AddLocationDto } from './dto/add-location.dto';
-import { I18nContext } from 'nestjs-i18n';
 import { UserService } from './user.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -113,8 +112,9 @@ export class UserController {
   )
   @Get('settings')
   async getSettings(@CurrentUser() user) {
-    const lang = I18nContext.current()?.lang;
-    const result = await this.userService.getAppSettings(user.id, lang);
+    // The effective language is resolved from THIS request's device (the token's
+    // deviceId) then the account — the same order the responses use.
+    const result = await this.userService.getAppSettings(user.id, user.deviceId);
     return { message: 'Settings fetched successfully', result };
   }
 
@@ -130,7 +130,9 @@ export class UserController {
   )
   @Patch('settings/language')
   async setLanguage(@CurrentUser() user, @Body() dto: SetLanguageDto) {
-    return this.userService.setLanguage(user.id, dto.language);
+    // Scope the choice to the CURRENT device (from the token) so each device can
+    // read responses in its own language.
+    return this.userService.setLanguage(user.id, dto.language, user.deviceId);
   }
 
   /** The devices currently signed in to this account (no secrets). */

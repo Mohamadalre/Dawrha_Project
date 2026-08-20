@@ -12,6 +12,7 @@ import { MaterialCondition } from '../entities/material-condition.entity';
 import { Offer } from '../entities/offer.entity';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
+import { OrderPartLine } from '@src/order/entities/order-part-line.entity';
 import { Account } from '@src/user/entities/account.entity';
 import { WasteCommonModule } from '../common/waste-common.module';
 import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
@@ -40,6 +41,9 @@ import { StockTransferController } from './stock-transfer.controller';
       WarehouseInventory,
       // Grade transfers resolve the warehouse's Odoo id before queuing the move.
       Warehouse,
+      // Deleting a material has to know whether any ORDER ever named it — a
+      // material with order history can only be deactivated, never erased.
+      OrderPartLine,
       // The expiry sweep notifies every admin that a material's pricing lapsed.
       Account]),
     PermissionsModule,

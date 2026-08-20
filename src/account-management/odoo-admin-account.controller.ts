@@ -64,8 +64,11 @@ export class OdooAdminAccountController {
   async createAdmin(@Body() dto: CreateOdooAdminDto) {
     try {
       const created = await this.odoo.createAdminUser({
+        // The email is the sign-in login AND the contact email — one value, so
+        // the new admin signs into Odoo with exactly the address the invite is
+        // sent to, and the two Odoo fields cannot disagree.
         name: dto.name,
-        login: dto.login,
+        login: dto.email,
         email: dto.email,
         phone: dto.phone,
       });
@@ -75,8 +78,9 @@ export class OdooAdminAccountController {
       };
     } catch (err: any) {
       // Odoo's unique-login constraint → a clean 409 rather than a raw 500.
+      // The login IS the email, so the message names the email.
       if (/login|unique|already|exist/i.test(String(err?.message ?? ''))) {
-        throw new ConflictException('An Odoo admin with this login already exists');
+        throw new ConflictException('An Odoo admin with this email already exists');
       }
       throw err;
     }

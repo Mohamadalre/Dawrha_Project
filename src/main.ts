@@ -11,6 +11,7 @@ import { winstonConfig, winstonLogger } from './core/logger-config/winston.confi
 import { LoggerExceptionsFilter } from './common/filters/logger-exception.filter';
 
 import { NestExpressApplication } from '@nestjs/platform-express';
+import helmet from 'helmet';
 
 
 
@@ -32,6 +33,49 @@ async function bootstrap() {
     const app = await NestFactory.create<NestExpressApplication>(AppModule, {
       logger,
       bufferLogs: true
+    });
+
+    /**
+     * Security headers (Helmet) — set BEFORE anything else so every response,
+     * including errors, carries them. Helmet sends a sane bundle: HSTS, no
+     * MIME-sniffing (X-Content-Type-Options), clickjacking protection
+     * (X-Frame-Options), a restrictive Referrer-Policy and Cross-Origin-*
+     * headers, and it hides the `X-Powered-By: Express` fingerprint.
+     *
+     * `contentSecurityPolicy` is disabled because this process serves a JSON API
+     * (and a few server-rendered auth/email pages the addon owns); a default CSP
+     * would break those inline assets while adding nothing for a pure API. Turn
+     * it on with an explicit policy the day a browser SPA is served from here.
+     */
+    app.use(
+      helmet({
+        contentSecurityPolicy: false,
+        crossOriginResourcePolicy: { policy: 'cross-origin' },
+      }),
+    );
+
+    /**
+     * CORS — an explicit allow-list, not a wildcard. Origins come from
+     * `CORS_ORIGINS` (comma-separated) so each environment declares exactly who
+     * may call it; when it is unset (local dev) any origin is reflected so the
+     * mobile/emulator clients still work. Credentials are allowed because the
+     * apps send a Bearer token, and the language header travels on every request.
+     */
+    const corsOrigins = (process.env.CORS_ORIGINS ?? '')
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean);
+    app.enableCors({
+      origin: corsOrigins.length ? corsOrigins : true,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'x-lang',
+        'lang',
+        'x-odoo-webhook-secret',
+      ],
     });
 
     // Set global API prefix
