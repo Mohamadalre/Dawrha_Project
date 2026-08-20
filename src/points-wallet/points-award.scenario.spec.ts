@@ -47,6 +47,7 @@ describe('Points award on order receipt (scenario)', () => {
     const view = new OrderViewService(
       orderRepo as any, {} as any, {} as any, {} as any,
       {} as any, {} as any, {} as any, {} as any, wallet,
+      { gradeMapFor: async () => new Map() } as any,
     );
     return { view, order, orderRepo, walletRepo, notifications };
   };

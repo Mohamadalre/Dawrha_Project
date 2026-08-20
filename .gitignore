@@ -53,3 +53,5 @@ i18n-report.json
 .DS_Store
 Thumbs.db
 desktop.ini
+
+*.md

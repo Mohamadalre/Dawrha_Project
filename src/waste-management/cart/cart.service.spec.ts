@@ -55,6 +55,7 @@ describe('CartService', () => {
         id,
         code: 'GRADE_' + id.toUpperCase(),
       })),
+      gradeMapFor: jest.fn(async () => new Map()),
     };
 
     // Answers from the SAME price mock the rest of this file drives, so the

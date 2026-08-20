@@ -587,10 +587,12 @@ export class CatalogService {
       name: p.name,
       description: p.description ?? null,
       image: p.imageURL ?? null,
-      category_id: p.categoryId,
-      category_name: p.category?.name ?? null,
-      unit_type: p.unitType,
-      unit_label: unitLabels.get(p.unitType) ?? p.unitType,
+      // The category as one object — id AND name — matching the authenticated
+      // catalogue, not a scattered category_id / category_name pair.
+      category: { id: p.categoryId, name: p.category?.name ?? null },
+      // The unit as one object — its code AND human label together — instead of
+      // a scattered unit_type / unit_label pair.
+      unit: { code: p.unitType, label: unitLabels.get(p.unitType) ?? p.unitType },
       // The pull, without the number: enough to make registering worth it,
       // not enough to remove the reason to.
       has_offer: offerFlags.has(p.id),
@@ -748,9 +750,12 @@ export class CatalogService {
 
     const [rows, total] = await qb.getManyAndCount();
     const bases = await this.basePricesForOffers(rows, this.buyingTier(caller));
+    const gradeMap = await this.conditionsService.gradeMapFor([
+      ...new Set(rows.map((o) => o.productId)),
+    ]);
     const result = {
       offers: rows.map((o) =>
-        this.mapOffer(o, !caller, bases.get(`${o.productId}:${o.conditionCode ?? ''}`), this.showsConditions(caller)),
+        this.mapOffer(o, !caller, bases.get(`${o.productId}:${o.conditionCode ?? ''}`), this.showsConditions(caller), gradeMap),
       ),
       pagination: buildPagination(total, query.page, query.limit),
     };
@@ -795,9 +800,12 @@ export class CatalogService {
 
     const [rows, total] = await qb.getManyAndCount();
     const bases = await this.basePricesForOffers(rows, this.buyingTier(caller));
+    const gradeMap = await this.conditionsService.gradeMapFor([
+      ...new Set(rows.map((o) => o.productId)),
+    ]);
     return {
       offers: rows.map((o) =>
-        this.mapOffer(o, !caller, bases.get(`${o.productId}:${o.conditionCode ?? ''}`), this.showsConditions(caller)),
+        this.mapOffer(o, !caller, bases.get(`${o.productId}:${o.conditionCode ?? ''}`), this.showsConditions(caller), gradeMap),
       ),
       pagination: buildPagination(total, query.page, query.limit),
     };
@@ -823,11 +831,14 @@ export class CatalogService {
     if (!offer) throw new OfferNotFoundException();
 
     const bases = await this.basePricesForOffers([offer], this.buyingTier(caller));
+    const gradeMap = await this.conditionsService.gradeMapFor([offer.productId]);
     return {
       offer: this.mapOffer(
         offer,
         !caller,
         bases.get(`${offer.productId}:${offer.conditionCode ?? ''}`),
+        this.showsConditions(caller),
+        gradeMap,
       ),
     };
   }
@@ -911,14 +922,16 @@ export class CatalogService {
       throw new ProductNotFoundException();
     }
 
-    const [conditionLabels, priceByCondition] = await Promise.all([
-      this.conditionsService.labelMapFor([product.id]),
+    const [conditionGrades, priceByCondition, unitLabels] = await Promise.all([
+      this.conditionsService.gradeMapFor([product.id]),
       this.callerConditionPrices(product.id, caller),
+      this.units.labelMap(),
     ]);
+    const unitLabel = unitLabels.get(product.unitType) ?? product.unitType;
 
     // Never pushed to Odoo yet → no stock lines can exist for it.
     if (!product.odooProductId) {
-      return this.mapAvailability(product, [], conditionLabels, priceByCondition, null);
+      return this.mapAvailability(product, [], conditionGrades, priceByCondition, null, unitLabel);
     }
 
     // Scoped to the buyer's OWN governorate.
@@ -950,7 +963,7 @@ export class CatalogService {
     const rows = await qb.orderBy('w.name', 'ASC').getMany();
 
     return this.mapAvailability(
-      product, rows, conditionLabels, priceByCondition, provinceId);
+      product, rows, conditionGrades, priceByCondition, provinceId, unitLabel);
   }
 
   /**
@@ -1002,9 +1015,10 @@ export class CatalogService {
   private mapAvailability(
     product: Product,
     rows: WarehouseInventory[],
-    conditionLabels: Map<string, string>,
+    conditionGrades: Map<string, { id: string; code: string; name: string; sort_order: number }>,
     priceByCondition: Map<string, number>,
     provinceId: string | null,
+    unitLabel: string,
   ) {
     let totalAvailable = 0;
     const byWarehouse = new Map<string, AvailabilityWarehouseEntry>();
@@ -1047,13 +1061,9 @@ export class CatalogService {
         entry.synced_at = r.syncedAt;
       }
       entry.conditions.push({
-        condition: r.conditionCode,
-        // Keyed by (material, code): the same code means different things for
-        // different materials, so the bare code is only the last-resort label.
-        condition_label:
-          conditionLabels.get(`${product.id}:${r.conditionCode}`)
-          ?? conditionLabels.get(r.conditionCode)
-          ?? r.conditionCode,
+        // The single canonical grade object — id, code, name, sort order — the
+        // same shape every route returns (or null for ungraded stock).
+        condition: ConditionsService.gradeObject(product.id, r.conditionCode, conditionGrades),
         quantity,
         reserved_quantity: reserved,
         available,
@@ -1070,7 +1080,8 @@ export class CatalogService {
       product: {
         id: product.id,
         name: product.name,
-        unit_type: product.unitType,
+        // The unit as one object — code AND label — matching the catalogue.
+        unit: { code: product.unitType, label: unitLabel },
       },
       total_available: totalAvailable,
       in_stock: totalAvailable > 0,
@@ -1222,14 +1233,12 @@ export class CatalogService {
     qb.skip((query.page - 1) * query.limit).take(query.limit);
 
     const [products, total] = await qb.getManyAndCount();
-    const [pricingMap, offerMap, unitLabels, conditionLabels, conditionSortOrders] =
-      await Promise.all([
-        this.pricingForProducts(products.map((p) => p.id)),
-        this.activeOffersForProducts(products.map((p) => p.id), caller.role),
-        this.units.labelMap(),
-        this.conditionsService.labelMapFor(products.map((p) => p.id)),
-        this.conditionsService.sortOrderMapFor(products.map((p) => p.id)),
-      ]);
+    const [pricingMap, offerMap, unitLabels, conditionGrades] = await Promise.all([
+      this.pricingForProducts(products.map((p) => p.id)),
+      this.activeOffersForProducts(products.map((p) => p.id), caller.role),
+      this.units.labelMap(),
+      this.conditionsService.gradeMapFor(products.map((p) => p.id)),
+    ]);
 
     // For a factory / free facility, how much of each material is available in
     // their governorate's active warehouses — the quantity they can order right
@@ -1247,10 +1256,9 @@ export class CatalogService {
         offerMap.get(p.id),
         unitLabels,
         callerTier,
-        conditionLabels,
+        conditionGrades,
         provinceStock,
         isAdmin,
-        conditionSortOrders,
       ),
     );
 
@@ -1665,9 +1673,9 @@ export class CatalogService {
     prices: ProductPricing[],
     liveOffers: Offer[],
     unitLabels?: Map<string, string>,
-    conditionLabels?: Map<string, string>,
-    conditionSortOrders?: Map<string, number>,
+    conditionGrades?: Map<string, { id: string; code: string; name: string; sort_order: number }>,
   ) {
+    const grades = conditionGrades ?? new Map();
     const flatPrice = (tier: PricingTier): number | null => {
       const row = this.liveRows(prices, tier).find((r) => !r.conditionCode);
       return row ? Number(row.price) : null;
@@ -1676,17 +1684,14 @@ export class CatalogService {
       this.liveRows(prices, tier)
         .filter((r) => r.conditionCode)
         .map((r) => ({
-          condition: {
-            id: r.conditionId ?? null,
-            name: conditionLabels?.get(r.conditionCode!) ?? r.conditionCode,
-          },
-          sort_order: conditionSortOrders?.get(`${p.id}:${r.conditionCode}`) ?? null,
+          // The single canonical grade object — id, code, name, sort order.
+          condition: ConditionsService.gradeObject(p.id, r.conditionCode, grades),
           price: Number(r.price),
         }))
         .sort(
           (a, b) =>
-            (a.sort_order ?? Number.MAX_SAFE_INTEGER) -
-            (b.sort_order ?? Number.MAX_SAFE_INTEGER),
+            (a.condition?.sort_order ?? Number.MAX_SAFE_INTEGER) -
+            (b.condition?.sort_order ?? Number.MAX_SAFE_INTEGER),
         );
     const gradedTier = (tier: PricingTier) => {
       const conditions = byCondition(tier);
@@ -1708,8 +1713,8 @@ export class CatalogService {
       description: p.description ?? null,
       image: p.imageURL ?? null,
       category: { id: p.categoryId, name: p.category?.name ?? null },
-      unit_type: p.unitType,
-      unit_label: unitLabels?.get(p.unitType) ?? p.unitType,
+      // The unit as one object — code AND label — not a scattered pair.
+      unit: { code: p.unitType, label: unitLabels?.get(p.unitType) ?? p.unitType },
       currency: 'SYP',
       // The full price sheet — every tier, graded tiers broken out per condition.
       prices: {
@@ -1728,12 +1733,7 @@ export class CatalogService {
               amount: Number(offer.amount),
               direction:
                 offer.audience === OfferAudience.SELLERS ? 'INCREASE' : 'DECREASE',
-              condition: offer.conditionCode
-                ? {
-                    code: offer.conditionCode,
-                    name: conditionLabels?.get(offer.conditionCode) ?? offer.conditionCode,
-                  }
-                : null,
+              condition: ConditionsService.gradeObject(p.id, offer.conditionCode, grades),
               valid_until: offer.validUntil ?? null,
             },
           }
@@ -1748,27 +1748,25 @@ export class CatalogService {
     liveOffers?: Offer[],
     unitLabels?: Map<string, string>,
     callerTier?: PricingTier,
-    conditionLabels?: Map<string, string>,
+    conditionGrades?: Map<string, { id: string; code: string; name: string; sort_order: number }>,
     provinceStock?: Map<number, number>,
     isAdmin = false,
-    conditionSortOrders?: Map<string, number>,
   ) {
-    // The grade's admin-arranged position, by (material, code). Undefined for a
-    // code with no row (should not happen for a priced grade) sorts last.
-    const sortOrderOf = (code?: string | null): number | undefined =>
-      code ? conditionSortOrders?.get(`${p.id}:${code}`) : undefined;
+    // The grade as the single canonical object (or null) every route returns.
+    const grades = conditionGrades ?? new Map();
+    const gradeOf = (code?: string | null) =>
+      ConditionsService.gradeObject(p.id, code, grades);
     // An ADMIN administers the catalogue, so they read the WHOLE price sheet —
     // every tier at once — not a single buyer's figure. Graded tiers (factory /
-    // free facility) carry a per-condition breakdown, each with the grade's id
-    // AND name, so the admin sees exactly which grade each price belongs to.
+    // free facility) carry a per-condition breakdown, each with the grade object,
+    // so the admin sees exactly which grade each price belongs to.
     if (isAdmin) {
       return this.mapProductForAdmin(
         p,
         prices,
         liveOffers ?? [],
         unitLabels,
-        conditionLabels,
-        conditionSortOrders,
+        grades,
       );
     }
 
@@ -1786,15 +1784,7 @@ export class CatalogService {
     // institution the row carries just the money, with no condition key at all.
     const offerRows = offers
       .map((o) => ({
-        ...(isGradedTier
-          ? {
-              condition: o.conditionCode ?? null,
-              condition_label: o.conditionCode
-                ? (conditionLabels?.get(o.conditionCode) ?? o.conditionCode)
-                : null,
-              sort_order: sortOrderOf(o.conditionCode) ?? null,
-            }
-          : {}),
+        ...(isGradedTier ? { condition: gradeOf(o.conditionCode) } : {}),
         // Both numbers, and the amount between them. An offer is a CHANGE of
         // price: showing only the new figure answers "what does it cost" while
         // losing "what did it cost", which is what makes the change legible.
@@ -1816,18 +1806,16 @@ export class CatalogService {
       ? this.liveRows(prices, tier)
           .filter((r) => r.conditionCode)
           .map((r) => ({
-            condition: r.conditionCode,
-            condition_label: conditionLabels?.get(r.conditionCode!) ?? r.conditionCode,
-            // The admin-arranged position ships with every grade a buyer sees.
-            sort_order: sortOrderOf(r.conditionCode) ?? null,
+            // The grade as the single canonical object — id, code, name, order.
+            condition: gradeOf(r.conditionCode),
             price: Number(r.price),
           }))
           // Shown in the admin's chosen order, not by price — that order is a
           // deliberate ranking of quality the buyer is meant to read top-down.
           .sort(
             (a, b) =>
-              (a.sort_order ?? Number.MAX_SAFE_INTEGER) -
-              (b.sort_order ?? Number.MAX_SAFE_INTEGER),
+              (a.condition?.sort_order ?? Number.MAX_SAFE_INTEGER) -
+              (b.condition?.sort_order ?? Number.MAX_SAFE_INTEGER),
           )
       : undefined;
 
@@ -1862,8 +1850,8 @@ export class CatalogService {
       // The category as one object — id AND name together — so the client needs
       // no second lookup and no flat `category_*` pair scattered across the row.
       category: { id: p.categoryId, name: p.category?.name ?? null },
-      unit_type: p.unitType,
-      unit_label: unitLabels?.get(p.unitType) ?? p.unitType,
+      // The unit as one object — code AND label — not a scattered pair.
+      unit: { code: p.unitType, label: unitLabels?.get(p.unitType) ?? p.unitType },
       // ONLY the caller's own price (see tierHeadlinePrice) — never the whole
       // tier matrix, so a user token can never read a factory's number.
       price: this.tierHeadlinePrice(prices, tier),
@@ -1947,6 +1935,7 @@ export class CatalogService {
     isGuest = false,
     basePrice?: number | null,
     showCondition = false,
+    gradeMap: Map<string, { id: string; code: string; name: string; sort_order: number }> = new Map(),
   ) {
     return {
       offer_id: o.id,
@@ -1980,8 +1969,11 @@ export class CatalogService {
           }),
       audience: o.audience,
       // Grade is a factory / free-facility concept only: a citizen or institution
-      // never sees a condition on an offer, not even a null key.
-      ...(showCondition ? { condition: o.conditionCode ?? null } : {}),
+      // never sees a condition on an offer, not even a null key. When shown, it
+      // is the SAME object every route returns (or null), never a bare code.
+      ...(showCondition
+        ? { condition: ConditionsService.gradeObject(o.productId, o.conditionCode, gradeMap) }
+        : {}),
       description: o.description ?? null,
       valid_from: o.validFrom,
       valid_until: o.validUntil ?? null,

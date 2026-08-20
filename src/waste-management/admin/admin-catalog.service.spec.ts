@@ -84,7 +84,7 @@ describe('AdminCatalogService', () => {
     // Deleting a material archives its live price rows here first.
     historyRepo = { save: jest.fn(), create: jest.fn((x) => x) };
     offerRepo = { findOne: jest.fn(), create: jest.fn((x) => x), save: jest.fn((x) => Promise.resolve({ id: 'o1', ...x })), delete: jest.fn() };
-    conditionsService = { invalidate: jest.fn() };
+    conditionsService = { invalidate: jest.fn(), gradeMapFor: jest.fn(async () => new Map()) };
     // Order-line repo: the delete guard counts orders on a material. Default
     // zero so deletes proceed; a test overrides it to prove the refusal.
     orderLineRepo = { count: jest.fn().mockResolvedValue(0) };

@@ -105,7 +105,7 @@ describe('InventoryQueryService', () => {
       expect(res.quantity).toBe(150);
       expect(res.reserved_quantity).toBe(30);
       expect(res.available).toBe(120);
-      const good = res.conditions.find((c) => c.condition === 'GOOD')!;
+      const good = res.conditions.find((c) => c.condition?.code === 'GOOD')!;
       expect(good.available).toBe(70);
     });
 
@@ -305,12 +305,12 @@ describe('InventoryQueryService', () => {
       // How a unit BEHAVES belongs to the units screen, not to a stock read.
       expect(res.product.unit).not.toHaveProperty('is_weight');
       expect(res.product.unit).not.toHaveProperty('allows_tolerance');
-      expect(res.conditions[0]).toMatchObject({
-        condition_id: 'c-good',
-        condition: 'GOOD',
+      // The grade as the single canonical object every route returns.
+      expect(res.conditions[0].condition).toMatchObject({
+        id: 'c-good',
+        code: 'GOOD',
       });
-      // A third spelling of the same fact, which a caller then had to choose
-      // between. The id addresses the grade; the code names it.
+      expect(res.conditions[0]).not.toHaveProperty('condition_id');
       expect(res.conditions[0]).not.toHaveProperty('condition_label');
     });
 
@@ -324,7 +324,8 @@ describe('InventoryQueryService', () => {
 
       const res = await service.forProductInWarehouse('p-1', 'w1');
 
-      expect(res.conditions[0].condition_id).toBeNull();
+      // UNGRADED stock carries no grade object at all.
+      expect(res.conditions[0].condition).toBeNull();
     });
   });
 

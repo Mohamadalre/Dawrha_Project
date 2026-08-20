@@ -110,7 +110,7 @@ describe('offer payload on a material', () => {
     const out = map(prices, offers);
 
     expect(out.offer.by_condition).toHaveLength(3);
-    expect(out.offer.by_condition.map((o: any) => o.condition)).toEqual(['GOOD', 'POOR', 'EXCELLENT']);
+    expect(out.offer.by_condition.map((o: any) => o.condition?.code)).toEqual(['GOOD', 'POOR', 'EXCELLENT']);
     expect(out.offer.by_condition.map((o: any) => o.discount_percentage)).toEqual([50, 10, 5]);
   });
 

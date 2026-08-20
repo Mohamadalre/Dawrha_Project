@@ -73,6 +73,7 @@ describe('offer basis — amount vs percentage', () => {
         hasConditions: jest.fn().mockResolvedValue(false),
         validateActiveCode: jest.fn(),
         activeForProduct: jest.fn(async () => []),
+        gradeMapFor: jest.fn(async () => new Map()),
         resolveActiveById: jest.fn(),
       };
       const noop = { invalidate: jest.fn(), record: jest.fn() };
@@ -213,6 +214,7 @@ describe('offer basis — amount vs percentage', () => {
         hasConditions: jest.fn().mockResolvedValue(true),
         validateActiveCode: jest.fn(),
         activeForProduct: jest.fn(async () => GRADES),
+        gradeMapFor: jest.fn(async () => new Map()),
         resolveActiveById: jest.fn(),
       };
       const noop = { invalidate: jest.fn(), record: jest.fn() };
@@ -411,6 +413,7 @@ describe('offer edges — withdrawn materials and the buyer ceiling', () => {
     const conditions = {
       hasConditions: jest.fn().mockResolvedValue(false),
       activeForProduct: jest.fn(async () => []),
+        gradeMapFor: jest.fn(async () => new Map()),
       validateActiveCode: jest.fn(),
       resolveActiveById: jest.fn(),
     };

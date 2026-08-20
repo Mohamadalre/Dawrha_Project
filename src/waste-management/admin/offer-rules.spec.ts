@@ -106,6 +106,7 @@ describe('offer rules — audience, percentage, grades and the derived amount', 
         { id: 'cond-excellent', code: 'EXCELLENT' },
         { id: 'cond-good', code: 'GOOD' },
       ]),
+      gradeMapFor: jest.fn(async () => new Map()),
     };
     odooSync = { enqueueUpdatePricing: jest.fn() };
     const noop = { invalidate: jest.fn(), record: jest.fn() };
@@ -417,7 +418,7 @@ describe('offer validity and percentage edits', () => {
     service = new AdminCatalogService(
       {} as any, productRepo, {} as any, {} as any, {} as any, {} as any,
       pricingRepo, offerRepo, odooSync as any, { record: jest.fn() } as any,
-      cache as any, {} as any, {} as any, {} as any, {} as any,
+      cache as any, {} as any, { gradeMapFor: jest.fn(async () => new Map()) } as any, {} as any, {} as any,
       { count: jest.fn().mockResolvedValue(0) } as any,
     );
   });

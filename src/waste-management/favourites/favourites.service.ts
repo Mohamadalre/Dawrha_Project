@@ -76,11 +76,17 @@ export class FavouritesService {
           : undefined;
         return {
           favourite_id: row.id,
-          product_id: row.productId,
-          product_name: row.product?.name ?? null,
-          product_image: row.product?.imageURL ?? null,
-          category_id: row.product?.categoryId ?? null,
-          category_name: row.product?.category?.name ?? null,
+          // The material and its category as objects — id AND name together —
+          // instead of scattered *_id / *_name pairs, matching the catalogue.
+          product: {
+            id: row.productId,
+            name: row.product?.name ?? null,
+            image: row.product?.imageURL ?? null,
+          },
+          category: {
+            id: row.product?.categoryId ?? null,
+            name: row.product?.category?.name ?? null,
+          },
           unit: {
             id: unit?.id ?? null,
             code: unit?.code ?? row.product?.unitType ?? null,

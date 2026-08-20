@@ -41,6 +41,7 @@ describe('OrderViewService.fileComplaint routing', () => {
     const svc = new OrderViewService(
       orderRepo as any, partRepo as any, {} as any, {} as any,
       complaintRepo as any, warehouseRepo as any, odooSync as any, trips as any, wallet as any,
+      { gradeMapFor: async () => new Map() } as any,
     );
     return { svc, odooSync, complaints };
   };
@@ -129,6 +130,7 @@ describe('OrderViewService.fileOrderComplaint (whole-order scope)', () => {
     const svc = new OrderViewService(
       orderRepo as any, partRepo as any, {} as any, {} as any,
       complaintRepo as any, warehouseRepo as any, odooSync as any, {} as any, {} as any,
+      { gradeMapFor: async () => new Map() } as any,
     );
     return { svc, odooSync, complaints };
   };

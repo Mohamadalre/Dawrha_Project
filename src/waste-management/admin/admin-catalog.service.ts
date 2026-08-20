@@ -876,8 +876,11 @@ export class AdminCatalogService {
       .take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
+    const gradeMap = await this.conditionsService.gradeMapFor([
+      ...new Set(rows.map((o) => o.productId)),
+    ]);
     return {
-      offers: rows.map((o) => this.mapAdminOffer(o)),
+      offers: rows.map((o) => this.mapAdminOffer(o, gradeMap)),
       pagination: buildPagination(total, query.page, query.limit),
     };
   }
@@ -970,11 +973,12 @@ export class AdminCatalogService {
       })),
     });
 
+    const createdGradeMap = await this.conditionsService.gradeMapFor([product.id]);
     return {
       // The material the offer is on, named — the client no longer has to hold
       // the id it sent just to show "offer on <material>" back to the admin.
       material: { id: product.id, name: product.name },
-      offers: created.map((o) => this.mapAdminOffer(o)),
+      offers: created.map((o) => this.mapAdminOffer(o, createdGradeMap)),
       message:
         created.length > 1
           ? `Offer created successfully across ${created.length} lines`
@@ -1386,7 +1390,8 @@ export class AdminCatalogService {
       },
     );
 
-    return { offer: this.mapAdminOffer(saved) };
+    const savedGradeMap = await this.conditionsService.gradeMapFor([saved.productId]);
+    return { offer: this.mapAdminOffer(saved, savedGradeMap) };
   }
 
   /**
@@ -1430,6 +1435,7 @@ export class AdminCatalogService {
       .take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
+    const historyGradeMap = await this.conditionsService.gradeMapFor([product.id]);
     return {
       product: { id: product.id, name: product.name },
       filter: {
@@ -1437,7 +1443,7 @@ export class AdminCatalogService {
         to: query.to ?? null,
       },
       offers: rows.map((o) => ({
-        ...this.mapAdminOffer(o),
+        ...this.mapAdminOffer(o, historyGradeMap),
         basis: o.basis,
         basis_percentage: o.basisPercentage == null ? null : Number(o.basisPercentage),
         created_at: o.createdAt,
@@ -1600,15 +1606,18 @@ export class AdminCatalogService {
    * has simply run out must read as finished the moment it does, without
    * anything having to expire it.
    */
-  private mapAdminOffer(o: Offer) {
+  private mapAdminOffer(
+    o: Offer,
+    gradeMap: Map<string, { id: string; code: string; name: string; sort_order: number }> = new Map(),
+  ) {
     const now = Date.now();
     const started = new Date(o.validFrom).getTime() <= now;
     const notEnded = !o.validUntil || new Date(o.validUntil).getTime() > now;
 
     return {
       offer_id: o.id,
-      product_id: o.productId,
-      product_name: o.product?.name ?? null,
+      // The material as one object — id AND name — not a scattered pair.
+      product: { id: o.productId, name: o.product?.name ?? null },
 
       audience: {
         type: o.audience,
@@ -1629,9 +1638,10 @@ export class AdminCatalogService {
         scope: o.roleSpecific ? 'SPECIFIC' : 'GENERAL',
       },
 
-      grade: o.conditionId
-        ? { id: o.conditionId, code: o.conditionCode }
-        : null,
+      // The grade as the single canonical object every route uses (id, code,
+      // name, sort order), or null. Renamed from `grade` to `condition` so it
+      // matches the key every other response uses for the same fact.
+      condition: ConditionsService.gradeObject(o.productId, o.conditionCode, gradeMap),
 
       effect: {
         amount: Number(o.amount),

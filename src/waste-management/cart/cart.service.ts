@@ -194,6 +194,7 @@ export class CartService {
     );
 
     const summary = await this.buildSummary(cart.id, caller.role);
+    const gradeMap = await this.conditionsService.gradeMapFor([product.id]);
     return {
       cart_id: cart.id,
       item_id: item.id,
@@ -202,7 +203,9 @@ export class CartService {
       item: {
         // The material as one object — id AND name — not a bare id.
         product: { id: product.id, name: product.name },
-        condition_id: dto.condition_id ?? null,
+        // The grade as the SAME object every route returns (or null) — not a
+        // bare condition_id.
+        condition: ConditionsService.gradeObject(product.id, conditionCode, gradeMap),
         quantity: dto.quantity,
         unit_type: product.unitType,
         unit_price: unitPrice,
@@ -275,6 +278,13 @@ export class CartService {
     const gradedRole =
       caller.role === Role.FACTORY || caller.role === Role.EXTERNAL_PARTNER;
 
+    // The canonical grade object per (material, code), so a cart line returns a
+    // grade in the SAME shape the catalogue, pricing and offers do — an object,
+    // never a bare code. Built once for every material in the basket.
+    const gradeMap = await this.conditionsService.gradeMapFor(
+      [...new Set(items.map((it) => it.productId))],
+    );
+
     return {
       cart_id: cart.id,
       items: items.map((it) => ({
@@ -289,7 +299,9 @@ export class CartService {
         unit_type: it.unitType,
         // Grade only for graded buyers (factory / free facility) who actually
         // chose one — a citizen / institution line carries no condition key.
-        ...(gradedRole && it.conditionCode ? { condition: it.conditionCode } : {}),
+        ...(gradedRole && it.conditionCode
+          ? { condition: ConditionsService.gradeObject(it.productId, it.conditionCode, gradeMap) }
+          : {}),
         unit_price: Number(it.unitPrice),
         subtotal: Number(it.subtotal),
         // Offer as one nested object when applied, plus the boolean either way.

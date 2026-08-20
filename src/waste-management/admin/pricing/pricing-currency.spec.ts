@@ -39,7 +39,8 @@ describe('PricingService — price corrections', () => {
 
     service = new PricingService(
       productRepo, pricingRepo, historyRepo, cartItemRepo, odooSync, audit, cache,
-      {} as any, {} as any, offerSettlement,
+      { labelMapFor: jest.fn(async () => new Map()), sortOrderMapFor: jest.fn(async () => new Map()) } as any,
+      {} as any, offerSettlement,
       { find: jest.fn().mockResolvedValue([]) } as any,
       { createNotification: jest.fn(), enqueueNotification: jest.fn() } as any,
       { defaultCurrency: jest.fn().mockResolvedValue('SYP') } as any,

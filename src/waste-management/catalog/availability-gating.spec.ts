@@ -44,7 +44,7 @@ describe('CatalogService availability gating (mapAvailability)', () => {
     expect(res.warehouses).toHaveLength(1);
     expect(res.warehouses[0].conditions).toHaveLength(1);
     expect(res.warehouses[0].conditions[0]).toMatchObject({
-      condition: 'EXCELLENT',
+      condition: { code: 'EXCELLENT' },
       available: 100,
       price: 10,
     });
@@ -64,7 +64,7 @@ describe('CatalogService availability gating (mapAvailability)', () => {
         ['GOOD', 8],
       ]),
     );
-    const codes = res.warehouses[0].conditions.map((c: any) => c.condition);
+    const codes = res.warehouses[0].conditions.map((c: any) => c.condition?.code ?? null);
     expect(codes).toEqual(['EXCELLENT']);
   });
 
@@ -79,7 +79,7 @@ describe('CatalogService availability gating (mapAvailability)', () => {
         ['POOR', 3],
       ]),
     );
-    const codes = res.warehouses[0].conditions.map((c: any) => c.condition);
+    const codes = res.warehouses[0].conditions.map((c: any) => c.condition?.code ?? null);
     expect(codes).toEqual(['EXCELLENT']);
   });
 
@@ -91,7 +91,7 @@ describe('CatalogService availability gating (mapAvailability)', () => {
       ],
       new Map([['EXCELLENT', 10]]), // GOOD absent → null price
     );
-    const codes = res.warehouses[0].conditions.map((c: any) => c.condition);
+    const codes = res.warehouses[0].conditions.map((c: any) => c.condition?.code ?? null);
     expect(codes).toEqual(['EXCELLENT']);
     expect(res.total_available).toBe(100);
   });

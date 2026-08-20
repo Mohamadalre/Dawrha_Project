@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
@@ -10,6 +10,7 @@ import {
   Min,
 } from 'class-validator';
 import { PricingTier } from '@src/waste-management/enums/pricing-tier.enum';
+import { clampPageParam, MAX_PAGE_LIMIT } from '@src/waste-management/common/dto/pagination.dto';
 
 /**
  * Give the live price list an end date.
@@ -85,15 +86,15 @@ export class PriceHistoryQueryDto {
   as_of?: string;
 
   @IsOptional()
-  @Type(() => Number)
+  @Transform(({ value }) => clampPageParam(value, 1, Number.MAX_SAFE_INTEGER, 1))
   @IsInt()
   @Min(1)
   page?: number = 1;
 
   @IsOptional()
-  @Type(() => Number)
+  @Transform(({ value }) => clampPageParam(value, 1, MAX_PAGE_LIMIT, 20))
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(MAX_PAGE_LIMIT)
   limit?: number = 20;
 }

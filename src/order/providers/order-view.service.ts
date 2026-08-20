@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
+import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
 import { Order } from '../entities/order.entity';
 import { OrderPart } from '../entities/order-part.entity';
 import { OrderPartLine } from '../entities/order-part-line.entity';
@@ -54,6 +55,7 @@ export class OrderViewService {
     private readonly odooSync: OdooSyncService,
     private readonly trips: DeliveryTripService,
     private readonly wallet: PointsWalletService,
+    private readonly conditions: ConditionsService,
   ) {}
 
   async listMine(accountId: string, page = 1, limit = 10, status?: OrderStatus) {
@@ -158,6 +160,17 @@ export class OrderViewService {
 
     const live = parts.filter((p) => !FAILED_PART_STATUSES.includes(p.status));
 
+    // The canonical grade object per (material, code), so every frozen line
+    // returns its grade in the SAME shape the catalogue does — an object, or
+    // null. A since-deleted grade falls back to a code-only object, never a
+    // bare string, so a historical order still renders consistently.
+    const orderLines = await this.lineRepo.find({
+      where: { partId: In(live.map((p) => p.id)) },
+    });
+    const gradeMap = await this.conditions.gradeMapFor([
+      ...new Set(orderLines.map((l) => l.productId)),
+    ]);
+
     const detailedParts = await Promise.all(
       live.map(async (part) => {
         const lines = await this.lineRepo.find({ where: { partId: part.id } });
@@ -186,8 +199,10 @@ export class OrderViewService {
           can_rate:
             part.status === OrderPartStatus.DELIVERED && !ratedParts.has(part.id),
           lines: lines.map((l) => ({
+            // Snapshot name (the material may since have been renamed or
+            // deleted); the grade as the single canonical object, or null.
             product_name: l.productName,
-            condition: l.conditionCode,
+            condition: ConditionsService.gradeObject(l.productId, l.conditionCode, gradeMap),
             quantity: Number(l.quantity),
             unit: l.unitType,
             unit_price: Number(l.unitPrice),

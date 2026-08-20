@@ -7,8 +7,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Type } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { clampPageParam } from '@src/waste-management/common/dto/pagination.dto';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
@@ -22,7 +23,7 @@ import { TruckTrackingService } from './truck-tracking.service';
  */
 class HistoryQueryDto {
   @IsOptional()
-  @Type(() => Number)
+  @Transform(({ value }) => clampPageParam(value, 1, 500, 50))
   @IsInt()
   @Min(1)
   @Max(500)

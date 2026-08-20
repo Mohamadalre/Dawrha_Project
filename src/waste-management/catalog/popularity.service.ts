@@ -16,8 +16,7 @@ export interface PopularMaterial {
   id: string;
   name: string;
   image: string | null;
-  category_id: string;
-  category_name: string | null;
+  category: { id: string; name: string | null };
   unit_type: string;
   unit_label: string;
   /** Distinct orders this material appeared in — what the ranking uses. */
@@ -101,8 +100,8 @@ export class PopularityService {
         id: product.id,
         name: product.name,
         image: product.imageURL ?? null,
-        category_id: product.categoryId,
-        category_name: product.category?.name ?? null,
+        // The category as one object, matching the rest of the catalogue.
+        category: { id: product.categoryId, name: product.category?.name ?? null },
         unit_type: product.unitType,
         unit_label: unitLabels.get(product.unitType) ?? product.unitType,
         order_count: row.orderCount,

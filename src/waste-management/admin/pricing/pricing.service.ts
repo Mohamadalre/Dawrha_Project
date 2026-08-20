@@ -727,13 +727,19 @@ export class PricingService {
     // offers route serving the old numbers.
     await this.cache.invalidate('products', 'offers');
 
+    const [labels, sortOrders] = await Promise.all([
+      this.conditions.labelMapFor([row.productId]),
+      this.conditions.sortOrderMapFor([row.productId]),
+    ]);
     return {
       message: 'Price corrected successfully',
       pricing_id: row.id,
       product_id: row.productId,
       tier: row.tier.toLowerCase(),
-      condition_id: row.conditionId ?? null,
-      condition: row.conditionCode ?? null,
+      // The grade as one object (id, code, name, sort order), or null — the same
+      // shape every pricing view uses, not a scattered condition_id / condition.
+      condition: this.gradeObject(
+        row.productId, row.conditionId, row.conditionCode, labels, sortOrders),
       price: Number(row.price),
       currency: row.currency,
       updated_cart_items: updatedCarts,

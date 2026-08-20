@@ -60,6 +60,10 @@ describe('CatalogService', () => {
         ['UNGRADED', 'غير مفروزة'],
       ])),
       sortOrderMapFor: jest.fn(async () => new Map([['p1:EXCELLENT', 1]])),
+      gradeMapFor: jest.fn(async () => new Map([
+        ['p1:EXCELLENT', { id: 'ce', code: 'EXCELLENT', name: 'ممتازة', sort_order: 1 }],
+        ['p1:GOOD', { id: 'cg', code: 'GOOD', name: 'جيدة', sort_order: 2 }],
+      ])),
       activeForProduct: jest.fn(async () => []),
       hasConditions: jest.fn(async () => false),
     };
@@ -490,7 +494,7 @@ describe('CatalogService', () => {
       expect(res.categories).toHaveLength(1);
       expect(res.categories[0]).toMatchObject({ id: 'c1', name: 'Plastic' });
       expect(res.products).toHaveLength(1);
-      expect(res.products[0]).toMatchObject({ id: 'p1', unit_label: 'كغم' });
+      expect(res.products[0]).toMatchObject({ id: 'p1', unit: { label: 'كغم' } });
       // The product query was scoped to the selected categories.
       expect(qb.andWhere).toHaveBeenCalledWith(
         'p.categoryId IN (:...filterCategoryIds)',
@@ -570,8 +574,7 @@ describe('CatalogService', () => {
       expect(res.warehouses).toHaveLength(1);
       expect(res.warehouses[0]).toMatchObject({ warehouse_id: 'w1', available: 70 });
       expect(res.warehouses[0].conditions[0]).toMatchObject({
-        condition: 'EXCELLENT',
-        condition_label: 'ممتازة',
+        condition: { code: 'EXCELLENT', name: 'ممتازة' },
         quantity: 100,
         available: 70,
         price: 10,
@@ -594,7 +597,7 @@ describe('CatalogService', () => {
 
       const res: any = await service.getProductAvailability(factory, 'p1');
 
-      const codes = res.warehouses[0].conditions.map((c: any) => c.condition);
+      const codes = res.warehouses[0].conditions.map((c: any) => c.condition?.code ?? null);
       expect(codes).toEqual(['EXCELLENT']); // GOOD dropped (no price)
       expect(res.total_available).toBe(100);
     });
@@ -730,7 +733,7 @@ describe('CatalogService', () => {
       expect(product).toMatchObject({
         id: 'p1',
         name: 'PET Bottles',
-        unit_label: 'كغم',
+        unit: { label: 'كغم' },
         requires_login: true,
       });
       // Nothing price-shaped survives — checked by key, so a field added to

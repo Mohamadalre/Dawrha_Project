@@ -76,7 +76,7 @@ describe('offer edit — amount vs percentage', () => {
     service = new AdminCatalogService(
       {} as any, productRepo as any, {} as any, {} as any, {} as any, {} as any,
       pricingRepo as any, offerRepo as any, odooSync as any,
-      noop as any, noop as any, {} as any, {} as any, {} as any, {} as any,
+      noop as any, noop as any, {} as any, { gradeMapFor: jest.fn(async () => new Map()) } as any, {} as any, {} as any,
       { count: jest.fn().mockResolvedValue(0) } as any,
     );
   });
@@ -157,7 +157,7 @@ describe('offer timeline — a material’s offers over time', () => {
     service = new AdminCatalogService(
       {} as any, productRepo as any, {} as any, {} as any, {} as any, {} as any,
       {} as any, offerRepo as any, {} as any,
-      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, { gradeMapFor: jest.fn(async () => new Map()) } as any, {} as any, {} as any,
       { count: jest.fn().mockResolvedValue(0) } as any,
     );
   };
