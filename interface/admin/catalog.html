@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الكتالوج والتسعير — الأدمن</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="admin">
+<div class="admin-shell">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="dot" style="width:28px;height:28px;border-radius:8px;background:var(--admin-accent);color:#1e293b;display:grid;place-items:center;font-size:14px">د</span> دورها — أدمن</div>
+    <nav>
+      <a href="dashboard.html">📊 لوحة التحكم</a>
+      <a href="accounts.html">👥 الحسابات</a>
+      <a href="requests.html">🚚 طلبات الجمع</a>
+      <a href="fleet.html">🛻 الأسطول والورديات</a>
+      <a href="catalog.html" class="active">🗂️ الكتالوج والتسعير</a>
+      <a href="reports.html">📈 التقارير</a>
+      <a href="login.html" data-logout-link>↩ خروج</a>
+    </nav>
+  </aside>
+
+  <main class="admin-content">
+    <div class="admin-header">
+      <div class="row">
+        <button class="btn sidebar-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <h1>الكتالوج والتسعير</h1>
+      </div>
+      <button class="btn admin" onclick="ui.ok('أُنشئ منتج جديد (محاكاة)','POST /api/v1/admin/waste/products')">+ منتج</button>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active">المنتجات <span class="endpoint">GET /api/v1/admin/waste/products</span></div>
+      <div class="tab">الفئات</div>
+      <div class="tab">العروض</div>
+      <div class="tab">وحدات القياس</div>
+      <div class="tab">الظروف</div>
+      <div class="tab">مستودعات <span class="endpoint">GET /api/v1/admin/warehouses</span></div>
+    </div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <tr><th>المنتج</th><th>الفئة</th><th>الوحدة</th><th>سعر البيع</th><th>تسعير بالشرائح</th></tr>
+          <tbody data-products-list>
+            <tr><td colspan="5" class="muted small">جارٍ التحميل…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint mt-8">كل تعديل يدفع Job إلى Odoo (<span class="endpoint">recycle.product.*</span>) + سجل تدقيق (audit).</p>
+    </div>
+
+    <div class="card">
+      <h3>الفئات <span class="endpoint">GET /api/v1/admin/waste/categories</span></h3>
+      <div data-categories-list></div>
+    </div>
+
+    <div class="card">
+      <h3>العروض <span class="endpoint">GET /api/v1/admin/waste/offers</span></h3>
+      <div data-offers-list></div>
+    </div>
+
+    <div class="card">
+      <h3>نقاط المكافأة لكل دور <span class="endpoint">PATCH /api/v1/points-rates</span></h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>الدور</th><th>1 نقطة =</th><th>حالة</th></tr>
+          <tr><td>مواطن CITIZEN</td><td>1,000 ل.س</td><td><span class="badge green">نشط</span></td></tr>
+          <tr><td>مؤسسة INSTITUTIONS</td><td>800 ل.س</td><td><span class="badge green">نشط</span></td></tr>
+          <tr><td>معمل FACTORY</td><td>750 ل.س</td><td><span class="badge green">نشط</span></td></tr>
+          <tr><td>جهة حرة EXTERNAL_PARTNER</td><td>750 ل.س</td><td><span class="badge gray">غير مفعل</span></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>طلبات فئات من المؤسسات <span class="endpoint">GET /api/v1/admin/waste/category-requests</span></h3>
+      <div class="list-item">
+        <div style="flex:1"><b>إطارات مطاطية</b><div class="muted small">اقترحت مؤسسة النور · بحاجة موافقة</div></div>
+        <button class="btn primary" style="padding:5px 10px" onclick="ui.ok('اعتُمدت الفئة (محاكاة)','PATCH /api/v1/admin/waste/category-requests/:id/approve')">موافقة</button>
+        <button class="btn danger" style="padding:5px 10px" onclick="ui.ok('رُفضت الفئة (محاكاة)','PATCH /api/v1/admin/waste/category-requests/:id/reject')">رفض</button>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+  var lo = document.querySelector('[data-logout-link]');
+  if (lo) lo.addEventListener('click', function (ev) { ev.preventDefault(); API.logout('login.html'); });
+
+  var box = document.querySelector('[data-products-list]');
+  API.get('admin/waste/products').then(function (json) {
+    var list = API.list(json);
+    box.innerHTML = '';
+    if (!list.length) { box.innerHTML = '<tr><td colspan="5" class="muted small">لا توجد منتجات.</td></tr>'; return; }
+    list.forEach(function (p) {
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><b>' + API.esc(p.name || '—') + '</b></td>' +
+        '<td>' + API.esc(p.category_name || (p.category && p.category.name) || '—') + '</td>' +
+        '<td>' + API.esc(p.unit_name || p.unit || '—') + '</td>' +
+        '<td>' + ((p.price != null) ? (+p.price).toLocaleString('en-US') + ' ل.س' : '—') + '</td>' +
+        '<td>' + ((p.pricing_tiers || p.tiers) ? '<span class="badge blue">شرائح</span>' : '<span class="muted small">سعر موحد</span>') + '</td>';
+      box.appendChild(tr);
+    });
+  }).catch(function (e) { box.innerHTML = '<tr><td colspan="5" class="muted small">' + API.esc(e.message || '') + '</td></tr>'; });
+
+  var cat = document.querySelector('[data-categories-list]');
+  API.get('admin/waste/categories').then(function (json) {
+    var list = API.list(json);
+    cat.innerHTML = '';
+    if (!list.length) { cat.innerHTML = '<p class="muted small">لا توجد فئات.</p>'; return; }
+    list.forEach(function (c) {
+      var d = document.createElement('div');
+      d.className = 'list-item';
+      d.innerHTML = '<div style="flex:1"><b>' + API.esc(c.name || '—') + '</b><p class="muted small">' + API.esc(c.description || '') + '</p></div>' +
+        '<span class="badge gray">' + (c.product_count || c.products_count || 0) + ' منتج</span>';
+      cat.appendChild(d);
+    });
+  }).catch(function (e) { cat.innerHTML = '<p class="muted small">' + API.esc(e.message || '') + '</p>'; });
+
+  var off = document.querySelector('[data-offers-list]');
+  API.get('admin/waste/offers').then(function (json) {
+    var list = API.list(json);
+    off.innerHTML = '';
+    if (!list.length) { off.innerHTML = '<p class="muted small">لا توجد عروض.</p>'; return; }
+    list.forEach(function (o) {
+      var d = document.createElement('div');
+      d.className = 'list-item';
+      var amt = o.discount_type === 'PERCENT' ? o.discount_value + '%' : o.discount_value + ' ل.س';
+      d.innerHTML = '<div style="flex:1"><b>' + API.esc(o.name || 'عرض') + '</b>' +
+        '<p class="muted small">' + API.esc(amt) + (o.ends_at ? ' · ينتهي ' + API.esc(o.ends_at.slice(0, 10)) : '') + '</p></div>' +
+        API.badge(o.status || 'ACTIVE');
+      off.appendChild(d);
+    });
+  }).catch(function (e) { off.innerHTML = '<p class="muted small">' + API.esc(e.message || '') + '</p>'; });
+</script>
+</body>
+</html>

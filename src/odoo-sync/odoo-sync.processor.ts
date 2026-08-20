@@ -85,6 +85,7 @@ import {
   DriverDecisionPayload,
   PushDriverRequestPayload,
   PushHandoverPayload,
+  RegisterIntakePayload,
   PushShiftChangePayload,
   PushTruckProblemPayload,
   ShiftChangeDecisionPayload,
@@ -230,6 +231,7 @@ export class OdooSyncProcessor extends WorkerHost {
     [ODOO_JOBS.PUSH_TRUCK_PROBLEM]: (job) => this.pushTruckProblem(job.data as PushTruckProblemPayload),
     [ODOO_JOBS.PUSH_HANDOVER_PICKUP]: (job) => this.pushHandoverPickup(job.data as PushHandoverPayload),
     [ODOO_JOBS.PUSH_HANDOVER_DROPOFF]: (job) => this.pushHandoverDropoff(job.data as PushHandoverPayload),
+    [ODOO_JOBS.REGISTER_INTAKE]: (job) => this.pushRegisterIntake(job.data as RegisterIntakePayload),
     [ODOO_JOBS.APPLY_DRIVER_DECISION]: (job) => this.applyDriverDecision(job.data as DriverDecisionPayload),
     [ODOO_JOBS.APPLY_SHIFT_CHANGE_DECISION]: (job) =>
       this.applyShiftChangeDecision(job.data as ShiftChangeDecisionPayload),
@@ -1049,7 +1051,8 @@ export class OdooSyncProcessor extends WorkerHost {
    * leave it behind and keep quoting a price that no longer exists.
    */
   private async syncDeliveryTariffs() {
-    const rows = await this.odoo.fetchDeliveryTariffs();
+    const rows = (await this.odoo.fetchDeliveryTariffs()) ?? [];
+    if (!rows.length) return;
 
     // Resolve Odoo warehouse ids to backend ids in ONE query rather than one
     // lookup per row.
@@ -1978,6 +1981,24 @@ export class OdooSyncProcessor extends WorkerHost {
       droppedOffAt: this.odooDatetime(h.droppedOffAt),
       dropoffReason: h.dropoffReason ?? null,
       lateMinutes: h.lateDropoffMinutes ?? 0,
+    });
+  }
+
+  /**
+   * Registers a delivered collection request's ACTUAL intake in Odoo. The job
+   * carries everything (the processor owns no collection repos, and the payload
+   * already has the Odoo ids resolved) — idempotent on the request id.
+   */
+  private async pushRegisterIntake(payload: RegisterIntakePayload) {
+    await this.odoo.registerIntake({
+      request_id: payload.requestId,
+      warehouse_odoo_id: payload.odooWarehouseId ?? null,
+      producer_name: payload.producerName ?? null,
+      received_at: payload.receivedAt ?? null,
+      lines: payload.lines.map((l) => ({
+        product_odoo_id: l.odooProductId ?? null,
+        quantity: l.quantity,
+      })),
     });
   }
 

@@ -45,6 +45,7 @@ import { MaintenanceModule } from './maintenance/maintenance.module';
 import { ReportsModule } from './reports/reports.module';
 import { ShiftModule } from './shift/shift.module';
 import { ContentModule } from './content/content.module';
+import { CollectionRequestModule } from './collection-request/collection-request.module';
 
 
 
@@ -57,7 +58,7 @@ import { ContentModule } from './content/content.module';
       fallbackLanguage: 'en',
       loaderOptions: {
         path: path.join(__dirname, '/i18n/'),
-        watch: true,
+        watch: false,
       },
       resolvers: [
         new HeaderResolver(['x-lang', 'lang']),
@@ -108,7 +109,8 @@ import { ContentModule } from './content/content.module';
     ReportsModule,
     ShiftModule,
     ContentModule,
-    PointsWalletModule
+    PointsWalletModule,
+    CollectionRequestModule
   ],
   controllers: [AppController],
   providers: [

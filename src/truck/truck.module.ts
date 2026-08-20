@@ -48,11 +48,11 @@ import { TruckTrackingController } from './tracking/truck-tracking.controller';
   // decides in Odoo — submit / list mine / cancel-while-pending) and
   // truck-problem reports (read-only for the manager in Odoo).
   controllers: [
+    TruckTrackingController,
     TruckController,
     DriverController,
     ShiftChangeRequestController,
     TruckProblemController,
-    TruckTrackingController,
   ],
   providers: [
     TruckService,
@@ -63,5 +63,6 @@ import { TruckTrackingController } from './tracking/truck-tracking.controller';
     TruckTrackingService,
     TruckTrackingGateway,
   ],
+  exports: [HandoverService],
 })
 export class TruckModule {}

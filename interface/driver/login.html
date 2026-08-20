@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>دخول السائق — تطبيق السائقين</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="driver">
+<div class="auth-wrap driver">
+  <div class="auth-card">
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="auth-title">دخول السائق</div>
+    <div class="auth-sub">تطبيق السائقين (COLLECTOR)</div>
+
+    <form id="loginForm">
+      <div class="field">
+        <label>البريد الإلكتروني</label>
+        <input name="email" type="email" required placeholder="driver@example.com" value="driver.flow@dawrha.com">
+      </div>
+      <div class="field">
+        <label>كلمة المرور</label>
+        <input name="password" type="password" required value="Driver@123">
+      </div>
+      <div class="field">
+        <label>دخول Google</label>
+        <button type="button" class="btn ghost block" onclick="ui.ok('فتح نافذة Google OAuth (محاكاة)','POST /api/v1/auth/login/collector-app/google')">G دخول بحساب Google</button>
+      </div>
+      <button class="btn driver block" type="submit">دخول</button>
+    </form>
+
+    <div class="row mt-16">
+      <a href="onboarding.html" class="small" style="color:var(--driver); font-weight:600">سائق جديد؟ أكمل ملفك</a>
+    </div>
+    <div class="row mt-16" style="justify-content:center">
+      <a class="chip" href="../user/login.html">تطبيق المستخدم</a>
+      <a class="chip" href="../admin/login.html">تطبيق الأدمن</a>
+      <a class="chip" href="../index.html">الفهرس</a>
+    </div>
+  </div>
+</div>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  /* الربط الحقيقي: POST /api/v1/auth/login/collector-app */
+  document.getElementById('loginForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var btn = this.querySelector('[type="submit"]');
+    btn.disabled = true;
+    API.login('login/collector-app', { email: this.email.value, password: this.password.value }, {
+      home: 'home.html',
+      otp: 'otp.html',
+      profile: 'onboarding.html',   /* PENDING_PROFILE → أكمل الملف */
+      waiting: 'onboarding.html?view=waiting' /* PENDING_APPROVAL / NEED_CHANGES */
+    }).finally(function () { btn.disabled = false; });
+  });
+</script>
+</body>
+</html>

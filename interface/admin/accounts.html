@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الحسابات — الأدمن</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="admin">
+<div class="admin-shell">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="dot" style="width:28px;height:28px;border-radius:8px;background:var(--admin-accent);color:#1e293b;display:grid;place-items:center;font-size:14px">د</span> دورها — أدمن</div>
+    <nav>
+      <a href="dashboard.html">📊 لوحة التحكم</a>
+      <a href="accounts.html" class="active">👥 الحسابات</a>
+      <a href="requests.html">🚚 طلبات الجمع</a>
+      <a href="fleet.html">🛻 الأسطول والورديات</a>
+      <a href="catalog.html">🗂️ الكتالوج والتسعير</a>
+      <a href="reports.html">📈 التقارير</a>
+      <a href="login.html" data-logout-link>↩ خروج</a>
+    </nav>
+  </aside>
+
+  <main class="admin-content">
+    <div class="admin-header">
+      <div class="row">
+        <button class="btn sidebar-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <h1>إدارة الحسابات</h1>
+      </div>
+      <div class="row">
+        <select id="filterRole" style="padding:8px; border:1px solid var(--line); border-radius:8px">
+          <option value="">كل الأدوار</option>
+          <option>FACTORY</option>
+          <option>INSTITUTIONS</option>
+          <option>EXTERNAL_PARTNER</option>
+          <option>CITIZEN</option>
+        </select>
+        <select id="filterAccStatus" style="padding:8px; border:1px solid var(--line); border-radius:8px">
+          <option value="">كل الحالات</option>
+          <option>PENDING_APPROVAL</option>
+          <option>ACTIVE</option>
+          <option>REJECTED</option>
+          <option>BLOCKED</option>
+        </select>
+        <button class="btn admin" data-filter>تصفية</button>
+      </div>
+    </div>
+
+    <div class="card" style="border:2px solid var(--warn); background:#fffbeb">
+      <b>⚠️ السائقون (COLLECTOR) لا يُدارون هنا</b>
+      <p class="muted small mt-8">رفضت المنصة محاولة تغيير حالة سائق: <span class="endpoint">400 DRIVER_MANAGED_IN_ODOO</span> — القبول/الرفض/الحظر يتم من شاشة Odoo، وتصل القرارات عبر webhook</p>
+      <div class="statusbar mt-8">POST /api/v1/odoo/webhooks/driver-decision { backend_driver_id, approved } → الرد 202 queued</div>
+    </div>
+
+    <div class="card">
+      <div class="row between" style="margin-bottom:10px">
+        <h3 style="margin:0">حسابات للمراجعة <span class="endpoint">GET /api/v1/account-management/accounts?role&status</span></h3>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <tr><th>الاسم</th><th>النوع</th><th>الحالة</th><th>إجراء</th></tr>
+          <tbody data-accounts-list>
+            <tr><td colspan="4" class="muted small">جارٍ التحميل…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="field mt-8" style="max-width:640px">
+        <label>عرض وثائق حساب (profileId)</label>
+        <div class="row">
+          <input id="profileIdInput" style="flex:1; padding:10px; border:1px solid var(--line); border-radius:10px" placeholder="معرف الملف الشخصي">
+          <button class="btn" data-view-media>عرض الوثائق</button>
+        </div>
+        <div data-media-panel class="mt-8"></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+  var lo = document.querySelector('[data-logout-link]');
+  if (lo) lo.addEventListener('click', function (ev) { ev.preventDefault(); API.logout('login.html'); });
+
+  function renderAccounts() {
+    var box = document.querySelector('[data-accounts-list]');
+    var role = document.getElementById('filterRole').value;
+    var st = document.getElementById('filterAccStatus').value;
+    var qs = ['limit=50'];
+    if (role) qs.push('role=' + role);
+    if (st) qs.push('status=' + st);
+    box.innerHTML = '<tr><td colspan="4" class="muted small">جارٍ التحميل…</td></tr>';
+    API.get('account-management/accounts?' + qs.join('&')).then(function (json) {
+      var list = API.list(json);
+      box.innerHTML = '';
+      if (!list.length) {
+        box.innerHTML = '<tr><td colspan="4" class="muted small">لا توجد حسابات.</td></tr>';
+        return;
+      }
+      list.forEach(function (a) {
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td><b>' + API.esc(a.full_name || a.company_name || a.name || '—') + '</b></td>' +
+          '<td>' + API.esc(a.role || '—') + '</td>' +
+          '<td>' + API.badge(a.status || '—') + '</td>' +
+          '<td>' +
+          '<button class="btn primary" style="padding:5px 10px" data-ap="' + a.id + '">اعتماد</button> ' +
+          '<button class="btn danger" style="padding:5px 10px" data-rj="' + a.id + '">رفض</button> ' +
+          '<button class="btn" style="padding:5px 10px" data-bk="' + a.id + '">حظر/فك</button>' +
+          '</td>';
+        tr.querySelector('[data-ap]').addEventListener('click', function () {
+          API.patch('account-management/' + a.id + '/status', { status: 'ACTIVE' })
+            .then(function () { ui.ok('اعتُمد الحساب'); renderAccounts(); })
+            .catch(function (e) { ui.err(e.message || 'فشل الاعتماد'); });
+        });
+        tr.querySelector('[data-rj]').addEventListener('click', function () {
+          var desc = prompt('سبب الرفض (اختياري):') || undefined;
+          API.patch('account-management/' + a.id + '/status', { status: 'REJECTED', description: desc })
+            .then(function () { ui.ok('رُفض الحساب'); renderAccounts(); })
+            .catch(function (e) { ui.err(e.message || 'فشل الرفض'); });
+        });
+        tr.querySelector('[data-bk]').addEventListener('click', function () {
+          var target = a.status === 'BLOCKED' ? 'ACTIVE' : 'BLOCKED';
+          var reason = target === 'BLOCKED' ? (prompt('سبب الحظر:') || '') : undefined;
+          API.patch('account-management/' + a.id + '/block-status', { status: target, reason: reason })
+            .then(function () { ui.ok(target === 'BLOCKED' ? 'حُظر الحساب' : 'فُك الحظر'); renderAccounts(); })
+            .catch(function (e) { ui.err(e.message || 'فشل العملية'); });
+        });
+        box.appendChild(tr);
+      });
+    }).catch(function (e) {
+      box.innerHTML = '<tr><td colspan="4" class="muted small">' + API.esc(e.message || 'تعذر التحميل') + '</td></tr>';
+    });
+  }
+  renderAccounts();
+  document.querySelector('[data-filter]').addEventListener('click', renderAccounts);
+
+  /* عرض الوثائق + قبول/رفض وسائط */
+  var mp = document.querySelector('[data-media-panel]');
+  document.querySelector('[data-view-media]').addEventListener('click', function () {
+    var pid = document.getElementById('profileIdInput').value.trim();
+    if (!pid) return ui.err('أدخل المعرف');
+    mp.innerHTML = '<p class="muted small">جارٍ التحميل…</p>';
+    API.get('account-management/' + pid + '/media').then(function (json) {
+      var list = API.list(json);
+      mp.innerHTML = '';
+      if (!list.length) { mp.innerHTML = '<p class="muted small">لا توجد وثائق.</p>'; return; }
+      list.forEach(function (m) {
+        var d = document.createElement('div');
+        d.className = 'list-item';
+        d.innerHTML = '<div style="flex:1"><b>' + API.esc(m.file_type || m.type || '—') + '</b>' +
+          '<p class="muted small">' + API.esc(m.url || '') + '</p></div>' + API.badge(m.status || 'PENDING') +
+          '<button class="btn primary" style="padding:5px 10px" data-mok="' + m.id + '">قبول</button> ' +
+          '<button class="btn danger" style="padding:5px 10px" data-mno="' + m.id + '">رفض</button>';
+        d.querySelector('[data-mok]').addEventListener('click', function () {
+          API.patch('account-management/media/' + m.id + '/status', { status: 'APPROVED' })
+            .then(function () { ui.ok('قُبلت الوثيقة'); renderAccounts(); })
+            .catch(function (e) { ui.err(e.message || 'فشل'); });
+        });
+        d.querySelector('[data-mno]').addEventListener('click', function () {
+          API.patch('account-management/media/' + m.id + '/status', { status: 'REJECTED' })
+            .then(function () { ui.ok('رُفضت الوثيقة'); renderAccounts(); })
+            .catch(function (e) { ui.err(e.message || 'فشل'); });
+        });
+        mp.appendChild(d);
+      });
+    }).catch(function (e) { mp.innerHTML = '<p class="muted small">' + API.esc(e.message || '') + '</p>'; });
+  });
+</script>
+</body>
+</html>

@@ -30,13 +30,15 @@ describe('TruckTrackingGateway', () => {
     tracking = {
       hasActiveHandover: jest.fn(),
       isDriverOfTruck: jest.fn(),
-      saveLocation: jest.fn(async (dto: any, driverId: string) => ({ ...dto, driverId })),
+      saveLocation: jest.fn((dto: any, driverId: string) => ({ ...dto, driverId })),
       finalizeStop: jest.fn().mockResolvedValue({ id: 'log1' }),
       getLocation: jest.fn(),
       getActiveTrucks: jest.fn(),
     };
-    gateway = new TruckTrackingGateway(tracking, {} as any, {} as any, {} as any);
+    const emitter = { emit: jest.fn() };
+    gateway = new TruckTrackingGateway(tracking, {} as any, {} as any, {} as any, emitter as any);
     (gateway as any).server = mkServer();
+    (gateway as any).eventEmitter = emitter;
   });
 
   it('rejects a location when the driver has NOT picked up the truck', async () => {

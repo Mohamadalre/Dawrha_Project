@@ -90,6 +90,60 @@ export class PointsWalletService {
   }
 
   /**
+   * Reward a DELIVERED collection request: the producer's material was
+   * actually collected and weighed, so their wallet earns on the actual value
+   * (the estimate when the actual is not yet recorded).
+   *
+   * Same conversion as an order (`points = floor(value / amountPerPoint)` at the
+   * producer's role rate) but with its own notification copy. Best-effort like
+   * the rest: a points hiccup never fails the delivery that triggered it.
+   */
+  async awardForCollection(
+    accountId: string,
+    role: Role,
+    value: number,
+    requestNumber?: string,
+  ): Promise<{ points: number; balance: number } | null> {
+    try {
+      const rate = await this.rates.forRole(role);
+      if (!rate) return null;
+      const per = Number(rate.amountPerPoint);
+      if (!(per > 0) || !(value > 0)) return null;
+
+      const points = Math.floor(value / per);
+      if (points <= 0) return { points: 0, balance: (await this.view(accountId, role)).points };
+
+      const wallet = await this.ensureForAccount(accountId, role);
+      if (!wallet) return null;
+      wallet.points += points;
+      await this.walletRepo.save(wallet);
+
+      await this.notifications
+        .createNotification({
+          userId: accountId,
+          type: NotificationType.GENERAL,
+          title: `You earned ${points} point(s)`,
+          body: `You have been gifted ${points} point(s) in your wallet for collection request ${requestNumber ?? ''}.`,
+          titleKey: 'notifications.collectionPointsEarned.title',
+          bodyKey: 'notifications.collectionPointsEarned.body',
+          args: { points, request: requestNumber ?? '' },
+        })
+        .catch((e) =>
+          this.logger.warn(
+            `Points credited but the notification was not queued for ${accountId}: ${e instanceof Error ? e.message : e}`,
+          ),
+        );
+
+      return { points, balance: wallet.points };
+    } catch (e) {
+      this.logger.warn(
+        `Could not award points for ${accountId}: ${e instanceof Error ? e.message : e}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Make sure an eligible account has a wallet, creating an empty one if not.
    *
    * Idempotent and safe to call from every activation path (admin approval, OTP

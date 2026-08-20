@@ -1,9 +1,9 @@
 # PROJECT_CONTEXT — Dawrha Backend (ملف إعادة الدخول الشامل)
 
 > **اقرأ هذا الملف وحده في بداية أي جلسة** بدل إعادة قراءة ملفات المشروع.
-> المرافقان: **API_REFERENCE.md** (توصيف كل endpoint: يأخذ/يرجع/السيناريو) · **FIXES.md** (سجل كل جولة إصلاح #1–67+ مرقّمة) · **ORDERS_DESIGN.md** (تصميم الطلبيات — لم يُنفَّذ).
-> آخر تحديث: 2026-07-24 · Stack: NestJS 11 + TS 5.7 + PostgreSQL/TypeORM + Redis/ioredis + BullMQ + Socket.IO + Firebase + Cloudinary + **Odoo (addon مخصص `recycle_warehouse`)**.
-> **آخر جولة (2026-07-24):** نطاق الوردية — `shifts.isGlobal`+`odooWarehouseIds` (هجرة `1784700000000`)؛ onboarding يعرض الورديات العامة فقط؛ تغيير الوردية = عامة أو مستودع السائق. تفاصيل: FIXES #88–91.
+> المرافقون: **API_REFERENCE.md** (توصيف كل endpoint) · **API_USER_APP.md / API_DRIVER_APP.md / API_ADMIN_APP.md** (واجهات كل تطبيق) · **ROOMS_SESSIONS.md** (غرف/جلسات كل مستخدم) · **SESSIONS_GUIDE.md** (شرح الجلسات الكامل) · **FIXES.md** (سجل كل جولة إصلاح) · **ORDERS_DESIGN.md** (تصميم الطلبيات — لم يُنفَّذ).
+> آخر تحديث: 2026-08-17 · Stack: NestJS 11 + TS 5.7 + PostgreSQL/TypeORM + Redis/ioredis + BullMQ + Socket.IO + Firebase + Cloudinary + **Odoo (addon مخصص `recycle_warehouse`)**.
+> **آخر جولة (2026-08-17):** منظومة الجمع (Collection) — سبرينت 1–4 كاملة: الطلبات/الإسناد/الخطط/التنفيذ/نقاط التغطية/التقارير + واجهة الأدمن (§14–18). تفاصيل: FIXES #147–155 · تصميم: `COLLECTION_DESIGN.md` · عقد الـ API: `COLLECTION_API.md` + أقسام API_REFERENCE.
 
 ## 0. تشغيل وتحقق
 
@@ -45,6 +45,7 @@
 | Warehouse | إنشاء (backend→Odoo، مع governorate)، استيراد، جرد **مجمّعاً بالحالات**، sync، `truck_count` |
 | Odoo / OdooSync | عميل JSON-RPC وحيد (جلسة مكاشة Redis 25د + timeout 10s) · طابور `waste-odoo-sync` (handler-map) + **كل الـ webhooks** |
 | Reports / Maintenance | إحصائيات الأدمن (`overview/accounts/trucks/drivers/warehouses/catalog` — `drivers` أُضيف 2026-07-20) · كرونات تنظيف بالـ worker فقط |
+| collection-request | منظومة الجمع (التصميم: `COLLECTION_DESIGN.md`): طلبات المواطنين/المنشآت (`product_id+quantity+lines` — **بلا سلة**، المحطة = request على route) · **محرك توزيع** بستة أوزان + مرشّحات أهليّة + عرض→قبول/رفض→route · دمج طرق قريب + إعادة elect عند الرفض/الانتهاء + NEEDS_ADMIN | **الأدمن**: سجلّ+إسناد يدوي+إلغاء · نقاط تغطية CRUD · `dispatch-config` (صف singleton، يضبط rebalance الدوري) · تقارير (يومي/طلبات/طرق) | **السائق**: قبول/رفض العرض · جولته · arrive/weigh/deliver (طوابع + `REGISTER_INTAKE`→Odoo + نقاط جمع) · مبدّل وردية المناوبة (كرون) | المتجر: جداول `collection_*` |
 
 ## 3. مخطط قاعدة البيانات (سطر لكل جدول — SnakeNaming)
 
@@ -52,6 +53,7 @@
 **السوق**: `waste_categories` (odooCategoryId) · `products` (unitType code, odooProductId) · `measurement_units` (**ديناميكية**: code, is_weight, **allows_tolerance**, odooUnitId) · `material_conditions` (**ديناميكية**: code, sort_order, odooConditionId) · `product_pricing`(+`_history`) (tier + **condition_code** null للفردي/المؤسسات) · `offers` (**condition_code + target_roles[]** null=للجميع) · `carts`+`cart_items` (snapshot سعر/وحدة/**condition_code**) · `product_suggestions` · `category_requests` · `audit_logs`.
 **المستودعات**: `warehouses` (odooWarehouseId, zones jsonb, **governorate**) · `warehouse_inventory` (**صف لكل مستودع+منتج+حالة**؛ UQ ثلاثي؛ UNGRADED=غير مفروز) · `warehouse_managers` · `collector_profiles.warehouse_id` (مستودع السائق، مرآة من قرار أودو — 2026-07-21).
 **الأسطول (مرآة Odoo)**: `trucks` (odooTruckId UQ, **warehouse_id FK**) · `shifts` (odooShiftId, **odooWarehouseId, tolerance**) · `truck_assignments` (odooAssignmentId; UQ truck+shift; 1:1 سائق) · `shift_change_requests` (odooRequestId, **reason**, truck_id nullable — يملؤه المدير عند القبول) · `truck_problems` (odooProblemId, driver, reason, images jsonb) · `truck_handovers` (**استلام/تسليم**: driver+shift+workDate فريد، pickedUpAt/droppedOffAt/dropoffReason/lateDropoffMinutes/status، حارسا إشعار) · `truck_location_logs`.
+**الجمع**: `collection_requests` (requestNumber تسلسلي يومي، type IMMEDIATE/SCHEDULED/PLAN، حالة، product خطوط `collection_request_lines`، إحداثيات نصية، تقديرات/فعليات، routeId+routeSequence — المحطة = الطلب) · `collection_routes` (routeNumber تسلسلي يومي، driverId، حالة PLANNED→COMPLETED، طوابع) · `collection_request_assignments` (سجلّ عرض كل سائق: OFFERED/ACCEPTED/REJECTED/EXPIRED + score + offerExpiresAt) · `collection_plans` (+ `_items`) للطلب المجدول المنشأ من الخطة (نافذة tolerance) · `coverage_points` (نقاط الركن: type SCHOOL/MARKET/HOSPITAL/GENERAL، إحداثيات، radius، priority، is_active — الحذف soft) · `driver_coverage_assignments` (من يقف أين + is_active) · `dispatch_config` (صف singleton: أوزان الستة، acceptWindowSec، scheduledLeadMin، routeMergeMax{Min,Km}، institutionToleranceMin، rebalanceMin، is_enabled).
 
 ## 4. تكامل Odoo — القلب (اتجاهان، كتابة عبر الطابور حصراً)
 
@@ -89,7 +91,7 @@ Strategy لحالات الدخول · Odoo write=طابور فقط + تعويض 
 
 ## 8. الحالة + المعلّق
 
-- **منجز ومختبر**: كل ما سبق (154 unit + 6 تكامل، tsc نظيف).
+- **منجز ومختبر**: كل ما سبق + منظومة الجمع (97 suites / **993 tests** + tsc/eslint نظيفان).
 - **غير منفَّذ**: منظومة الطلبيات (التصميم كامل في ORDERS_DESIGN.md — 4 sprints؛ "الأكثر استخداماً" ينتظر `order_items`).
 - **بانتظار قرار المستخدم**: مجلد `db/migartions/` المكرر بخطأ إملائي (لا يُلمس) · تنظيف typing في onboarding (`dto:any` + typo `acccountRepo`) · تحويل استثناءات onboarding/institution للنمط المسمى.
-- **الخطوة القادمة المعلنة**: المستخدم سيسلّم **مشروع Odoo** لتنفيذ الـ addon حسب عقد §4.
+- **الخطوة القادمة المعلنة**: المستخدم سيسلّم **مشروع Odoo** لتنفيذ الـ addon حسب عقد §4 (يشمل عقود `recycle.collection.request/backend_register_intake`).

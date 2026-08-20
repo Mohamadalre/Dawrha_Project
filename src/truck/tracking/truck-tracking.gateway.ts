@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import {
   ConnectedSocket,
@@ -54,6 +55,7 @@ export class TruckTrackingGateway
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly redisService: RedisService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -153,6 +155,19 @@ export class TruckTrackingGateway
     const stored = await this.tracking.saveLocation(dto, user.id);
     this.server.to(this.room(dto.truckId)).emit('truck:location', stored);
     this.server.to('admins').emit('truck:location', stored);
+
+    // The dispatch engine listens for this and re-elects the oldest queued
+    // request (throttled per driver) so a driver's fresh position reaches the
+    // scores without anyone polling Redis.
+    if (user.role === Role.COLLECTOR) {
+      this.eventEmitter.emit('truck.location.updated', {
+        truckId: dto.truckId,
+        driverId: user.id,
+        lat: dto.lat,
+        lng: dto.lng,
+        heading: dto.heading,
+      });
+    }
     return { status: 'ok' };
   }
 

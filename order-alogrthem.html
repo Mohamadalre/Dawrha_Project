@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام التدوير — تصميم الطلب والثوابت والفرز والمعايير</title>
+<style>
+  :root{
+    --bg:#0b1220; --bg-2:#0f172a; --bg-3:#111c33;
+    --card:#131d33; --card-2:#182442;
+    --border:#233352; --border-2:#2d4066;
+    --txt:#e8eefc; --muted:#8fa3c8; --faint:#5f7398;
+    --green:#22c55e; --green-bg:rgba(34,197,94,.12);
+    --blue:#38bdf8; --blue-bg:rgba(56,189,248,.12);
+    --amber:#f59e0b; --amber-bg:rgba(245,158,11,.12);
+    --red:#ef4444; --red-bg:rgba(239,68,68,.12);
+    --purple:#a78bfa; --purple-bg:rgba(167,139,250,.12);
+    --teal:#2dd4bf; --teal-bg:rgba(45,212,191,.12);
+    --pink:#f472b6; --pink-bg:rgba(244,114,182,.12);
+    --radius:14px; --shadow:0 8px 28px rgba(0,0,0,.35);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--bg); color:var(--txt);
+    font-family:"Segoe UI","Tajawal","Cairo",Tahoma,Arial,sans-serif;
+    min-height:100vh;
+  }
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-track{background:var(--bg-2)}
+  ::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:8px}
+  ::-webkit-scrollbar-thumb:hover{background:#3b5480}
+
+  /* ===== Layout ===== */
+  .layout{display:flex;min-height:100vh}
+  .sidebar{
+    width:240px;background:var(--bg-2);border-inline-start:1px solid var(--border);
+    padding:20px 14px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:6px;
+  }
+  .brand{display:flex;align-items:center;gap:10px;padding:6px 8px 20px}
+  .brand .logo{
+    width:40px;height:40px;border-radius:11px;flex-shrink:0;
+    background:linear-gradient(135deg,var(--green),var(--teal));
+    display:grid;place-items:center;font-size:20px;color:#04120a;font-weight:800;
+  }
+  .brand h1{font-size:14.5px;line-height:1.35}
+  .brand small{color:var(--faint);font-size:11px}
+  .nav-item{
+    display:flex;align-items:center;gap:11px;padding:11px 13px;border-radius:10px;
+    color:var(--muted);cursor:pointer;font-size:13.5px;font-weight:600;
+    border:1px solid transparent;transition:.18s;user-select:none;
+  }
+  .nav-item:hover{background:var(--bg-3);color:var(--txt)}
+  .nav-item.active{background:linear-gradient(135deg,var(--green-bg),var(--teal-bg));border-color:rgba(45,212,191,.35);color:#7ff0dd}
+  .nav-item .ico{font-size:16px;width:22px;text-align:center}
+  .nav-hint{margin-top:auto;background:var(--bg-3);border:1px dashed var(--border-2);border-radius:11px;padding:12px;font-size:11px;color:var(--faint);line-height:1.7}
+  .main{flex:1;padding:26px 30px;max-width:1320px;margin:0 auto;width:100%}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+  .topbar h2{font-size:20px;font-weight:800}
+  .topbar p{color:var(--muted);font-size:12.5px;margin-top:3px}
+  .topbar .date-badge{background:var(--bg-3);border:1px solid var(--border);padding:8px 14px;border-radius:9px;font-size:12px;color:var(--muted)}
+
+  /* ===== Cards ===== */
+  section{display:none;animation:fade .3s ease}
+  section.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .grid{display:grid;gap:16px}
+  .g-2{grid-template-columns:repeat(2,1fr)}
+  .g-3{grid-template-columns:repeat(3,1fr)}
+  .g-4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:1080px){.g-4,.g-3{grid-template-columns:repeat(2,1fr)}.g-2{grid-template-columns:1fr}}
+  @media(max-width:720px){.g-4,.g-3{grid-template-columns:1fr}.sidebar{display:none}}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow)}
+  .card-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px}
+  .card-title h3{font-size:15px;font-weight:800;display:flex;align-items:center;gap:9px}
+  .card-title .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:99px;font-size:11.5px;font-weight:700}
+  .b-green{background:var(--green-bg);color:var(--green);border:1px solid rgba(34,197,94,.3)}
+  .b-blue{background:var(--blue-bg);color:var(--blue);border:1px solid rgba(56,189,248,.3)}
+  .b-amber{background:var(--amber-bg);color:var(--amber);border:1px solid rgba(245,158,11,.3)}
+  .b-red{background:var(--red-bg);color:var(--red);border:1px solid rgba(239,68,68,.3)}
+  .b-purple{background:var(--purple-bg);color:var(--purple);border:1px solid rgba(167,139,250,.3)}
+  .b-teal{background:var(--teal-bg);color:var(--teal);border:1px solid rgba(45,212,191,.3)}
+  .b-pink{background:var(--pink-bg);color:var(--pink);border:1px solid rgba(244,114,182,.3)}
+  .b-gray{background:#22304e;color:var(--muted);border:1px solid var(--border-2)}
+
+  /* ===== Order Timeline ===== */
+  .timeline{display:flex;flex-direction:column;gap:0;position:relative}
+  .step{display:flex;gap:13px;position:relative;padding-bottom:14px}
+  .step::before{content:"";position:absolute;top:30px;bottom:0;right:13px;width:2px;background:var(--border-2)}
+  .step:last-child::before{display:none}
+  .step .node{
+    width:28px;height:28px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;
+    background:var(--bg-3);border:2px solid var(--border-2);color:var(--faint);font-size:12px;z-index:1;
+  }
+  .step.done .node{background:var(--green-bg);border-color:var(--green);color:var(--green)}
+  .step.now .node{background:var(--amber-bg);border-color:var(--amber);color:var(--amber);box-shadow:0 0 0 5px rgba(245,158,11,.12);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(245,158,11,.14)}50%{box-shadow:0 0 0 9px rgba(245,158,11,.05)}}
+  .step .st-body{flex:1;padding-top:4px}
+  .step .st-title{font-size:13px;font-weight:700}
+  .step:not(.done):not(.now) .st-title{color:var(--faint)}
+  .step .st-time{font-size:11px;color:var(--faint);margin-top:2px}
+
+  /* ===== Table ===== */
+  .tbl-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px}
+  table{width:100%;border-collapse:collapse;font-size:12.8px;min-width:640px}
+  th{background:var(--bg-3);color:var(--muted);text-align:right;padding:11px 14px;font-size:11.5px;letter-spacing:.3px;white-space:nowrap;border-bottom:1px solid var(--border)}
+  td{padding:11px 14px;border-bottom:1px solid var(--border);color:var(--txt)}
+  tr:last-child td{border-bottom:none}
+  tr:hover td{background:rgba(56,189,248,.04)}
+  .mono{direction:ltr;font-family:Consolas,monospace;font-size:12px;color:var(--teal)}
+
+  /* ===== Score Bar ===== */
+  .score-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px dashed var(--border)}
+  .score-row:last-child{border-bottom:none}
+  .score-name{width:150px;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .score-bar{flex:1;height:9px;background:var(--bg-3);border-radius:99px;overflow:hidden}
+  .score-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#0ea5e9,#22c55e);transition:width .6s ease}
+  .score-val{width:44px;text-align:center;font-weight:800;font-size:13px}
+  .crown{color:var(--amber)}
+
+  /* ===== Forms ===== */
+  .form-grid{display:grid;gap:14px;grid-template-columns:1fr 1fr}
+  @media(max-width:720px){.form-grid{grid-template-columns:1fr}}
+  .field label{display:block;font-size:12px;color:var(--muted);font-weight:700;margin-bottom:6px}
+  .field select,.field input,.field textarea{
+    width:100%;background:var(--bg-3);border:1px solid var(--border-2);color:var(--txt);
+    padding:10px 12px;border-radius:9px;font-size:13px;font-family:inherit;outline:none;transition:.15s;
+  }
+  .field select:focus,.field input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(56,189,248,.15)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{
+    padding:7px 13px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;
+    background:var(--bg-3);border:1px solid var(--border-2);color:var(--muted);transition:.15s;user-select:none;
+  }
+  .chip.on{background:var(--blue-bg);border-color:var(--blue);color:var(--blue)}
+  .btn{
+    padding:10px 20px;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;border:none;
+    transition:.15s;font-family:inherit;display:inline-flex;align-items:center;gap:8px;
+  }
+  .btn-primary{background:linear-gradient(135deg,#0ea5e9,#22c55e);color:#04120a;box-shadow:0 4px 16px rgba(34,197,94,.25)}
+  .btn-primary:hover{filter:brightness(1.12)}
+  .btn-ghost{background:var(--bg-3);border:1px solid var(--border-2);color:var(--muted)}
+  .btn-ghost:hover{color:var(--txt);border-color:var(--blue)}
+
+  /* ===== Slider ===== */
+  .w-row{display:flex;align-items:center;gap:14px;padding:13px 0;border-bottom:1px dashed var(--border)}
+  .w-row:last-child{border-bottom:none}
+  .w-info{flex:1}
+  .w-info .w-name{font-size:13.5px;font-weight:800}
+  .w-info .w-desc{font-size:11.5px;color:var(--faint);margin-top:3px;line-height:1.6}
+  .w-val{width:52px;text-align:center;background:var(--bg-3);border:1px solid var(--border-2);border-radius:8px;padding:7px 0;font-weight:800;font-size:13px;color:var(--blue)}
+  input[type=range]{-webkit-appearance:none;width:180px;height:6px;border-radius:99px;background:linear-gradient(90deg,#0ea5e9,var(--bg-3));outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;background:#38bdf8;border:3px solid #0b1220;cursor:pointer;box-shadow:0 0 0 2px rgba(56,189,248,.4)}
+
+  /* ===== Stat ===== */
+  .stat{display:flex;align-items:center;gap:13px;padding:15px;background:var(--bg-3);border:1px solid var(--border);border-radius:12px}
+  .stat .s-ico{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;font-size:19px;flex-shrink:0}
+  .stat .s-num{font-size:20px;font-weight:800}
+  .stat .s-lbl{font-size:11.5px;color:var(--muted);margin-top:2px}
+
+  /* ===== Formula ===== */
+  .formula{
+    background:var(--bg-3);border:1px solid var(--border);border-radius:12px;padding:18px;
+    font-family:Consolas,monospace;direction:ltr;text-align:center;font-size:16px;color:#7ff0dd;letter-spacing:.5px;overflow-x:auto;white-space:nowrap;
+  }
+  .formula small{display:block;margin-top:8px;color:var(--faint);font-size:11px;text-align:center;font-family:"Segoe UI",Tahoma,sans-serif;direction:rtl}
+  .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+  .kv .item{background:var(--bg-3);border:1px solid var(--border);border-radius:10px;padding:11px 13px}
+  .kv .k{font-size:11px;color:var(--faint)}
+  .kv .v{font-size:13.5px;font-weight:700;margin-top:4px}
+  .route-flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:14px;background:var(--bg-3);border:1px solid var(--border);border-radius:12px;margin-top:14px}
+  .route-stop{background:var(--card-2);border:1px solid var(--border-2);border-radius:9px;padding:7px 12px;font-size:12px;font-weight:700;display:flex;align-items:center;gap:7px}
+  .route-stop .t{color:var(--faint);font-size:10px;font-weight:600}
+  .route-stop.org{border-color:rgba(167,139,250,.4)}
+  .route-arrow{color:var(--faint);font-size:13px}
+  .route-stop .d{color:var(--amber);font-size:10px}
+  .kpi-note{font-size:11.5px;color:var(--faint);margin-top:10px;line-height:1.8}
+  .flash{animation:flashIn .5s ease}
+  @keyframes flashIn{0%{background:rgba(56,189,248,.25)}100%{background:transparent}}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:12px}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .hint-alert{background:var(--amber-bg);border:1px solid rgba(245,158,11,.3);color:var(--amber);font-size:12px;padding:11px 14px;border-radius:10px;line-height:1.7}
+  .hint-ok{background:var(--green-bg);border:1px solid rgba(34,197,94,.3);color:var(--green);font-size:12px;padding:11px 14px;border-radius:10px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">♻</div>
+      <div>
+        <h1>نظام التدوير الذكي</h1>
+        <small>تصميم — الطلب والثوابت والفرز</small>
+      </div>
+    </div>
+    <div class="nav-item active" data-tab="tab-order"><span class="ico">📦</span>الطلب</div>
+    <div class="nav-item" data-tab="tab-constants"><span class="ico">⚙️</span>ثوابت الطلب</div>
+    <div class="nav-item" data-tab="tab-sort"><span class="ico">🧮</span>الفرز / الإسناد</div>
+    <div class="nav-item" data-tab="tab-criteria"><span class="ico">🎯</span>معايير الفرز</div>
+    <div class="nav-hint">
+      نموذج تصميمي لعرض سيناريو الطلب: من الإنشاء ← قائمة الانتظار ← الفرز بالسكور ← المسار ← التغطية، مع الثوابت والمعايير القابلة للضبط.
+    </div>
+  </aside>
+
+  <!-- ================= MAIN ================= -->
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h2>تصميم واجهات: دورة الطلب الكاملة</h2>
+        <p>عرض تفاعلي لـ: الطلب ← ثوابته ← معايير الفرز ← النتيجة النهائية (سكور السائقين)</p>
+      </div>
+      <span class="date-badge">📅 15 أغسطس 2026 · نسخة تصميم v1.0</span>
+    </div>
+
+    <!-- ============ 1) الطلب ============ -->
+    <section id="tab-order" class="active">
+      <div class="grid g-2" style="grid-template-columns:1.1fr .9fr">
+        <!-- إنشاء طلب -->
+        <div class="card">
+          <div class="card-title">
+            <h3><span class="dot" style="background:var(--blue)"></span>إنشاء طلب جمع جديد</h3>
+            <span class="badge b-blue">مستخدم / مؤسسة</span>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label>نوع الطالب</label>
+              <select id="f-type">
+                <option>مستخدم فردي</option>
+                <option>مؤسسة (خطة دورية)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>نوع الطلب</label>
+              <select id="f-kind">
+                <option>فوري (Immediate)</option>
+                <option>مجدول (Scheduled)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>الموقع / العنوان</label>
+              <input id="f-loc" value="المزة — شارع المدارس">
+            </div>
+            <div class="field" id="f-schedule-wrap">
+              <label>وقت التنفيذ المجدول</label>
+              <input type="datetime-local" id="f-schedule" value="2026-08-16T10:00">
+            </div>
+            <div class="field" style="grid-column:1/-1">
+              <label>المواد المطلوب جمعها</label>
+              <div class="chips">
+                <span class="chip on" data-mat="بطاريات">🔋 بطاريات</span>
+                <span class="chip" data-mat="بلاستيك">🧴 بلاستيك</span>
+                <span class="chip" data-mat="ورق">📄 ورق</span>
+                <span class="chip" data-mat="زجاج">🍾 زجاج</span>
+                <span class="chip" data-mat="إلكترونيات">💻 إلكترونيات</span>
+              </div>
+            </div>
+            <div class="field">
+              <label>الكمية التقريبية (كغ)</label>
+              <input id="f-qty" type="number" value="35" min="1">
+            </div>
+            <div class="field">
+              <label>النقاط المتوقعة</label>
+              <input id="f-pts" value="≈ 120 نقطة" readonly style="color:var(--teal);font-weight:700">
+            </div>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-primary" id="btn-create">+ إنشاء الطلب وإدخاله قائمة الانتظار</button>
+            <button class="btn btn-ghost" id="btn-dispatch-now">⚡ تشغيل الفرز الآن</button>
+          </div>
+        </div>
+
+        <!-- حالة الطلب الحية -->
+        <div class="card">
+          <div class="card-title">
+            <h3><span class="dot" style="background:var(--green)"></span>تتبع الطلب لحظيًا</h3>
+            <span class="badge b-green" id="order-state-badge">في انتظار الفرز</span>
+          </div>
+          <div id="order-meta" class="kv" style="margin-bottom:14px">
+            <div class="item"><div class="k">رقم الطلب</div><div class="v mono" id="m-no">ORD-2026-0815-001</div></div>
+            <div class="item"><div class="k">نوعه</div><div class="v" id="m-kind">فوري</div></div>
+            <div class="item"><div class="k">القيمة التقديرية</div><div class="v" id="m-pts">120 نقطة</div></div>
+            <div class="item"><div class="k">السائق المسند</div><div class="v" id="m-driver">—</div></div>
+          </div>
+          <div class="timeline" id="tl">
+            <div class="step now">
+              <div class="node">✓</div>
+              <div class="st-body"><div class="st-title">تم إنشاء الطلب — دخل قائمة انتظار التوزيع</div><div class="st-time">07:59:30</div></div>
+            </div>
+            <div class="step">
+              <div class="node">1</div>
+              <div class="st-body"><div class="st-title">تم اسناد سائق (Dispatch Engine)</div></div>
+            </div>
+            <div class="step"><div class="node">2</div><div class="st-body"><div class="st-title">السائق بالطريق</div></div></div>
+            <div class="step"><div class="node">3</div><div class="st-body"><div class="st-title">السائق وصل — جاري الاستلام</div></div></div>
+            <div class="step"><div class="node">4</div><div class="st-body"><div class="st-title">تم استلام المواد — بالطريق إلى المستودع</div></div></div>
+            <div class="step"><div class="node">5</div><div class="st-body"><div class="st-title">تمت العملية / التسليم للمستودع</div></div></div>
+          </div>
+          <div class="hint-ok" id="tl-hint" style="margin-top:6px">
+            ✅ الطلب الآن <b>داخل Dispatch Queue</b> — تنتظر محرك الفرز (لا إسناد فوري لأقرب سائق).
+          </div>
+        </div>
+      </div>
+
+      <!-- شريط الوضعين -->
+      <div class="grid g-2" style="margin-top:16px">
+        <div class="card">
+          <div class="card-title">
+            <h3><span class="dot" style="background:var(--purple)"></span>Coverage Mode — وضع التغطية</h3>
+            <span class="badge b-purple">لا توجد طلبات</span>
+          </div>
+          <div class="route-flow" id="coverage-map" style="justify-content:center">
+            <div class="route-stop">🚚 موقف 1 <span class="t">مدرسة</span></div><span class="route-arrow">•</span>
+            <div class="route-stop">🚚 موقف 2 <span class="t">سوق مزدحم</span></div><span class="route-arrow">•</span>
+            <div class="route-stop">🚚 موقف 3 <span class="t">مشفى</span></div><span class="route-arrow">•</span>
+            <div class="route-stop" style="background:rgba(245,158,11,.08);border-color:rgba(245,158,11,.4)">🚚 موقف 4 <span class="t">— يتحرك ديناميكيًا</span></div>
+          </div>
+          <p class="kpi-note">
+            عند غياب الطلبات: النظام يوزع السائقين على <b>نقاط تغطية محددة مسبقًا</b> (مدارس، مناطق مزدحمة، مشافي) ليتحركوا بينها
+            دون مسار ثابت، مع <b>إعادة توازن دورية</b> كل فترة لمنع التكدس. بمجرد صدور طلب → ينتقل السائق إلى وضع التنفيذ.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-title">
+            <h3><span class="dot" style="background:var(--amber)"></span>Collection Mode — وضع التنفيذ</h3>
+            <span class="badge b-amber">عند وجود طلبات</span>
+          </div>
+          <div class="route-flow">
+            <div class="route-stop">🚚 نقطة التغطية الأساسية</div><span class="route-arrow">←</span>
+            <div class="route-stop">📍 طلب مستخدم 1</div><span class="route-arrow">←</span>
+            <div class="route-stop org">🏢 مؤسسة (موعد 10:00)</div><span class="route-arrow">←</span>
+            <div class="route-stop">📍 مستخدم 2 <span class="d">+8 دقائق</span></div><span class="route-arrow">←</span>
+            <div class="route-stop" style="border-color:rgba(34,197,94,.45)">🏭 المستودع</div>
+          </div>
+          <p class="kpi-note">
+            السائق يخرج من التغطية <b>مؤقتًا</b> لتنفيذ الطلب أو <b>مسار الجمع</b>. الطلبات القريبة زمنيًا وجغرافيًا
+            تُدمج في <b>Route واحد</b> (مستخدمين + مؤسسات حسب المواعيد). عند إنهاء كل المهام ← عودة تلقائية
+            لأفضل نقطة تغطية.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 2) الثوابت ============ -->
+    <section id="tab-constants">
+      <div class="grid g-4">
+        <div class="stat">
+          <div class="s-ico" style="background:var(--blue-bg)">📦</div>
+          <div><div class="s-num">3</div><div class="s-lbl">أنواع الطلبات</div></div>
+        </div>
+        <div class="stat">
+          <div class="s-ico" style="background:var(--green-bg)">🔄</div>
+          <div><div class="s-num">8</div><div class="s-lbl">حالات دورة الطلب</div></div>
+        </div>
+        <div class="stat">
+          <div class="s-ico" style="background:var(--amber-bg)">⏰</div>
+          <div><div class="s-num">60</div><div class="s-lbl">دقيقة قبل الموعد (نافذة التوزيع)</div></div>
+        </div>
+        <div class="stat">
+          <div class="s-ico" style="background:var(--purple-bg)">📍</div>
+          <div><div class="s-num">4</div><div class="s-lbl">عوامل رئيسية لسكور الفرز</div></div>
+        </div>
+      </div>
+
+      <div class="grid g-2" style="margin-top:16px">
+        <div class="card">
+          <div class="card-title"><h3><span class="dot" style="background:var(--blue)"></span>أنواع الطلبات (Order Types)</h3></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>النوع</th><th>الكود</th><th>سلوك التوزيع</th><th>وقت الدخول للفرز</th></tr></thead>
+              <tbody>
+                <tr><td><span class="badge b-blue">فوري</span></td><td class="mono">immediate</td><td>دخول فوري لقائمة الانتظار</td><td>لحظة الإنشاء</td></tr>
+                <tr><td><span class="badge b-purple">مجدول</span></td><td class="mono">scheduled</td><td>يبقى محفوظًا — لا إسناد مسبق</td><td>قبل الموعد بـ 60 دقيقة</td></tr>
+                <tr><td><span class="badge b-teal">مؤسسة دوري</span></td><td class="mono">org_plan</td><td>يولّد النظام الطلبات تلقائيًا من الخطة</td><td>قبل الموعد بـ 60 دقيقة</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title"><h3><span class="dot" style="background:var(--green)"></span>دورة حالات الطلب (Statuses)</h3></div>
+          <div class="route-flow" style="margin-top:0">
+            <div class="route-stop b-blue">CREATED</div><span class="route-arrow">←</span>
+            <div class="route-stop">QUEUED</div><span class="route-arrow">←</span>
+            <div class="route-stop b-teal">ASSIGNED</div><span class="route-arrow">←</span>
+            <div class="route-stop">EN_ROUTE</div><span class="route-arrow">←</span>
+            <div class="route-stop b-amber">ARRIVED</div><span class="route-arrow">←</span>
+            <div class="route-stop">PICKING</div><span class="route-arrow">←</span>
+            <div class="route-stop b-green">DELIVERED</div><span class="route-arrow">←</span>
+            <div class="route-stop b-red">CANCELLED</div>
+          </div>
+          <div class="tbl-wrap" style="margin-top:12px">
+            <table>
+              <thead><tr><th>الحالة</th><th>المعنى</th><th>بماذا تصل للمستخدم</th></tr></thead>
+              <tbody>
+                <tr><td><span class="badge b-blue">CREATED / QUEUED</span></td><td>تم استلام الطلب — في قائمة الانتظار</td><td>حدث فوري عبر WebSocket</td></tr>
+                <tr><td><span class="badge b-teal">ASSIGNED</span></td><td>اختار المحرك السائق الأنسب</td><td>حدث Order Assigned لكل الأطراف</td></tr>
+                <tr><td><span class="badge b-amber">EN_ROUTE → ARRIVED</span></td><td>السائق بالطريق ثم وصل</td><td>تتبع مباشر + ETA متجدد</td></tr>
+                <tr><td><span class="badge b-green">PICKING → DELIVERED</span></td><td>جاري الاستلام ثم تسليم المستودع</td><td>تحديث لحظي للحالة</td></tr>
+                <tr><td><span class="badge b-red">CANCELLED</span></td><td>إلغاء (من المستخدم / النظام)</td><td>إشعار بإلغاء</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid g-2" style="margin-top:16px">
+        <div class="card">
+          <div class="card-title"><h3><span class="dot" style="background:var(--amber)"></span>ثوابت السياسة التشغيلية (Policies)</h3></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>الثابت</th><th>القيمة الافتراضية</th><th>الوصف</th></tr></thead>
+              <tbody>
+                <tr><td>نافذة التوزيع المجدول</td><td class="mono">60 min</td><td>دخول الطلب المجدول للفرز قبل موعده بهذه المدة</td></tr>
+                <tr><td>مدة تحديث موقع السائق</td><td class="mono">5–10 sec</td><td>إرسال دوري للإحداثيات أو عند تغير مسافة محددة</td></tr>
+                <tr><td>نافذة دمج المسارات</td><td class="mono">≤ 15 min / ≤ 2 km</td><td>دمج الطلبات القريبة في Collection Route واحد</td></tr>
+                <tr><td>دورية إعادة التوازن</td><td class="mono">كل 30 min</td><td>إعادة توزيع السائقين بين نقاط التغطية</td></tr>
+                <tr><td>هامش تأخير موعد المؤسسة</td><td class="mono">± 20 min</td><td>أقصى تأخير مقبول عند إضافة طلب مستخدم للمسار</td></tr>
+                <tr><td>حد السعة للمركبة</td><td class="mono">يكوّن لكل مركبة</td><td>سعة متبقية تمنع الإسناد إن امتلأت</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title"><h3><span class="dot" style="background:var(--teal)"></span>قاعدة القرار الرئيسية</h3></div>
+          <div class="formula">
+            Score(d) = W₁·Proximity + W₂·Direction + W₃·Load + W₄·Vehicle + W₅·Deadline + W₆·Fairness
+            <small>السائق صاحب أعلى سكور يفوز بالمهمة — اختيار (Election) وليس أول/أقرب سائق</small>
+          </div>
+          <div style="margin-top:14px" class="kv">
+            <div class="item"><div class="k">قائمة الانتظار</div><div class="v">Dispatch Queue</div></div>
+            <div class="item"><div class="k">القرار يُحفظ في</div><div class="v">قاعدة البيانات</div></div>
+            <div class="item"><div class="k">يُبث حدث واحد</div><div class="v mono">Order Assigned</div></div>
+            <div class="item"><div class="k">المستقبلون</div><div class="v">سائق · مستخدم · لوحة تحكم</div></div>
+          </div>
+          <div class="hint-alert" style="margin-top:14px">
+            ⚠️ لا يُحتجز سائق لطلب مجدول — يُقيَّم على <b>وضعه الحقيقي اللحظي</b> وقت قرب التنفيذ لا وقت الإنشاء.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 3) الفرز ============ -->
+    <section id="tab-sort">
+      <div class="card">
+        <div class="card-title">
+          <h3><span class="dot" style="background:var(--green)"></span>طابور الفرز — ترتيب السائقين حسب السكور</h3>
+          <div style="display:flex;gap:8px">
+            <span class="badge b-blue">Order: ORD-2026-0815-001</span>
+            <span class="badge b-amber">📍 المزة</span>
+          </div>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>الترتيب</th><th>السائق</th><th>المنطقة</th><th>الحالة</th>
+                <th>القرب</th><th>الاتجاه</th><th>الطلبات معه</th><th>سعة مRemaining</th><th>السكور النهائي</th>
+              </tr>
+            </thead>
+            <tbody id="sort-body"></tbody>
+          </table>
+        </div>
+        <div class="legend">
+          <span><i style="background:var(--green)"></i> يتم الإسناد لأعلى سكور</span>
+          <span><i style="background:var(--amber)"></i> السائق المختار يخرج من التغطية مؤقتًا</span>
+          <span><i style="background:var(--border-2)"></i> الآخرون يبقون بتغطية المنطقة</span>
+        </div>
+      </div>
+
+      <div class="grid g-2" style="margin-top:16px">
+        <div class="card">
+          <div class="card-title"><h3><span class="dot" style="background:var(--purple)"></span>نتيجة الفرز — تفصيل سكور الفائز</h3></div>
+          <div id="winner-breakdown"></div>
+          <div id="winner-decision" class="hint-ok" style="margin-top:12px"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><h3><span class="dot" style="background:var(--amber)"></span>مسار الجمع الناتج (Collection Route)</h3></div>
+          <div class="route-flow" id="route-result">
+            <div class="route-stop">📍 المستخدم — المزة</div><span class="route-arrow">←</span>
+            <div class="route-stop org">🏢 مؤسسة أمل (موعد 10:00)</div><span class="route-arrow">←</span>
+            <div class="route-stop" style="border-color:rgba(34,197,94,.45)">🏭 المستودع</div>
+          </div>
+          <p class="kpi-note">
+            الطلبات القريبة (زمنيًا/جغرافيًا) دُمجت في مسار واحد. ترتيب النقاط يُحسب بالأمثلية (أقصر مسار مع احترام مواعيد المؤسسات).
+            عند نهاية المسار يتحول السائق تلقائيًا إلى وضع التغطية عند أفضل نقطة.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 4) المعايير ============ -->
+    <section id="tab-criteria">
+      <div class="grid g-2">
+        <div class="card">
+          <div class="card-title"><h3><span class="dot" style="background:var(--blue)"></span>عوامل السكور وأوزانها (قابلة للضبط)</h3></div>
+          <div id="weights"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><h3><span class="dot" style="background:var(--teal)"></span>آلة حاسبة حية — جرّب وضع سائق</h3></div>
+          <div id="calc" class="form-grid" style="grid-template-columns:1fr 1fr">
+            <div class="field"><label>مسافة السائق عن الطلب (كم)</label><input id="c-dist" type="number" value="1.2" step="0.1" min="0"></div>
+            <div class="field"><label>تناسب الاتجاه مع الوجهة (0–100)</label><input id="c-dir" type="number" value="85" min="0" max="100"></div>
+            <div class="field"><label>عدد الطلبات الموكلة حاليًا</label><input id="c-orders" type="number" value="1" min="0"></div>
+            <div class="field"><label>سعة المركبة المتبقية (٪)</label><input id="c-cap" type="number" value="70" min="0" max="100"></div>
+            <div class="field"><label>هامش موعد التنفيذ (دقيقة)</label><input id="c-deadline" type="number" value="40" min="0"></div>
+            <div class="field"><label>توزيع عادل (طلباته هذا اليوم)</label><input id="c-fair" type="number" value="3" min="0"></div>
+          </div>
+          <div class="formula" style="margin-top:16px" id="calc-formula">Score = 0 ...</div>
+          <div style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <div class="stat" style="flex:1;min-width:200px">
+              <div class="s-ico" style="background:var(--green-bg)">🏆</div>
+              <div><div class="s-num" id="calc-total">0</div><div class="s-lbl">السكور النهائي لهذا السائق</div></div>
+            </div>
+            <span class="badge b-teal" id="calc-verdict">—</span>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <div class="card-title"><h3><span class="dot" style="background:var(--amber)"></span>خريطة قرار محرك التوزيع (Dispatch Engine)</h3></div>
+        <div class="route-flow" id="engine-flow">
+          <div class="route-stop">⚡ حدث جديد (طلب/موقع/إنجاز)</div><span class="route-arrow">←</span>
+          <div class="route-stop">📥 قائمة الانتظار</div><span class="route-arrow">←</span>
+          <div class="route-stop" style="border-color:rgba(56,189,248,.45)">🧠 المحرك يحسب سكور كل سائق</div><span class="route-arrow">←</span>
+          <div class="route-stop" style="border-color:rgba(34,197,94,.45)">💾 حفظ القرار في الـ DB</div><span class="route-arrow">←</span>
+          <div class="route-stop">📡 حدث Order Assigned (WebSocket) ← سائق + مستخدم + لوحة</div>
+        </div>
+        <p class="kpi-note">
+          المحرك لا يخاطب كل تطبيق على حدة — يقرر القرار فقط، والباقي يعتمد على الحدث الواحد الصادر منه.
+          كل طلب مجدول يقترب موعده يتحول إلى طلب "جاهز للتنفيذ" ويدخل نفس الآلية كالطلبات الفورية.
+        </p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* ================= THUABIT (Constants) ================= */
+const POLICIES = {
+  scheduleWindowMin: 60,
+  socketIntervalSec: [5,10],
+  mergeMaxMin: 15,
+  mergeMaxKm: 2,
+  rebalanceMin: 30,
+  orgToleranceMin: 20
+};
+
+/* ================= DRIVER FACTORY ================= */
+const DRIVERS = [
+  { id:"D1",  name:"أحمد خليل",   zone:"المزة",        state:"متاح",    lat:33.510, lng:36.280, dir:95,  load:2, cap:80, done:3, dist:0.9 },
+  { id:"D2",  name:"محمد العبد",  zone:"المزة",        state:"مشغول",   lat:33.515, lng:36.292, dir:40,  load:4, cap:35, done:6, dist:2.8 },
+  { id:"D3",  name:"خالد سويد",   zone:"البرامكة",     state:"متاح",    lat:33.505, lng:36.275, dir:70,  load:0, cap:95, done:1, dist:3.4 },
+  { id:"D4",  name:"سامر حموي",   zone:"المزة",        state:"متاح",    lat:33.512, lng:36.285, dir:60,  load:1, cap:55, done:4, dist:1.6 },
+  { id:"D5",  name:"عبدو شهاب",   zone:"أبو رمانة",    state:"متاح",    lat:33.520, lng:36.310, dir:50,  load:2, cap:60, done:2, dist:5.1 }
+];
+
+/* ================= WEIGHTS (defaults) ================= */
+let WEIGHTS = [
+  { name:"القرب من الطلب (Proximity)",            desc:"كلما كان أقرب للطلب زاد السكور — عامل ZERO-CAP الأمثل", w:30 },
+  { name:"تناسب الاتجاه (Direction)",             desc:"اتجاه حركة السائق يتوافق مع وجهة الطلب", w:25 },
+  { name:"العبء الحالي (Load)",                   desc:"كلما قلت الطلبات الموكلة له حالياً ارتفع السكور", w:20 },
+  { name:"سعة المركبة المتبقية (Vehicle)",        desc:"المركبة شبه ممتلئة تخفض السكور بشدة", w:15 },
+  { name:"موعد التنفيذ (Deadline)",               desc:"هامش الوقت قبل موعد الطلب المجدول/المؤسسة", w:7 },
+  { name:"العدالة (Fairness)",                    desc:"رفع بسيط للسائق الأقل حظاً اليوم لتوزيع عادل", w:3 }
+];
+
+/* ================= SCORE ENGINE ================= */
+function factorScores(d){
+  let o = {};
+  o.proximity = Math.max(0, 100 - d.dist * 28);                 // هبوط خطي مع المسافة
+  o.direction = d.dir;
+  o.load      = Math.max(0, 100 - d.load * 22);
+  o.vehicle   = d.cap;
+  o.deadline  = 100; // طلب فوري — ياخد الحد الأقصى
+  o.fairness  = Math.min(100, 100 - (d.done - 1) * 12);
+  return o;
+}
+function totalScore(d){
+  const f = factorScores(d);
+  return Object.keys(f).reduce((s,k,i)=> s + f[k]*WEIGHTS[i].w/100, 0);
+}
+
+/* ================= RENDER: SORT TABLE ================= */
+const driverTotals = Object.fromEntries(DRIVERS.map(d=>[d.id, totalScore(d)]));
+function renderSort(){
+  const sorted = [...DRIVERS].sort((a,b)=> driverTotals[b.id] - driverTotals[a.id]);
+  const body = document.getElementById('sort-body');
+  body.innerHTML = sorted.map((d,i)=>{
+    const t = driverTotals[d.id].toFixed(1);
+    const rowStyle = i===0 ? 'style="background:rgba(34,197,94,.07)"' : '';
+    return `<tr ${rowStyle}>
+      <td>${i===0?'<span class="crown">👑</span>':i+1}</td>
+      <td><b>${d.name}</b></td>
+      <td>${d.zone}</td>
+      <td><span class="badge ${d.state==='متاح'?'b-green':'b-amber'}">${d.state}</span></td>
+      <td>${d.dist.toFixed(1)} كم</td>
+      <td>${d.dir}٪</td>
+      <td>${d.load}</td>
+      <td>${d.cap}٪</td>
+      <td><b style="color:var(--green);font-size:14.5px">${t}</b></td>
+    </tr>`;
+  }).join('');
+
+  const win = sorted[0];
+  const f = factorScores(win);
+  const keys = Object.keys(f);
+  document.getElementById('winner-breakdown').innerHTML =
+    keys.map((k,i)=>`
+      <div class="score-row">
+        <div class="score-name">${WEIGHTS[i].name.split('(')[0].trim()}</div>
+        <div class="score-bar"><i style="width:${f[k]}%"></i></div>
+        <div class="score-val">${f[k].toFixed(0)}</div>
+      </div>`).join('') + `
+      <div class="score-row" style="border-bottom:none">
+        <div class="score-name" style="color:var(--teal)">السكور الموزون النهائي</div>
+        <div class="score-bar"><i style="width:${driverTotals[win.id]}%;background:linear-gradient(90deg,#22c55e,#2dd4bf)"></i></div>
+        <div class="score-val" style="color:var(--teal)">${driverTotals[win.id].toFixed(1)}</div>
+      </div>`;
+  document.getElementById('winner-decision').innerHTML =
+    `✅ القرار: يُسند الطلب إلى <b>${win.name}</b> (السكور الأعلى ${driverTotals[win.id].toFixed(1)}) — يخرج من التغطية مؤقتًا وينفذ، والبقية يبقون منتشرين.`;
+}
+
+/* ================= WEIGHTS UI ================= */
+function renderWeights(){
+  document.getElementById('weights').innerHTML = WEIGHTS.map((w,i)=>`
+    <div class="w-row">
+      <div class="w-info">
+        <div class="w-name">${w.name}</div>
+        <div class="w-desc">${w.desc}</div>
+      </div>
+      <input type="range" min="0" max="60" value="${w.w}" data-i="${i}" class="w-range" style="width:150px">
+      <div class="w-val">${w.w}</div>
+    </div>`).join('');
+  document.querySelectorAll('.w-range').forEach(r=> r.addEventListener('input', e=>{
+    const i = +e.target.dataset.i;
+    WEIGHTS[i].w = +e.target.value;
+    e.target.closest('.w-row').querySelector('.w-val').textContent = e.target.value;
+    recalc(); renderSort();
+  }));
+}
+
+/* ================= CALCULATOR ================= */
+function recalc(){
+  const dist=+document.getElementById('c-dist').value||0;
+  const dir =+document.getElementById('c-dir').value||0;
+  const lo  =+document.getElementById('c-orders').value||0;
+  const cap =+document.getElementById('c-cap').value||0;
+  const dl  =+document.getElementById('c-deadline').value||0;
+  const done=+document.getElementById('c-fair').value||0;
+  const f = {
+    proximity: Math.max(0, 100 - dist*28),
+    direction: dir, load: Math.max(0,100-lo*22), vehicle: cap,
+    deadline: Math.min(100, dl*2.5), fairness: Math.max(0, 100-(done-1)*12)
+  };
+  const t = Object.keys(f).reduce((s,k,i)=> s + f[k]*WEIGHTS[i].w/100, 0);
+  document.getElementById('calc-formula').innerHTML =
+    `Score = ${f.proximity.toFixed(0)}×${WEIGHTS[0].w/100} + ${f.direction}×${WEIGHTS[1].w/100} + ${f.load.toFixed(0)}×${WEIGHTS[2].w/100} + ${f.vehicle}×${WEIGHTS[3].w/100} + ${f.deadline.toFixed(0)}×${WEIGHTS[4].w/100} + ${f.fairness.toFixed(0)}×${WEIGHTS[5].w/100} = ${t.toFixed(2)}`
+    + `<small>قِيم كل عامل 0–100 ثم تُضرب بوزنه (٪) ويُجمع المجموع — أعلى سكور يفوز</small>`;
+  document.getElementById('calc-total').textContent = t.toFixed(1);
+  const v = document.getElementById('calc-verdict');
+  if(t>=45){v.textContent='🏆 مؤهل بقوة'; v.className='badge b-green';}
+  else if(t>=25){v.textContent='مرشح متوسط'; v.className='badge b-amber';}
+  else {v.textContent='غير مرجح'; v.className='badge b-red';}
+}
+['c-dist','c-dir','c-orders','c-cap','c-deadline','c-fair'].forEach(id=>
+  document.getElementById(id).addEventListener('input', recalc));
+
+/* ================= ORDER SIMULATION ================= */
+const steps = [
+  {t:'تم إنشاء الطلب — دخل قائمة انتظار التوزيع', time:'07:59:30'},
+  {t:'تم اسناد سائق (Dispatch Engine)', time:'08:00:02'},
+  {t:'السائق بالطريق', time:'08:00:04'},
+  {t:'السائق وصل — جاري الاستلام', time:'08:14:41'},
+  {t:'تم استلام المواد — بالطريق إلى المستودع', time:'08:22:10'},
+  {t:'تمت العملية / التسليم للمستودع', time:'09:10:55'}
+];
+let stepIdx = 0;
+let orderAssigned = false;
+
+function refreshTimeline(){
+  const tl = document.getElementById('tl');
+  tl.innerHTML = steps.map((s,i)=>{
+    const cls = i<stepIdx?'done':(i===stepIdx?'now':'');
+    return `<div class="step ${cls}">
+      <div class="node">${i<stepIdx?'✓':(i===stepIdx?'●':i+1)}</div>
+      <div class="st-body"><div class="st-title">${s.t}</div><div class="st-time">${i<=stepIdx?s.time:''}</div></div>
+    </div>`;
+  }).join('');
+  const hint = document.getElementById('tl-hint');
+  const badge = document.getElementById('order-state-badge');
+  if(stepIdx===0){ badge.textContent='في انتظار الفرز';    badge.className='badge b-blue';    hint.className='hint-ok';    hint.innerHTML='✅ الطلب الآن <b>داخل Dispatch Queue</b> — تنتظر محرك الفرز (لا إسناد فوري لأقرب سائق).'; }
+  else if(stepIdx===1){ badge.textContent='تم اسناد سائق';  badge.className='badge b-teal';    hint.className='hint-ok';    hint.innerHTML='✅ حدث <b>Order Assigned</b> بُث عبر WebSocket لكل الأطراف (سائق + مستخدم + لوحة تحكم).'; }
+  else if(stepIdx===2){ badge.textContent='السائق بالطريق'; badge.className='badge b-amber';   hint.className='hint-ok';    hint.innerHTML='📡 الموقع يصل كل 5–10 ثوانٍ — المستخدم يرى حركة السائق و<b>ETA يتحدث تلقائيًا</b>.'; }
+  else if(stepIdx===3){ badge.textContent='السائق وصل';     badge.className='badge b-amber';   hint.className='hint-ok';    hint.innerHTML='📍 جاري استلام المواد من موقع المستخدم.'; }
+  else if(stepIdx===4){ badge.textContent='تم الاستلام';    badge.className='badge b-purple';  hint.className='hint-ok';    hint.innerHTML='✅ المواد بالطريق إلى المستودع (Odoo — فرز وتنظيف وإدخال).'; }
+  else if(stepIdx>=5){ badge.textContent='مكتمل';           badge.className='badge b-green';   hint.className='hint-ok';    hint.innerHTML='✅ <b>تمت العملية</b> — السائق بلا مهام ← النظام يعيده تلقائيًا لأفضل نقطة تغطية (Coverage Mode).'; }
+}
+refreshTimeline();
+
+/* ================= EVENTS ================= */
+document.querySelectorAll('.nav-item').forEach(n=> n.addEventListener('click', ()=>{
+  document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('section').forEach(s=>s.classList.remove('active'));
+  n.classList.add('active');
+  document.getElementById(n.dataset.tab).classList.add('active');
+}));
+
+document.querySelectorAll('.chip').forEach(c=> c.addEventListener('click', ()=> c.classList.toggle('on')));
+
+document.getElementById('btn-create').addEventListener('click', ()=>{
+  stepIdx = 0; orderAssigned = false; refreshTimeline();
+  document.getElementById('m-kind').textContent = document.getElementById('f-type').value.includes('مؤسسة')?'دوري (خطة جمع)':(document.getElementById('f-kind').value.includes('فوري')?'فوري':'مجدول');
+  document.getElementById('m-pts').textContent = '≈ '+ (document.getElementById('f-qty').value*3.4).toFixed(0) +' نقطة';
+  document.getElementById('m-driver').textContent = 'جاري الفرز…';
+  document.getElementById('route-result').innerHTML = `📍 ${document.getElementById('f-loc').value}`;
+  setTimeout(()=>{ document.getElementById('m-driver').textContent = 'أحمد خليل'; }, 500);
+});
+
+document.getElementById('btn-dispatch-now').addEventListener('click', ()=>{
+  stepIdx = Math.min(stepIdx+1, steps.length-1);
+  orderAssigned = true;
+  document.getElementById('m-driver').textContent = 'أحمد خليل';
+  refreshTimeline();
+});
+
+/* simulate auto-advance */
+setInterval(()=>{
+  if(stepIdx < 2){ stepIdx++; refreshTimeline(); }
+}, 6000);
+
+/* init */
+renderSort(); renderWeights(); recalc();
+</script>
+</body>
+</html>

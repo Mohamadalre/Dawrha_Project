@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>دورها — واجهات النظام</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body style="direction:rtl">
+<div class="container wide" style="padding-top: 34px">
+  <div style="text-align:center; margin-bottom: 30px">
+    <h1 style="font-size:26px; margin-bottom:6px">دورها — نماذج الواجهات <span class="badge blue">Prototype</span></h1>
+    <p class="muted">نماذج HTML لكل واجهة في الأنظمة الثلاثة، مرفقة بمرجعي الـ API التفصيليين: المرجع الكامل (324 endpoint + Socket.IO) ومرجع طلبات التجميع (30 endpoint).</p>
+    <p class="muted">الواجهات محاكاة (Mockup) — كل زر يعرض الطلب الحقيقي المرتبط به بدون اتصال فعلي بالخادم.</p>
+  </div>
+
+  <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; margin-bottom: 40px">
+
+    <div class="card" style="border:2px solid var(--admin-accent)">
+      <h3>📘 دليل الفلوات التفصيلي</h3>
+      <p class="muted" style="margin-bottom:10px">شرح كامل لسير العمليات: إنشاء طلب من مستخدم → فرز للسائق → إسناد → جمع → نقل → تسليم، خطط المؤسسات، انضمام السائقين واعتماد Odoo، والمزيد — كل خطوة مربوطة بالشاشة المقابلة.</p>
+      <a class="btn amber" href="flows.html">افتح الدليل</a>
+    </div>
+
+    <div class="card" style="border:2px solid var(--ok)">
+      <h3>📡 مرجع الـ API الكامل</h3>
+      <p class="muted" style="margin-bottom:10px">قائمة موثقة بكل واجهات الـ API (19 موديول / 324 endpoint) مجمعة حسب الوظيفة: المصادقة، الحسابات، الطلبات، الكتالوج، الأسطول، التقارير — مع نماذج الطلب والاستجابة الكاملة + توثيق Socket.IO (2 namespace).</p>
+      <a class="btn green" href="api-reference.html">افتح المرجع</a>
+    </div>
+
+    <div class="card" style="border:2px solid #7c3aed">
+      <h3>📋 مرجع طلبات التجميع <span class="badge purple" style="background:#7c3aed;color:#fff">30 endpoint</span></h3>
+      <p class="muted" style="margin-bottom:10px">مرجع تفصيلي لـ 30 واجهة API تخص طلبات التجميع والتوزيع — مقسم حسب الدور: المستخدم (4)، السائق (6)، الأدمن (16) — مع نماذج الطلب والاستجابة.</p>
+      <a class="btn" style="background:#7c3aed;color:#fff" href="api-collection-requests.html">افتح المرجع</a>
+    </div>
+
+    <div class="card">
+      <h3>📱 تطبيق المستخدم <span class="badge green">CITIZEN · INSTITUTIONS · FACTORY · EXTERNAL_PARTNER</span></h3>
+      <p class="muted" style="margin-bottom:10px">تسجيل، تصفح المنتجات، سلة، طلب جمع، تتبع مباشر، نقاط ومحفظة.</p>
+      <div style="display:flex; flex-wrap:wrap; gap:8px">
+        <a class="btn primary" href="user/login.html">تسجيل الدخول</a>
+        <a class="btn" href="user/register.html">إنشاء حساب</a>
+        <a class="btn" href="user/otp.html">تحقق OTP</a>
+        <a class="btn" href="user/home.html">الرئيسية</a>
+        <a class="btn" href="user/cart.html">السلة</a>
+        <a class="btn" href="user/new-request.html">طلب جمع جديد</a>
+        <a class="btn" href="user/requests.html">طلباتي وتتبعها</a>
+        <a class="btn" href="user/profile.html">ملفي الشخصي</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>🚛 تطبيق السائق <span class="badge blue">COLLECTOR</span></h3>
+      <p class="muted" style="margin-bottom:10px">تسجيل دخول، إنهاء ملف (معلومات/موقع/وثائق)، جولة الجمع، استلام الشاحنة، تغيير الوردية، بث مباشر للموقع عبر Socket.IO.</p>
+      <div style="display:flex; flex-wrap:wrap; gap:8px">
+        <a class="btn driver" href="driver/login.html">تسجيل الدخول</a>
+        <a class="btn" href="driver/onboarding.html">إنهاء الملف (Onboarding)</a>
+        <a class="btn" href="driver/home.html">الرئيسية</a>
+        <a class="btn" href="driver/tour.html">الجولة</a>
+        <a class="btn" href="driver/profile.html">ملفي</a>
+      </div>
+      <p class="hint mt-8">ملاحظة: قبول السائق/رفضه يتم في Odoo عبر webhook — لا يملك الأدمن صلاحية تغيير حالة السائق مباشرة.</p>
+    </div>
+
+    <div class="card">
+      <h3>🖥️ تطبيق الأدمن <span class="badge gray">ADMIN</span></h3>
+      <p class="muted" style="margin-bottom:10px">لوحة تحكم، إدارة حسابات، طلبات الجمع والإسناد اليدوي، أسطول وورديات (تتبع مباشر)، كتالوج وتسعير، تقارير.</p>
+      <div style="display:flex; flex-wrap:wrap; gap:8px">
+        <a class="btn admin" href="admin/login.html">تسجيل الدخول</a>
+        <a class="btn" href="admin/dashboard.html">لوحة التحكم</a>
+        <a class="btn" href="admin/accounts.html">الحسابات</a>
+        <a class="btn" href="admin/requests.html">طلبات الجمع</a>
+        <a class="btn" href="admin/fleet.html">الأسطول والورديات</a>
+        <a class="btn" href="admin/catalog.html">الكتالوج والتسعير</a>
+        <a class="btn" href="admin/reports.html">التقارير</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🔌 نقاط الربط المباشر (الخادم المحلي)</h3>
+    <p class="muted" style="margin-bottom:8px">هذه النماذج تحاكي الـ API. لتشغيلها فعليًا ضد الخادم المحلي على المنفذ 3000، يجب ربط كل استمارة بـ fetch. المسارات الحقيقية:</p>
+    <div class="statusbar">POST /api/v1/auth/login/user-app · POST /api/v1/auth/login/collector-app · POST /api/v1/auth/login/admin<br>
+POST /api/v1/auth/register/citizen · POST /api/v1/auth/otp/verify<br>
+POST /api/v1/onboarding/collector/location · POST /api/v1/onboarding/collector/upload-doc (multipart)<br>
+POST /api/v1/admin/collection-requests/:id/assign · PATCH /api/v1/driver/collection-requests/:id/{accept|arrived|collected|delivered}<br>
+Socket.IO: /tracking (truck:location · truck:stop · admin:subscribeAll) · /collection (request:assigned · request:updated)</div>
+  </div>
+</div>
+</body>
+</html>

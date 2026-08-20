@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>طلبات الجمع — الأدمن</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="admin">
+<div class="admin-shell">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="dot" style="width:28px;height:28px;border-radius:8px;background:var(--admin-accent);color:#1e293b;display:grid;place-items:center;font-size:14px">د</span> دورها — أدمن</div>
+    <nav>
+      <a href="dashboard.html">📊 لوحة التحكم</a>
+      <a href="accounts.html">👥 الحسابات</a>
+      <a href="requests.html" class="active">🚚 طلبات الجمع</a>
+      <a href="fleet.html">🛻 الأسطول والورديات</a>
+      <a href="catalog.html">🗂️ الكتالوج والتسعير</a>
+      <a href="reports.html">📈 التقارير</a>
+      <a href="login.html" data-logout-link>↩ خروج</a>
+    </nav>
+  </aside>
+
+  <main class="admin-content">
+    <div class="admin-header">
+      <div class="row">
+        <button class="btn sidebar-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <h1>طلبات الجمع والتوزيع</h1>
+      </div>
+      <div class="row">
+        <select id="filterStatus" style="padding:8px; border:1px solid var(--line); border-radius:8px">
+          <option value="">كل الحالات</option><option>QUEUED</option><option>ASSIGNED</option>
+          <option>EN_ROUTE</option><option>ARRIVED</option><option>PICKING</option>
+          <option>DELIVERED</option><option>COMPLETED</option><option>NEEDS_ADMIN</option><option>CANCELLED</option>
+        </select>
+        <button class="btn admin" data-filter>تصفية</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>الإسناد اليدوي <span class="endpoint">POST /api/v1/admin/collection-requests/:id/assign { driver_id }</span></h3>
+      <p class="muted small">يحجز الطلب لسائق مؤهل (حساب ACTIVE + شاحنة + وردية تغطي الآن + سعة كافية) — 409 إن لم يكن مؤهلًا.</p>
+      <div class="row mt-8" style="max-width:640px">
+        <input id="assignReq" style="flex:1.4; padding:10px; border:1px solid var(--line); border-radius:10px" placeholder="رقم الطلب أو معرّفه">
+        <select id="assignDriver" style="flex:1; padding:10px; border:1px solid var(--line); border-radius:10px">
+          <option value="">— تحميل السائقين… —</option>
+        </select>
+        <button class="btn amber" data-assign>إسناد</button>
+      </div>
+      <p class="hint mt-8">المعرّف المطلوب هو <code>collector_profiles.id</code> (من <span class="endpoint">GET /api/v1/trucks/drivers</span>).</p>
+    </div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <tr><th>الطلب</th><th>النوع</th><th>الحالة</th><th>السائق</th><th>الوزن الفعلي</th><th>إجراء</th></tr>
+          <tbody data-requests-list>
+            <tr><td colspan="6" class="muted small">جارٍ التحميل…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>نقاط التغطية <span class="endpoint">GET/POST /api/v1/coverage-points</span></h3>
+      <div class="row wrap" style="gap:8px">
+        <select id="covWarehouse" style="padding:8px; border:1px solid var(--line); border-radius:8px">
+          <option value="">— تحميل المستودعات… —</option>
+        </select>
+        <input id="covName" type="text" placeholder="اسم النقطة" style="padding:8px; border:1px solid var(--line); border-radius:8px">
+        <select id="covPointType" style="padding:8px; border:1px solid var(--line); border-radius:8px">
+          <option value="GENERAL">عام</option><option value="SCHOOL">مدرسة</option><option value="MARKET">سوق</option><option value="HOSPITAL">مستشفى</option>
+        </select>
+        <input id="covLat" type="number" placeholder="خطوط عرض" style="padding:8px; border:1px solid var(--line); border-radius:8px">
+        <input id="covLng" type="number" placeholder="خطوط طول" style="padding:8px; border:1px solid var(--line); border-radius:8px">
+        <input id="covRadius" type="number" value="1000" placeholder="متر radius" style="padding:8px; border:1px solid var(--line); border-radius:8px">
+        <input id="covPriority" type="number" value="0" placeholder="الأولوية" style="padding:8px; border:1px solid var(--line); border-radius:8px">
+        <button class="btn admin" id="covAdd">إضافة نقطة</button>
+      </div>
+      <div class="row mt-8" style="max-width:640px">
+        <span class="chip active" data-cov-id="">مركز دمشق</span>
+        <span class="chip" data-cov-id="">ريف دمشق</span>
+        <span class="chip" data-cov-id="">حلب</span>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+  var lo = document.querySelector('[data-logout-link]');
+  if (lo) lo.addEventListener('click', function (ev) { ev.preventDefault(); API.logout('login.html'); });
+
+  var drivers = [];
+
+  function badge(st) { return API.badge(st); }
+
+  function renderRequests() {
+    var box = document.querySelector('[data-requests-list]');
+    var st = document.getElementById('filterStatus').value;
+    var qs = st ? '?status=' + st + '&limit=50' : '?limit=50';
+    box.innerHTML = '<tr><td colspan="6" class="muted small">جارٍ التحميل…</td></tr>';
+    API.get('admin/collection-requests' + qs).then(function (json) {
+      var list = API.list(json);
+      box.innerHTML = '';
+      if (!list.length) {
+        box.innerHTML = '<tr><td colspan="6" class="muted small">لا توجد طلبات.</td></tr>';
+        return;
+      }
+      list.forEach(function (r) {
+        var tr = document.createElement('tr');
+        if (r.status === 'NEEDS_ADMIN') tr.style.background = '#fffbeb';
+        var lines = (r.lines || []).map(function (l) {
+          return (l.product_name || 'منتج') + ' × ' + (l.quantity || 0);
+        }).join(' · ');
+        tr.innerHTML =
+          '<td><b>' + API.esc(r.request_number || r.id.slice(0, 8)) + '</b></td>' +
+          '<td>' + API.esc(r.type || 'IMMEDIATE') + '</td>' +
+          '<td>' + badge(r.status || '—') + '</td>' +
+          '<td class="muted small">' + API.esc(r.driver_name || r.driver ? (r.driver.full_name || '—') : '—') + '</td>' +
+          '<td>' + (r.actual_weight_kg != null ? r.actual_weight_kg + ' كغ' : '—') + '</td>' +
+          '<td><button class="btn amber" style="padding:5px 10px" data-assign-this="' + r.id + '">إسناد</button> ' +
+          '<button class="btn danger" style="padding:5px 10px" data-cancel-this="' + r.id + '">إلغاء</button></td>';
+        var ab = tr.querySelector('[data-assign-this]');
+        ab.addEventListener('click', function () {
+          document.getElementById('assignReq').value = r.request_number || r.id;
+          document.getElementById('assignReq').dataset.id = r.id;
+          ui.ok('اختير الطلب ' + r.request_number + ' — حدد السائق وأرسل');
+        });
+        var cb = tr.querySelector('[data-cancel-this]');
+        cb.addEventListener('click', function () {
+          var reason = prompt('سبب الإلغاء (اختياري):') || '';
+          API.patch('admin/collection-requests/' + r.id + '/cancel', { reason: reason })
+            .then(function () { ui.ok('أُلغي الطلب'); renderRequests(); })
+            .catch(function (e) { ui.err(e.message || 'فشل الإلغاء'); });
+        });
+        box.appendChild(tr);
+      });
+    }).catch(function (e) {
+      box.innerHTML = '<tr><td colspan="6" class="muted small">' + API.esc(e.message || 'تعذر التحميل') + '</td></tr>';
+    });
+  }
+  renderRequests();
+  document.querySelector('[data-filter]').addEventListener('click', renderRequests);
+
+  /* السائقون القابلون للإسناد */
+  var sel = document.getElementById('assignDriver');
+  API.get('trucks/drivers').then(function (json) {
+    drivers = API.list(json);
+    sel.innerHTML = '<option value="">— اختر سائقًا —</option>';
+    drivers.forEach(function (d) {
+      var o = document.createElement('option');
+      o.value = d.id;
+      o.textContent = (d.full_name || d.name || 'سائق') + ' · ' + (d.truck && d.truck.model || '');
+      sel.appendChild(o);
+    });
+  }).catch(function (e) { sel.innerHTML = '<option value="">تعذر تحميل السائقين: ' + API.esc(e.message || '') + '</option>'; });
+
+  document.querySelector('[data-assign]').addEventListener('click', function () {
+    var btn = this;
+    var raw = document.getElementById('assignReq').value.trim();
+    var id = document.getElementById('assignReq').dataset.id;
+    var driverId = sel.value;
+    if (!raw) return ui.err('أدخل رقم الطلب');
+    if (!driverId) return ui.err('اختر السائق');
+    btn.disabled = true;
+    API.post('admin/collection-requests/' + (id || raw) + '/assign', { driver_id: driverId })
+      .then(function () { ui.ok('أُسنِد الطلب للسائق'); renderRequests(); })
+      .catch(function (e) { ui.err(e.message || 'فشل الإسناد'); })
+      .finally(function () { btn.disabled = false; });
+  });
+
+  /* تغطية نقاط */
+  var wp = document.getElementById('covWarehouse');
+  API.get('admin/warehouses').then(function (json) {
+    var list = API.list(json);
+    wp.innerHTML = '<option value="">— مستودعات —</option>';
+    list.forEach(function (w) {
+      var o = document.createElement('option');
+      o.value = w.id;
+      o.textContent = w.name;
+      wp.appendChild(o);
+    });
+  }).catch(function () { wp.innerHTML = '<option value="">تعذر التحميل</option>'; });
+
+  document.getElementById('covAdd').addEventListener('click', function () {
+    var name = document.getElementById('covName').value.trim();
+    var type = document.getElementById('covPointType').value;
+    var lat = parseFloat(document.getElementById('covLat').value);
+    var lng = parseFloat(document.getElementById('covLng').value);
+    var radius = parseInt(document.getElementById('covRadius').value);
+    var priority = parseInt(document.getElementById('covPriority').value);
+    var warehouseId = document.getElementById('covWarehouse').value;
+    if (!name) return ui.err('أدخل الاسم');
+    if (isNaN(lat) || isNaN(lng)) return ui.err('أدخل خطوط العرض/طول');
+    API.post('admin/coverage-points', { name, point_type: type, lat: lat, lng: lng, radius_m: radius, priority: priority, warehouseId })
+      .then(function () { ui.ok('أُضيفت نقطة coverage'); renderCoverage(); })
+      .catch(function (e) { ui.err(e.message || 'فشل الإضافة'); });
+    document.getElementById('covName').value = '';
+  });
+
+  function renderCoverage() {
+    var box = document.querySelector('.row.mt-8');
+    if (!box) return;
+    API.get('admin/coverage-points').then(function (json) {
+      var list = API.list(json);
+      box.innerHTML = '';
+      if (!list.length) {
+        box.innerHTML = '<span class="chip active" data-cov-id="">لا توجد نقاط</span>';
+        return;
+      }
+list.forEach(function (p) {
+        var w = p.warehouseId ? ' (wl-' + p.warehouseId.slice(0, 8) + ')' : '';
+        var span = document.createElement('span');
+        span.className = 'chip';
+        span.dataset.covId = p.id;
+        span.textContent = p.name + w;
+        box.appendChild(span);
+      });
+    }).catch(function (e) { box.innerHTML = '<span class="chip active" data-cov-id="">خطأ في التحميل</span>'; });
+  }
+  renderCoverage();
+</script>
+</body>
+</html>

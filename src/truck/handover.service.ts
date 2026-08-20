@@ -152,12 +152,6 @@ export class HandoverService {
     if (now.getTime() < win.start.getTime()) throw new PickupBeforeShiftException();
     if (now.getTime() > win.end.getTime() + win.toleranceMs) throw new PickupAfterShiftException();
 
-    // He may not already hold a truck.
-    const alreadyOpen = await this.handoverRepo.findOne({
-      where: { driverId: driver.id, status: HandoverStatus.OPEN },
-    });
-    if (alreadyOpen) throw new TruckAlreadyHeldException();
-
     // The physical truck must not still be held by the previous shift's driver.
     const heldByOther = await this.handoverRepo.findOne({
       where: { truckId: truck.id, status: HandoverStatus.OPEN, driverId: Not(driver.id) },

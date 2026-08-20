@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الرئيسية — تطبيق السائقين</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="driver">
+<header class="topbar">
+  <div class="inner">
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="grow"></div>
+    <span class="badge green">وردية نشطة</span>
+    <a href="profile.html" class="avatar">أ</a>
+  </div>
+</header>
+
+<main class="container">
+  <div class="row between mt-16" style="align-items:flex-end">
+    <div>
+      <h2 style="font-size:19px">أهلًا، أحمد 🚛</h2>
+      <p class="muted">08:00 – 16:00 · وردية الصباح</p>
+    </div>
+    <a href="tour.html" class="btn driver">جولتي الحالية</a>
+  </div>
+
+  <div class="card mt-16">
+    <h3>شاحنتي <span class="endpoint">GET /api/v1/driver/my-truck</span></h3>
+    <div class="row" data-mytruck>
+      <p class="muted small">جارٍ التحميل…</p>
+    </div>
+    <div class="row mt-16">
+      <button class="btn driver grow" data-pickup>استلام الشاحنة</button>
+      <button class="btn danger" data-dropoff>تسليم الشاحنة</button>
+    </div>
+    <p class="hint mt-8">الاستلام مسجّل بنطاق الوردية النشطة — والتسليم يتطلب سببًا إجباريًا.</p>
+  </div>
+
+  <div class="card">
+    <div class="row between">
+      <h3>تتبع مباشر</h3>
+      <span class="badge gray" data-tracking-badge>غير متصل</span>
+    </div>
+    <div data-tracking-info>
+      <p class="muted small">افتح \"جولتي الحالية\" واستلم الشاحنة لبدء البث</p>
+    </div>
+    <div class="row mt-8">
+      <button class="btn driver grow" data-track-start disabled>▶ بدء البث</button>
+      <button class="btn danger" data-track-stop disabled>⏹ إيقاف البث</button>
+    </div>
+    <div class="statusbar mt-8" data-tracking-log>في انتظار الاتصال…</div>
+  </div>
+
+  <div class="card">
+    <div class="row between">
+      <h3>حالة التسليم</h3>
+      <span class="endpoint">GET /api/v1/driver/handover-status</span>
+    </div>
+    <div class="notif-item" data-handover>
+      <p class="muted small">جارٍ التحميل…</p>
+    </div>
+  </div>
+</main>
+
+<nav class="bottomnav">
+  <a href="home.html" class="active"><span class="ic">🏠</span>الرئيسية</a>
+  <a href="tour.html"><span class="ic">🗺️</span>الجولة</a>
+  <a href="profile.html"><span class="ic">👤</span>ملفي</a>
+</nav>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script src="../assets/socket.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+
+  var trackingSocket = null;
+  var trackingInterval = null;
+  var currentTruckId = null;
+  var watchId = null;
+
+  function setTrackingBadge(text, color) {
+    var b = document.querySelector('[data-tracking-badge]');
+    if (b) { b.textContent = text; b.className = 'badge ' + (color || 'gray'); }
+  }
+  function setTrackingLog(text) {
+    var l = document.querySelector('[data-tracking-log]');
+    if (l) l.textContent = text;
+  }
+
+  function render() {
+    /* شاحنتي */
+    API.get('driver/my-truck').then(function (json) {
+      var d = API.one(json);
+      var truck = d.truck || d;
+      currentTruckId = truck.id || null;
+      var box = document.querySelector('[data-mytruck]');
+      if (!box) return;
+      var model = truck.model || truck.plate_number || '—';
+      var plate = truck.plate_number || '';
+      var cap = truck.capacity_kg != null ? ' · سعة ' + (+truck.capacity_kg).toLocaleString() + ' كغ' : '';
+      var shift = d.shift && (d.shift.start_time ? d.shift.start_time.slice(0, 5) + ' – ' + d.shift.end_time.slice(0, 5) : d.shift.name) || '';
+      var wh = d.warehouse && d.warehouse.name || '';
+      box.innerHTML =
+        '<div style="font-size:34px">🛻</div>' +
+        '<div class="grow"><b>' + API.esc(model) + '</b>' +
+        '<div class="muted small">' + API.esc(plate) + cap + '</div>' +
+        '<div class="muted small">الوردية: ' + API.esc(shift) + (wh ? ' · ' + API.esc(wh) : '') + '</div></div>' +
+        '<span class="badge green">' + API.esc(truck.status || 'assigned') + '</span>';
+      /* فعّل زر البث إذا وُجدت شاحنة */
+      var startBtn = document.querySelector('[data-track-start]');
+      if (startBtn) startBtn.disabled = false;
+    }).catch(function (e) {
+      var box = document.querySelector('[data-mytruck]');
+      if (box) box.innerHTML = '<p class="muted small">' + API.esc(e.message || 'لا توجد شاحنة مسندة') + '</p>';
+    });
+
+    /* حالة التسليم (handover) */
+    API.get('driver/handover-status').then(function (json) {
+      var h = API.one(json);
+      var box = document.querySelector('[data-handover]');
+      if (!box) return;
+      var status = h.status || (h.is_holding ? 'OPEN' : 'CLOSED');
+      var label = status === 'OPEN' ? 'مفتوح — شاحنة بحوزتك' : 'مغلق — لا يوجد تسليم حالي';
+      box.innerHTML = '<div style="flex:1"><b>الحالة: ' + label + '</b>' +
+        '<p class="muted small">' + API.esc(h.details || h.message || '') + '</p></div>' +
+        API.badge(status);
+    }).catch(function () {});
+  }
+  render();
+
+  /* =================== البث المباشر (Socket.IO /tracking) =================== */
+  function startTracking() {
+    if (!currentTruckId) { ui.err('لا توجد شاحنة مسندة'); return; }
+    if (trackingSocket && trackingSocket.connected) { ui.ok('البث جارٍ بالفعل'); return; }
+
+    if (!navigator.geolocation) { ui.err('المتصفح لا يدعم تحديد الموقع'); return; }
+
+    setTrackingBadge('جارٍ الاتصال…', 'amber');
+    setTrackingLog('جارٍ الاتصال بالخادم…');
+
+    Socket.connect('/tracking').then(function (sock) {
+      trackingSocket = sock;
+      setTrackingBadge('بث مباشر', 'green');
+      setTrackingLog('متصل — جارٍ إرسال الموقع…');
+      ui.ok('تم الاتصال بقناة التتبع');
+
+      /* بدء إرسال الموقع كل 5 ثوانٍ */
+      trackingInterval = setInterval(function () {
+        if (!trackingSocket || !trackingSocket.connected) return;
+        navigator.geolocation.getCurrentPosition(function (pos) {
+          var payload = {
+            truckId: currentTruckId,
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            speed: pos.coords.speed || undefined,
+            heading: pos.coords.heading || undefined
+          };
+          trackingSocket.emit('truck:location', payload, function (res) {
+            if (res && res.status === 'ok') {
+              setTrackingLog('✓ ' + new Date().toLocaleTimeString('ar') + ' — ' + pos.coords.latitude.toFixed(5) + ', ' + pos.coords.longitude.toFixed(5));
+            } else {
+              setTrackingLog('⚠ ' + (res && res.message || 'خطأ'));
+            }
+          });
+        }, function (err) {
+          setTrackingLog('⚠ خطأ GPS: ' + err.message);
+        }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 });
+      }, 5000);
+
+      /* استمع لأحداث التوقف */
+      trackingSocket.on('truck:stopped', function (data) {
+        setTrackingBadge('توقف', 'amber');
+        setTrackingLog('الشاحنة توقفت: ' + (data.reason || ''));
+      });
+    }).catch(function (err) {
+      setTrackingBadge('خطأ الاتصال', 'red');
+      setTrackingLog('فشل الاتصال: ' + (err.message || ''));
+      ui.err('تعذر الاتصال بالخادم: ' + (err.message || ''));
+    });
+  }
+
+  function stopTracking() {
+    if (trackingInterval) { clearInterval(trackingInterval); trackingInterval = null; }
+    if (trackingSocket) {
+      if (currentTruckId) {
+        trackingSocket.emit('truck:stop', { truckId: currentTruckId }, function () {});
+      }
+      trackingSocket.disconnect();
+      trackingSocket = null;
+    }
+    setTrackingBadge('متوقف', 'gray');
+    setTrackingLog('تم إيقاف البث');
+    ui.ok('تم إيقاف البث');
+  }
+
+  document.querySelector('[data-track-start]').addEventListener('click', startTracking);
+  document.querySelector('[data-track-stop]').addEventListener('click', stopTracking);
+
+  /* إيقاف البث عند مغادرة الصفحة */
+  window.addEventListener('beforeunload', stopTracking);
+
+  /* استلام الشاحنة */
+  document.querySelector('[data-pickup]').addEventListener('click', function () {
+    var btn = this; btn.disabled = true;
+    API.post('driver/pickup', { note: 'استلام عبر التطبيق' }).then(function () {
+      ui.ok('استُلمت الشاحنة — بدأت جلسة التتبع');
+      render();
+      /* بدء البث تلقائيًا بعد الاستلام */
+      setTimeout(startTracking, 1000);
+    }).catch(function (e) { ui.err(e.message || 'فشل الاستلام'); }).finally(function () { btn.disabled = false; });
+  });
+  /* تسليم الشاحنة (سبب إجباري) */
+  document.querySelector('[data-dropoff]').addEventListener('click', function () {
+    var reason = prompt('سبب تسليم الشاحنة (إجباري):');
+    if (reason === null) return;
+    if (!reason.trim()) { ui.err('السبب مطلوب'); return; }
+    API.post('driver/dropoff', { reason: reason.trim() }).then(function () {
+      stopTracking();
+      ui.ok('سُلّمت الشاحنة');
+      render();
+    }).catch(function (e) { ui.err(e.message || 'فشل التسليم'); });
+  });
+</script>
+</body>
+</html>

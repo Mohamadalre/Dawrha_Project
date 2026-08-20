@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الأسطول والورديات — الأدمن</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="admin">
+<div class="admin-shell">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="dot" style="width:28px;height:28px;border-radius:8px;background:var(--admin-accent);color:#1e293b;display:grid;place-items:center;font-size:14px">د</span> دورها — أدمن</div>
+    <nav>
+      <a href="dashboard.html">📊 لوحة التحكم</a>
+      <a href="accounts.html">👥 الحسابات</a>
+      <a href="requests.html">🚚 طلبات الجمع</a>
+      <a href="fleet.html" class="active">🛻 الأسطول والورديات</a>
+      <a href="catalog.html">🗂️ الكتالوج والتسعير</a>
+      <a href="reports.html">📈 التقارير</a>
+      <a href="login.html" data-logout-link>↩ خروج</a>
+    </nav>
+  </aside>
+
+  <main class="admin-content">
+    <div class="admin-header">
+      <div class="row">
+        <button class="btn sidebar-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <h1>الأسطول والتتبع</h1>
+      </div>
+      <span class="badge gray">socket /tracking ← بث مباشر</span>
+    </div>
+
+    <div class="card" style="border:2px solid var(--ok)">
+      <div class="row between">
+        <h3 style="margin:0">تتبع مباشر <span class="endpoint">GET /api/v1/trucks/active</span></h3>
+      </div>
+      <div data-active-trucks></div>
+      <div class="statusbar">truck:location { truckId, lat, lng, speed } · truck:stopped · truck:session started/ended</div>
+    </div>
+
+    <div class="card">
+      <h3>الشاحنات <span class="endpoint">GET /api/v1/trucks</span></h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>الشاحنة</th><th>السائق</th><th>الوردية</th><th>الحالة</th><th>الموقع</th></tr>
+          <tbody data-trucks-list>
+            <tr><td colspan="5" class="muted small">جارٍ التحميل…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint mt-8">التغييرات تُدفع إلى Odoo ← تتم مزامنة الأسطول عبر sync-fleet-from-odoo.</p>
+    </div>
+
+    <div class="card">
+      <h3>طلبات تغيير الوردية <span class="endpoint">GET /api/v1/admin/shift-change-requests</span></h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>السائق</th><th>من</th><th>إلى</th><th>الحالة</th><th>إجراء</th></tr>
+          <tr>
+            <td>سامر</td><td>08:00–16:00</td><td>16:00–24:00</td>
+            <td><span class="badge amber">PROCESSING</span></td>
+            <td>
+              <button class="btn primary" style="padding:5px 10px" onclick="ui.ok('القرار يُعالج في Odoo (محاكاة) — ستصله القرارات عبر /shift-change-decision','PATCH /api/v1/admin/shift-change-requests/:id/status')">معالجة</button>
+            </td>
+          </tr>
+        </table>
+      </div>
+      <p class="hint mt-8">القرار في <b>Odoo</b> — webhook <span class="endpoint">POST /api/v1/odoo/webhooks/shift-change-decision</span></p>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script src="../assets/socket.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+  var lo = document.querySelector('[data-logout-link]');
+  if (lo) lo.addEventListener('click', function (ev) { ev.preventDefault(); API.logout('login.html'); });
+
+  /* ── Active trucks: in-memory map keyed by truckId ── */
+  var trucks = {};
+  var act = document.querySelector('[data-active-trucks]');
+  var logEl = document.querySelector('.statusbar');
+
+  function renderActive() {
+    var ids = Object.keys(trucks);
+    if (!ids.length) { act.innerHTML = '<p class="muted small">لا توجد شاحنات نشطة (تبث موقعها) حاليًا.</p>'; return; }
+    act.innerHTML = '';
+    ids.forEach(function (id) {
+      var t = trucks[id];
+      var loc = (t.lat != null && t.lng != null) ? (+t.lat).toFixed(4) + ', ' + (+t.lng).toFixed(4) : '—';
+      var ago = t.updatedAt ? timeSince(t.updatedAt) : '';
+      var d = document.createElement('div');
+      d.className = 'list-item';
+      d.innerHTML = '<div style="flex:1"><b>🚛 ' + API.esc(t.plateNumber || t.truckId || id) + '</b>' +
+        '<p class="muted small">' + API.esc(t.driverName || t.driverId || '') +
+        ' · ' + loc +
+        (t.speed != null ? ' · ' + t.speed + ' كم/س' : '') +
+        (ago ? ' · منذ ' + ago : '') + '</p></div>';
+      act.appendChild(d);
+    });
+  }
+
+  function timeSince(iso) {
+    var diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 5) return 'الآن';
+    if (diff < 60) return Math.floor(diff) + ' ث';
+    if (diff < 3600) return Math.floor(diff / 60) + ' د';
+    return Math.floor(diff / 3600) + ' س';
+  }
+
+  function setLog(msg) { if (logEl) logEl.textContent = msg; }
+
+  /* ── Initial REST load (fallback / seed) ── */
+  API.get('trucks/active').then(function (json) {
+    var list = API.list(json);
+    list.forEach(function (t) {
+      var id = t.truckId || t.truck_id || t.id;
+      if (id) trucks[id] = { truckId: id, plateNumber: t.truck_plate || t.plate_number, driverName: t.driver_name, lat: t.lat, lng: t.lng, speed: t.speed, updatedAt: t.updatedAt };
+    });
+    renderActive();
+  }).catch(function (e) { setLog('REST: ' + (e.message || '')); });
+
+  /* ── Socket.IO live tracking ── */
+  var trackingSocket = null;
+
+  Socket.connect('/tracking').then(function (sock) {
+    trackingSocket = sock;
+    setLog('متصل — بانتظار التحديثات المباشرة…');
+
+    /* Join the admins room to receive all broadcasts */
+    trackingSocket.emit('admin:subscribeAll', null, function (res) {
+      if (res && res.status === 'ok') {
+        /* Seed with currently active trucks */
+        (res.active || []).forEach(function (t) {
+          var id = t.truckId;
+          if (id) trucks[id] = { truckId: id, plateNumber: t.plateNumber || t.plate_number, driverName: t.driverName || t.driver_id, lat: t.lat, lng: t.lng, speed: t.speed, updatedAt: t.updatedAt };
+        });
+        renderActive();
+        setLog('متصل — يتبع ' + Object.keys(trucks).length + ' شاحنة نشطة');
+      }
+    });
+
+    /* Live: truck location update */
+    trackingSocket.on('truck:location', function (data) {
+      var id = data.truckId;
+      if (!id) return;
+      trucks[id] = {
+        truckId: id,
+        plateNumber: data.plateNumber || (trucks[id] && trucks[id].plateNumber) || '',
+        driverName: data.driverName || data.driverId || (trucks[id] && trucks[id].driverName) || '',
+        lat: data.lat,
+        lng: data.lng,
+        speed: data.speed,
+        updatedAt: data.updatedAt || new Date().toISOString()
+      };
+      renderActive();
+      setLog('📍 ' + (trucks[id].plateNumber || id) + ' — ' + (+data.lat).toFixed(4) + ', ' + (+data.lng).toFixed(4) + ' — ' + new Date().toLocaleTimeString('ar'));
+    });
+
+    /* Live: truck stopped */
+    trackingSocket.on('truck:stopped', function (data) {
+      var id = data.truckId;
+      if (id && trucks[id]) {
+        trucks[id].lat = data.location && data.location.lat;
+        trucks[id].lng = data.location && data.location.lng;
+        trucks[id].updatedAt = data.location && data.location.updatedAt;
+      }
+      renderActive();
+      setLog('⏹ الشاحنة توقفت: ' + (id || '') + ' — السبب: ' + (data.reason || ''));
+    });
+
+    /* Live: new session started (pickup) */
+    trackingSocket.on('truck:session', function (data) {
+      var id = data.truckId;
+      if (id) {
+        trucks[id] = {
+          truckId: id,
+          plateNumber: data.plateNumber || '',
+          driverName: data.driverId || '',
+          lat: null, lng: null,
+          speed: null,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      renderActive();
+      setLog('▶ بدأت جلسة تتبع: ' + (data.plateNumber || id || '') + ' — السائق: ' + (data.driverId || ''));
+    });
+
+  }).catch(function (err) {
+    setLog('⚠ فشل الاتصال بالـ Socket.IO: ' + (err.message || ''));
+  });
+
+  /* ── Trucks list (static) ── */
+  var box = document.querySelector('[data-trucks-list]');
+  API.get('trucks').then(function (json) {
+    var list = API.list(json);
+    box.innerHTML = '';
+    if (!list.length) { box.innerHTML = '<tr><td colspan="5" class="muted small">لا توجد شاحنات.</td></tr>'; return; }
+    list.forEach(function (t) {
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><b>' + API.esc(t.model || t.id.slice(0, 8)) + (t.plate_number ? ' ' + API.esc(t.plate_number) : '') + '</b></td>' +
+        '<td class="muted">' + API.esc(t.driver_name || (t.driver ? t.driver.full_name : '—')) + '</td>' +
+        '<td class="muted">' + API.esc(t.shift_name || '—') + '</td>' +
+        '<td>' + API.badge(t.status || '—') + '</td>' +
+        '<td class="muted small">' + API.esc(t.last_lat && t.last_lng ? (+t.last_lat).toFixed(4) + ', ' + (+t.last_lng).toFixed(4) : '—') + '</td>';
+      box.appendChild(tr);
+    });
+  }).catch(function (e) { box.innerHTML = '<tr><td colspan="5" class="muted small">' + API.esc(e.message || '') + '</td></tr>'; });
+
+  /* Cleanup on leave */
+  window.addEventListener('beforeunload', function () { if (trackingSocket) trackingSocket.disconnect(); });
+</script>
+</body>
+</html>

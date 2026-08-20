@@ -594,3 +594,21 @@
 - **المجال (النطاق):** لا مشكلة — عدم التداخل و`min ≤ max` مفروضان، و«أي مرحلة لهذا الرصيد؟» له جواب واحد دائماً.
 
 **تحقّق (طلبات سابقة):** البحث الموحّد `GET /waste/search?type=all|product|category` والعروض `GET /waste/offers` + `/offers/search` (بالاسم/المعرّف) **موجودة وتعمل ومختبَرة**. `tsc` نظيف · **831/831 اختبار**.
+
+---
+
+## جولة Collection (Sprint 3 + Sprint 4)
+
+| # | المشكلة | الملف | الحالة | ما تم |
+|---|---|---|---|---|
+| 147 | دمج مسارات الطلبات (merge) لم يكن يكتمل النقل الفعلي للمحطة ويبقي request بدون routeId | `dispatch-engine.service.ts` `tryMergeRequest`/`bindMerged` | ✅ | نقل الطلب للطريق المستهدف + إعادة ترقيم الأقساط التالية + حدث `MERGED` للسائق. |
+| 148 | لا توجد سجلّية وصول للواردات في Odoo عند إتمام الجمع | `odoo-sync/*` + `dispatch-engine.service.ts` | ✅ | Job `REGISTER_INTAKE` (idempotent على request_id) عبر `recycle.collection.request/backend_register_intake` يُدرج بعد الوزن الفعلي (proportional actuals). |
+| 149 | السائق لا يُكافأ على الجمع | `points-wallet/points-wallet.service.ts` | ✅ | `awardForCollection` (floor(value/amountPerPoint)) + إشعار `collectedPointsEarned`. |
+| 150 | تحويل نهاية الوردية إلى سائق شارع كان يضرب فجوة غياب السائق الأصلي | `shift-swapper.cron.ts` | ✅ | إغلاق الـ OPEN بعد نهاية الوردية+tolerance ثم `handovers.pickup(account.id)` best-effort. |
+| 151 | تنفيذ الجولة بلا طوابع زمنية ولا نسبة intake لكل محطة | `route-execution.service.ts` | ✅ | طوابع `enRouteAt/arrivedAt/pickedAt/deliveredAt` + تناسبية فعلية للتسجيل إلى Odoo. |
+| 152 | واجهة الأدمن للجمع (السجلّ، الإسناد اليدوي، الإلغاء، نقاط التغطية، إعدادات التوزيع، التقارير) لم تكن وُعدت في §14–18 من `COLLECTION_API` | `admin-collection.*`، `coverage-points.*`، `dispatch-config.*`، `collection-reports.*` | ✅ | 4 مُتحكّمات جديدة بصلاحيات `collection.admin.view/manage` + `collection.coverage.manage` + `collection.dispatch.manage` + `admin.reports.view`؛ الإسناد اليدوي يمرّ عبر مرشّحات الـ engine (لا تجاوز) ويسجّل OFFERED→ACCEPTED. |
+| 153 | كرون الـ rebalance ثابت بنصف ساعة رغم أنّه قابل للضبط | `coverage-rebalance.cron.ts` | ✅ | `SchedulerRegistry` بفاصل `rebalance_min` + `reschedule()` عند الحفظ من `PATCH /admin/dispatch-config`. |
+| 154 | **فخّ class-transformer**: `plainToInstance` يكشف الحقول غير المرسلة بصورة `undefined` — دمج الـ weights يحذف الوزن المخزّن (`{...cfg.weights, ...dto.weights}` → كل القيم undefined غير `fairness`) | `dispatch-config.controller.ts` | ✅ | فلترة `undefined` من حزمة الـ DTO قبل الدمج (اكتُشف أثناء الاختبار؛ كان JSON.stringify يخفيها فتبدو سليمة). |
+| 155 | عدم تطابق مفتاحه: `CollectionRouteStatus.ACTIVE` غير موجود (الاسم `IN_PROGRESS`) | `collection-reports.service.spec.ts` | ✅ | تصحيح الاختبار؛ الاختلاف ظهر عبر `tsc --noEmit` قبل الجريان. |
+
+**تحقّق (جولة Collection):** `tsc --noEmit` نظيف · `eslint` نظيف · **97 suites / 993 tests خضراء** (إضافة dispatch-engine assignManually 4، coverage-points 5، collection-reports 5، admin-collection 3، dispatch-config 3).

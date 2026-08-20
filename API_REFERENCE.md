@@ -204,3 +204,33 @@
 |---|---|---|---|
 | GET `about` | هيدر `x-lang` اختياري | `{ title, body, last_updated }` | نص «حول التطبيق» من ملفات i18n بلغة الطلب — تعديل النص من `src/i18n/*/translation.json` تحت `content.about`. |
 | GET `terms` | هيدر `x-lang` اختياري | `{ title, body, last_updated }` | شروط الاستخدام — `content.terms`. |
+
+## Collection Requests (Producer) - `/api/v1/collection-requests` (JwtAuthGuard, PermissionsGuard)
+| Method · Path | صلاحية | يأخذ (Body) | يرجّع | السيناريو |
+|---|---|---|---|---|
+| POST | `collection.requests.create` | `CreateCollectionRequestDto {product_id, quantity, lines[], scheduled_at?, contact_name?, contact_phone?, address_text?, lat?, lng?, note?}` | `{ id, request_number, status }` | طلب جمع فوري → QUEUED + بث `collection.request.queued` (elect فوري)؛ المجدول يبقى CREATED وتنفتح نافذة elect قبل موعده بـ `scheduled_lead_min`. |
+| GET `?status&type&page&limit` | `collection.requests.view` | — | `{ requests[], pagination }` | قائمة طلبات صاحب الحساب فقط. |
+| GET `:id` | `collection.requests.view` | — | تفاصيل الطلب | تفاصيل طلب مملوك؛ 404 لغير المملوك. |
+| PATCH `:id/cancel` | `collection.requests.cancel` | `{ reason? }` | `{ id, status }` | إلغاء طلب CREATED/QUEUED/NEEDS_ADMIN فقط (409 خلاف ذلك) + بث `collection.request.cancelled`. |
+
+## Collection — Driver (العروض والتنفيذ) - `/api/v1/driver/collection-requests` (JwtAuthGuard, PermissionsGuard)
+| Method · Path | صلاحية | يأخذ (Body) | يرجّع | السيناريو |
+|---|---|---|---|---|
+| PATCH `:id/accept` \| `:id/reject` | `collection.driver.manage` | — | `{ message, result }` | قبول/رفض عرض ضمن نافذة `accept_window_sec`؛ القبول → bindToRoute + ASSIGNED؛ الرفض → elect التالي. |
+| GET | `collection.driver.view` | — | `{ route, stops[] }` | جولة السائق النشطة (PLANNED/IN_PROGRESS) بمحطاتها مرتبة. |
+| PATCH `:id/arrived` | `collection.driver.manage` | — | `{ request_id, status }` | وصول السائق للمحطة (طابعا `enRouteAt`/`arrivedAt`). |
+| PATCH `:id/collected` | `collection.driver.manage` | `{ actual_weight_kg }` | `{ request_id, status }` | الوزن الفعلي → PICKING (طابع `pickedAt`) + `REGISTER_INTAKE` إلى Odoo (idempotent) + نقاط الجمع. |
+| PATCH `:id/delivered` | `collection.driver.manage` | `{ warehouse_id? }` | `{ request_id, status }` | DELIVERED (طابع `deliveredAt`)؛ آخر محطة تُغلق الجولة (COMPLETED) وتُحرَّر اليد. |
+
+## Collection — Admin - `/api/v1/admin` (JwtAuthGuard, PermissionsGuard)
+| Method · Path | صلاحية | يأخذ (Body) | يرجّع | السيناريو |
+|---|---|---|---|---|
+| GET `collection-requests?status&type&from&to&driver_id&page&limit` | `collection.admin.view` | — | `{ requests[], totals, pagination }` | سجلّ كامل بفلترة الحالة/النوع/النافذة/السائق + إجماليات الوزن والقيمة. |
+| POST `collection-requests/:id/assign` | `collection.admin.manage` | `{ driver_id }` | `{ message, request_id }` | إسناد يدوي لسائق محدّد — يمرّ عبر مرشّحات الـ engine (409 إن لم يكن مؤهلاً)؛ NEEDS_ADMIN يُعاد للطابور أولاً؛ السجلّ يحفظ OFFERED→ACCEPTED. |
+| PATCH `collection-requests/:id/cancel` | `collection.admin.manage` | `{ reason? }` | `{ id, status }` | إلغاء إداري بنفس تدفّق إلغاء المنتِج دون فحص الملكية. |
+| GET/POST `coverage-points` | `collection.coverage.manage` | `{ name, point_type?, lat, lng, radius_m?, priority? }` | `{ id, name, point_type, lat, lng, radius_m, priority, is_active, parked_drivers }` | نقاط التغطية (مدارس/أسواق/مستشفيات)؛ القائمة تحمل عدد الركن الحالي لكل نقطة. |
+| PATCH/DELETE `coverage-points/:id` | `collection.coverage.manage` | `{ name?, point_type?, lat?, lng?, radius_m?, priority?, is_active? }` | نفس الشكل | تعديل/إزالة؛ الحذف soft (`is_active=false`) — التاريخ محفوظ. |
+| GET/PATCH `dispatch-config` | `collection.dispatch.manage` | `{ weights?, accept_window_sec?, scheduled_lead_min?, route_merge_max_min?, route_merge_max_km?, institution_tolerance_min?, rebalance_min?, is_enabled? }` | نفس الشكل | قراءة/تعديل إعدادات المحرّك (صف singleton)؛ تغيير `rebalance_min` يعيد جدولة كرون الـ rebalance. |
+| GET `reports/collection/daily?date` | `admin.reports.view` | — | `{ date, requests:{total, by_status, collected_weight_kg, paid_out_value}, routes:{total, by_status} }` | ملخص يوم (UTC): الطلبات حسب الحالة، والوزن والقيمة للـ COMPLETED فقط. |
+| GET `reports/collection/requests` | `admin.reports.view` | نفس فلترة القائمة | `{ requests[], totals, pagination }` | سجلّ الطلبات كتقرير. |
+| GET `reports/collection/routes?from&to&driver_id` | `admin.reports.view` | — | `{ routes[], totals }` | سجلّ المسارات: محطات/مكتملة، وزن وقيمة الـ COMPLETED فقط (actual أو تقدير). |
