@@ -33,7 +33,7 @@ describe('OrderSpendingCapService', () => {
     };
     capRepo = { findOne: jest.fn(), find: jest.fn(), create: jest.fn(), save: jest.fn(), delete: jest.fn() };
     orderRepo = { createQueryBuilder: jest.fn(() => qb) };
-    service = new OrderSpendingCapService(capRepo, orderRepo);
+    service = new OrderSpendingCapService(capRepo, orderRepo, { defaultCurrency: jest.fn().mockResolvedValue('SYP') } as any);
   });
 
   it('passes with no configured cap (null = no ceiling)', async () => {

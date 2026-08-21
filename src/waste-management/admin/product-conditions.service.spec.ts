@@ -18,7 +18,10 @@ describe('ProductConditionsService — addressing a grade', () => {
   let conditionRepo: any;
   let productRepo: any;
   let pricingRepo: any;
+  let historyRepo: any;
+  let offerRepo: any;
   let inventoryRepo: any;
+  let odooSync: any;
   let service: ProductConditionsService;
 
   const CONDITION = {
@@ -37,6 +40,7 @@ describe('ProductConditionsService — addressing a grade', () => {
       find: jest.fn().mockResolvedValue([]),
       save: jest.fn(async (c) => c),
       create: jest.fn((v) => v),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
       count: jest.fn().mockResolvedValue(0),
       createQueryBuilder: jest.fn(() => ({
         select: jest.fn().mockReturnThis(),
@@ -47,7 +51,15 @@ describe('ProductConditionsService — addressing a grade', () => {
     productRepo = {
       findOne: jest.fn().mockResolvedValue({ id: 'prod-A', name: 'PET' }),
     };
-    pricingRepo = { count: jest.fn().mockResolvedValue(0) };
+    pricingRepo = {
+      count: jest.fn().mockResolvedValue(0),
+      find: jest.fn().mockResolvedValue([]),
+      remove: jest.fn(),
+    };
+    // A grade's live price is archived here before it is deleted with the grade.
+    historyRepo = { save: jest.fn(), create: jest.fn((v) => v) };
+    // Deleting a grade takes its offers down with it.
+    offerRepo = { count: jest.fn().mockResolvedValue(0), delete: jest.fn() };
     // Deleting a grade has to know whether any of it is still on a shelf.
     inventoryRepo = {
       createQueryBuilder: jest.fn(() => ({
@@ -57,18 +69,35 @@ describe('ProductConditionsService — addressing a grade', () => {
         getRawOne: jest.fn().mockResolvedValue({ total: '0' }),
       })),
     };
+    odooSync = {
+      enqueueSyncCondition: jest.fn(),
+      enqueueDeleteCondition: jest.fn(),
+      enqueueUpdatePricing: jest.fn(),
+    };
+
+    // Inside a transaction the service asks for a repo PER entity. Route each to
+    // the mock that stands in for it so a cascade delete can be asserted.
+    const manager = {
+      getRepository: (entity: any) => {
+        const name = entity?.name ?? '';
+        if (name === 'ProductPricing') return pricingRepo;
+        if (name === 'ProductPricingHistory') return historyRepo;
+        if (name === 'Offer') return offerRepo;
+        return conditionRepo; // MaterialCondition
+      },
+    };
 
     service = new ProductConditionsService(
       conditionRepo,
       productRepo,
       pricingRepo,
+      historyRepo,
       inventoryRepo,
-      // Deleting a grade also has to know whether a live offer names it.
-      { count: jest.fn().mockResolvedValue(0) } as any,
-      { enqueueSyncCondition: jest.fn() } as any,
+      offerRepo,
+      odooSync,
       { record: jest.fn(), log: jest.fn() } as any,
       { invalidate: jest.fn() } as any,
-      { transaction: jest.fn(async (cb) => cb({ getRepository: () => conditionRepo })) } as any,
+      { transaction: jest.fn(async (cb) => cb(manager)) } as any,
     );
   });
 
@@ -131,6 +160,43 @@ describe('ProductConditionsService — addressing a grade', () => {
     );
 
     expect(res.condition.name_ar).toBe('ممتازة');
+  });
+
+  // ------------------------------------------------------------------
+  // Deletion: stock is the one blocker; price and offers cascade
+  // ------------------------------------------------------------------
+  it('refuses to delete a grade that still holds stock in any warehouse', async () => {
+    productRepo.findOne.mockResolvedValue({ id: 'prod-A', odooProductId: 42 });
+    inventoryRepo.createQueryBuilder = jest.fn(() => ({
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({ total: '5' }),
+    }));
+
+    const err = await service.remove('admin', 'cond-1').catch((e) => e);
+
+    expect(String(err.message)).toContain('warehouse stock');
+    expect(conditionRepo.delete).not.toHaveBeenCalled();
+  });
+
+  it('deletes a grade together with its live price and offers when no stock', async () => {
+    productRepo.findOne.mockResolvedValue({ id: 'prod-A', odooProductId: 42 });
+    conditionRepo.findOne.mockResolvedValue({ ...CONDITION, odooConditionId: 7 });
+    pricingRepo.find.mockResolvedValue([
+      { productId: 'prod-A', tier: 'FACTORY', conditionCode: 'PREMIUM', price: '10', currency: 'SYP', effectiveFrom: new Date() },
+    ]);
+
+    await service.remove('admin', 'cond-1');
+
+    // Price archived, then removed; offers deleted; grade deleted.
+    expect(historyRepo.save).toHaveBeenCalled();
+    expect(pricingRepo.remove).toHaveBeenCalled();
+    expect(offerRepo.delete).toHaveBeenCalledWith({ conditionId: 'cond-1' });
+    expect(conditionRepo.delete).toHaveBeenCalledWith('cond-1');
+    // Odoo: price sheet rewritten (drops the row) then the grade unlinked.
+    expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: 'prod-A' });
+    expect(odooSync.enqueueDeleteCondition).toHaveBeenCalledWith({ odooConditionId: 7 });
   });
 
   it('answers a wrong pairing with 400, not 404', async () => {

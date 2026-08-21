@@ -20,7 +20,18 @@ export class Location {
     onDelete: 'CASCADE'
   })
   cititzenProfile: CitizenProfile
-  
+
+  /**
+   * A human label the citizen gives the place — "Home", "Work". It is what they
+   * pick from when choosing where an order is collected, so it is the location's
+   * identity to THEM, not a globally unique key: two people may both have a
+   * "Home", but ONE person may not (a partial unique index enforces that per
+   * profile, case-insensitively). Nullable so onboarding's first location, and
+   * every location created before this, stays valid without one.
+   */
+  @Column({ nullable: true })
+  name?: string;
+
   @Column({ nullable: true })
   DesscriptLocation?: string;
 

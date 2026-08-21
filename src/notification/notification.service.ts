@@ -4,6 +4,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull, Not, In } from 'typeorm';
 import { Queue } from 'bullmq';
+import { I18nService } from 'nestjs-i18n';
 import { Notification } from './entities/notification.entity';
 import { UserDevice } from '@src/auth/entities/user-device.entity';
 import { Account } from '@src/user/entities/account.entity';
@@ -33,7 +34,43 @@ export class NotificationService {
     private readonly userDeviceRepository: Repository<UserDevice>,
     @InjectQueue(NOTIFICATION_QUEUE_NAME)
     private readonly notificationQueue: Queue,
+    private readonly i18n: I18nService,
   ) {}
+
+  /**
+   * Renders a notification's title/body in the READER's language for display.
+   *
+   * The row stores the default (English) text plus, when the creator supplied
+   * them, i18n keys + args under `metadata.i18n` — the same keys the push
+   * processor already localises at send time. The in-app list used to show only
+   * the stored English text; this translates it for the account viewing it, so a
+   * signed-in Arabic user sees Arabic notifications without sending any header.
+   * Falls back to the stored text when there is no key or the key is missing.
+   */
+  private localize(notification: Notification, lang?: string): Notification {
+    const i18n = (notification.metadata as any)?.i18n as
+      | { titleKey?: string; bodyKey?: string; args?: Record<string, unknown> }
+      | undefined;
+    if (!i18n || (!i18n.titleKey && !i18n.bodyKey) || !lang) return notification;
+
+    const tr = (key?: string, fallback?: string): string => {
+      if (!key) return fallback ?? '';
+      const out = this.i18n.translate(`translation.${key}`, {
+        lang,
+        args: i18n.args,
+      });
+      // I18nService returns the key path back when it cannot resolve it.
+      return typeof out === 'string' && out !== `translation.${key}` && out !== key
+        ? out
+        : fallback ?? '';
+    };
+
+    return {
+      ...notification,
+      title: tr(i18n.titleKey, notification.title),
+      body: tr(i18n.bodyKey, notification.body),
+    } as Notification;
+  }
 
   async createNotification(payload: NotificationPayload): Promise<Notification> {
     // When i18n keys are supplied, keep them on the notification so each device
@@ -88,7 +125,11 @@ export class NotificationService {
     this.logger.log(`Notification job enqueued ${notificationId}`);
   }
 
-  async findUserNotifications(userId: string, query: NotificationQueryDto) {
+  async findUserNotifications(
+    userId: string,
+    query: NotificationQueryDto,
+    lang?: string,
+  ) {
     const orderByMap = {
       createdAt: 'notification.createdAt',
       sentAt: 'notification.sentAt',
@@ -121,8 +162,7 @@ export class NotificationService {
     const [items, total] = await qb.getManyAndCount();
 
     return {
-      message:'Fetch notifications sussccufully',
-      items,
+      items: items.map((n) => this.localize(n, lang)),
       total,
       page: query.page,
       limit: query.limit,
@@ -143,7 +183,11 @@ export class NotificationService {
     }
   }
 
-  async getNotificationById(userId: string, id: string) : Promise<Notification> {
+  async getNotificationById(
+    userId: string,
+    id: string,
+    lang?: string,
+  ): Promise<Notification> {
     const notification = await this.notificationRepository.findOne({
       where: { id, userId },
     });
@@ -152,7 +196,7 @@ export class NotificationService {
       throw new NotificationNotFoundException(id);
     }
 
-    return notification;
+    return this.localize(notification, lang);
   }
 
   async getNotificationByQueueId(id: string): Promise<Notification | null> {

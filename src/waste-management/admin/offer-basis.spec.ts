@@ -73,6 +73,7 @@ describe('offer basis — amount vs percentage', () => {
         hasConditions: jest.fn().mockResolvedValue(false),
         validateActiveCode: jest.fn(),
         activeForProduct: jest.fn(async () => []),
+        gradeMapFor: jest.fn(async () => new Map()),
         resolveActiveById: jest.fn(),
       };
       const noop = { invalidate: jest.fn(), record: jest.fn() };
@@ -95,20 +96,12 @@ describe('offer basis — amount vs percentage', () => {
         {} as any, { findOne: jest.fn().mockResolvedValue({ id: GRADED, isActive: true }) } as any,
         {} as any, {} as any, {} as any, {} as any, pricingRepo as any,
         offerRepo as any, { enqueueUpdatePricing: jest.fn() } as any,
-        noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any,
+        noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any, { count: jest.fn().mockResolvedValue(0) } as any,
       );
     });
 
     const create = (over: any) =>
       service.createOffer('admin-1', { product_id: GRADED, ...over } as any);
-
-    it('records an AMOUNT offer as amount-based, with no promised ratio', async () => {
-      await create({ audience: OfferAudience.BUYERS, amount: 20 });
-
-      expect(saved[0].basis).toBe(OfferBasis.AMOUNT);
-      expect(saved[0].basisPercentage).toBeNull();
-      expect(Number(saved[0].amount)).toBe(20);
-    });
 
     it('turns a PERCENTAGE into an amount and keeps the ratio as the promise', async () => {
       // 25% of the buyer price of 80.
@@ -127,12 +120,13 @@ describe('offer basis — amount vs percentage', () => {
       expect(Number(saved[0].amount)).toBe(25);
     });
 
-    it('refuses both an amount and a percentage', async () => {
-      // They disagree the first time a price moves and nothing could say which
-      // one was meant.
-      await expect(
-        create({ audience: OfferAudience.BUYERS, amount: 20, percentage: 25 }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+    it('ignores a smuggled amount — only the percentage is read', async () => {
+      // `amount` is gone from the DTO; if one is smuggled past validation the
+      // service never reads it, and the stored amount comes from the percentage.
+      await create({ audience: OfferAudience.BUYERS, percentage: 25, amount: 999 });
+
+      expect(saved[0].basis).toBe(OfferBasis.PERCENTAGE);
+      expect(Number(saved[0].amount)).toBe(20); // 25% of 80, not 999
     });
 
     it('refuses a percentage that would take a buyer price to zero', async () => {
@@ -220,6 +214,7 @@ describe('offer basis — amount vs percentage', () => {
         hasConditions: jest.fn().mockResolvedValue(true),
         validateActiveCode: jest.fn(),
         activeForProduct: jest.fn(async () => GRADES),
+        gradeMapFor: jest.fn(async () => new Map()),
         resolveActiveById: jest.fn(),
       };
       const noop = { invalidate: jest.fn(), record: jest.fn() };
@@ -242,7 +237,7 @@ describe('offer basis — amount vs percentage', () => {
         {} as any, { findOne: jest.fn().mockResolvedValue({ id: GRADED, isActive: true }) } as any,
         {} as any, {} as any, {} as any, {} as any, pricingRepo as any,
         offerRepo as any, { enqueueUpdatePricing: jest.fn() } as any,
-        noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any,
+        noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any, { count: jest.fn().mockResolvedValue(0) } as any,
       );
     });
 
@@ -267,29 +262,13 @@ describe('offer basis — amount vs percentage', () => {
       expect(saved.every((o) => Number(o.basisPercentage) === 25)).toBe(true);
     });
 
-    it('a single AMOUNT is checked against each grade separately', async () => {
-      await create({ audience: OfferAudience.BUYERS, amount: 12 });
+    it('keeps the derived percentage identical across grades', async () => {
+      // The percentage is the promise, so every grade advertises the SAME share
+      // even though the amount differs — 25% off both, 17.50 and 15.
+      await create({ audience: OfferAudience.BUYERS, percentage: 25 });
 
-      // Two grades × two buyer roles = four rows.
       expect(saved).toHaveLength(4);
-      // The same 12 off each grade — legal here because 12 < 60 < 70. The
-      // point is each row is validated against its own price, not a shared one.
-      expect(saved.every((o) => Number(o.amount) === 12)).toBe(true);
-      const byGrade = Object.fromEntries(
-        saved.map((o) => [o.conditionCode, Number(o.discountPercentage)]),
-      );
-      // 12/70 ≈ 17.14%, 12/60 = 20% — the derived percentage differs per grade.
-      expect(byGrade.EXCELLENT).toBeCloseTo(17.14, 1);
-      expect(byGrade.GOOD).toBe(20);
-    });
-
-    it('refuses a flat amount that would drive the CHEAPEST grade negative', async () => {
-      // 65 is a fair cut off the 70 grade but larger than the 60 grade — it
-      // would take that one below zero, so the whole offer is refused and the
-      // message names the grade that could not bear it.
-      await expect(
-        create({ audience: OfferAudience.BUYERS, amount: 65 }),
-      ).rejects.toThrow(/GOOD/);
+      expect(saved.every((o) => Number(o.discountPercentage) === 25)).toBe(true);
     });
 
     it('a SELLER percentage on a graded material is added, never split by grade below zero', async () => {
@@ -434,6 +413,7 @@ describe('offer edges — withdrawn materials and the buyer ceiling', () => {
     const conditions = {
       hasConditions: jest.fn().mockResolvedValue(false),
       activeForProduct: jest.fn(async () => []),
+        gradeMapFor: jest.fn(async () => new Map()),
       validateActiveCode: jest.fn(),
       resolveActiveById: jest.fn(),
     };
@@ -448,7 +428,7 @@ describe('offer edges — withdrawn materials and the buyer ceiling', () => {
       {} as any, { findOne: jest.fn(async () => productRow) } as any,
       {} as any, {} as any, {} as any, {} as any, pricingRepo as any,
       offerRepo as any, { enqueueUpdatePricing: jest.fn() } as any,
-      noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any,
+      noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any, { count: jest.fn().mockResolvedValue(0) } as any,
     );
   });
 
@@ -462,13 +442,13 @@ describe('offer edges — withdrawn materials and the buyer ceiling', () => {
     productRow.isActive = false;
 
     await expect(
-      create({ audience: OfferAudience.BUYERS, amount: 10 }),
+      create({ audience: OfferAudience.BUYERS, percentage: 10 }),
     ).rejects.toThrow(/not active/i);
   });
 
   it('still allows one on a live material', async () => {
     await expect(
-      create({ audience: OfferAudience.BUYERS, amount: 10 }),
+      create({ audience: OfferAudience.BUYERS, percentage: 10 }),
     ).resolves.toBeDefined();
   });
 
@@ -538,14 +518,14 @@ describe('a withdrawn material', () => {
     const service = new AdminCatalogService(
       {} as any, productRepo as any, {} as any, {} as any, {} as any, {} as any,
       {} as any, {} as any, {} as any, noop as any, noop as any, {} as any,
-      {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, { count: jest.fn().mockResolvedValue(0) } as any,
     );
 
     await expect(
       service.createOffer('admin-1', {
         product_id: PRODUCT,
         audience: OfferAudience.BUYERS,
-        amount: 5,
+        percentage: 5,
       } as any),
     ).rejects.toThrow(/not active/i);
   });

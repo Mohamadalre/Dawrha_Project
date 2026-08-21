@@ -50,7 +50,7 @@ describe('AdminComplaintService', () => {
     const { svc } = build(open());
     const res: any = await svc.list({});
     expect(res.complaints).toHaveLength(1);
-    expect(res.complaints[0].order_number).toBe('ORD-1');
+    expect(res.complaints[0].order.number).toBe('ORD-1');
   });
 
   it('applies status / route / kind filters when given', async () => {

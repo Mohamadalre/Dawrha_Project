@@ -28,6 +28,7 @@ describe('Points award on order receipt (scenario)', () => {
     const stageRepo = { find: jest.fn().mockResolvedValue([]) };
     const wallet = new PointsWalletService(
       walletRepo as any, rates, notifications as any, stageRepo as any,
+      { previousRanks: jest.fn().mockResolvedValue(new Map()), refreshBaseline: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     const order: any = {
@@ -46,6 +47,7 @@ describe('Points award on order receipt (scenario)', () => {
     const view = new OrderViewService(
       orderRepo as any, {} as any, {} as any, {} as any,
       {} as any, {} as any, {} as any, {} as any, wallet,
+      { gradeMapFor: async () => new Map() } as any,
     );
     return { view, order, orderRepo, walletRepo, notifications };
   };

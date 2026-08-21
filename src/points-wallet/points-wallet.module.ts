@@ -4,9 +4,11 @@ import { NotificationModule } from '@src/notification/notification.module';
 import { PlatformSettingsModule } from '@src/platform-settings/platform-settings.module';
 import { PointsWallet } from './entities/points-wallet.entity';
 import { PointsRate } from './entities/points-rate.entity';
+import { LeaderboardSnapshot } from './entities/leaderboard-snapshot.entity';
 import { Stage } from '@src/stages/entities/stage.entity';
 import { PointsWalletService } from './points-wallet.service';
 import { PointsRateService } from './points-rate.service';
+import { LeaderboardSnapshotService } from './leaderboard-snapshot.service';
 import { PointsWalletController } from './points-wallet.controller';
 import { PointsRateController } from './points-rate.controller';
 
@@ -22,14 +24,14 @@ import { PointsRateController } from './points-rate.controller';
     // Stage is read (not written) here so the leaderboard can name each user's
     // current stage. Registering the entity is enough — no dependency on
     // StagesModule, which would be circular (stages already read wallets).
-    TypeOrmModule.forFeature([PointsWallet, PointsRate, Stage]),
+    TypeOrmModule.forFeature([PointsWallet, PointsRate, Stage, LeaderboardSnapshot]),
     // Awarding points tells the buyer they were gifted them.
     NotificationModule,
     // The rate's currency comes from the central platform setting.
     PlatformSettingsModule,
   ],
   controllers: [PointsWalletController, PointsRateController],
-  providers: [PointsWalletService, PointsRateService],
+  providers: [PointsWalletService, PointsRateService, LeaderboardSnapshotService],
   exports: [PointsWalletService, PointsRateService],
 })
 export class PointsWalletModule {}

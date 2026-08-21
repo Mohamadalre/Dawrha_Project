@@ -11,8 +11,10 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { Role } from '@src/user/enums/role.enum';
+import { clampPageParam, MAX_PAGE_LIMIT } from '@src/waste-management/common/dto/pagination.dto';
 
 /**
  * Generic accounts window: filter by role and/or status, hide archived by
@@ -21,16 +23,17 @@ import { Role } from '@src/user/enums/role.enum';
  */
 export class AccountsByRoleQueryDto {
   @IsOptional()
-  @Type(() => Number)
+  // Clamped, never rejected — pagination must not 400 on a bad/over-cap number.
+  @Transform(({ value }) => clampPageParam(value, 1, Number.MAX_SAFE_INTEGER, 1))
   @IsInt()
   @Min(1)
   page = 1;
 
   @IsOptional()
-  @Type(() => Number)
+  @Transform(({ value }) => clampPageParam(value, 1, MAX_PAGE_LIMIT, 10))
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(MAX_PAGE_LIMIT)
   limit = 10;
 
   @IsOptional()
@@ -141,16 +144,17 @@ export class CancelReuploadRequestsDto {
 /** Listing a role's accounts, filtered by status. */
 export class AccountListQueryDto {
   @IsOptional()
-  @Type(() => Number)
+  // Clamped, never rejected — pagination must not 400 on a bad/over-cap number.
+  @Transform(({ value }) => clampPageParam(value, 1, Number.MAX_SAFE_INTEGER, 1))
   @IsInt()
   @Min(1)
   page = 1;
 
   @IsOptional()
-  @Type(() => Number)
+  @Transform(({ value }) => clampPageParam(value, 1, MAX_PAGE_LIMIT, 10))
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(MAX_PAGE_LIMIT)
   limit = 10;
 
   /**

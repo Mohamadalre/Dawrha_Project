@@ -15,9 +15,9 @@ const row = (
   effectiveFrom = '2026-01-01',
 ): PriceRowView => ({ tier, price, conditionCode, effectiveFrom });
 
-const labels = new Map<string, string>([
-  ['p1:EXCELLENT', 'ممتاز'],
-  ['p1:GOOD', 'جيد'],
+const grades = new Map<string, { id: string; code: string; name: string; sort_order: number }>([
+  ['p1:EXCELLENT', { id: 'ce', code: 'EXCELLENT', name: 'ممتاز', sort_order: 1 }],
+  ['p1:GOOD', { id: 'cg', code: 'GOOD', name: 'جيد', sort_order: 2 }],
 ]);
 
 /**
@@ -36,7 +36,7 @@ describe('mapTierPrices', () => {
       GuestAudience.USER,
       [row(PricingTier.INDIVIDUAL, 0.3), row(PricingTier.COMPANY, 0.27)],
       'p1',
-      labels,
+      grades,
     );
 
     expect(out).toEqual({ individual: { price: 0.3 } });
@@ -53,7 +53,7 @@ describe('mapTierPrices', () => {
         row(PricingTier.FREE_FACILITY, 0.85, 'EXCELLENT'),
       ],
       'p1',
-      labels,
+      grades,
     );
 
     expect(Object.keys(out)).toEqual(['factory']);
@@ -103,7 +103,7 @@ describe('mapTierPrices', () => {
         row(PricingTier.FREE_FACILITY, 0.85, 'EXCELLENT'),
       ],
       'p1',
-      labels,
+      grades,
     );
 
     expect(Object.keys(out)).toEqual(['individual']);
@@ -115,7 +115,7 @@ describe('mapTierPrices', () => {
       GuestAudience.FACTORY,
       [row(PricingTier.INDIVIDUAL, 0.3), row(PricingTier.FACTORY, 0.9, 'EXCELLENT')],
       'p1',
-      labels,
+      grades,
     );
 
     expect(Object.keys(out)).toEqual(['factory']);
@@ -129,13 +129,13 @@ describe('mapTierPrices', () => {
         row(PricingTier.FACTORY, 0.6, 'GOOD'),
       ],
       'p1',
-      labels,
+      grades,
     );
 
     expect(out.factory.price_from).toBe(0.6);
     expect(out.factory.conditions).toEqual([
-      { condition: 'GOOD', condition_label: 'جيد', price: 0.6 },
-      { condition: 'EXCELLENT', condition_label: 'ممتاز', price: 0.9 },
+      { condition: { id: 'cg', code: 'GOOD', name: 'جيد', sort_order: 2 }, price: 0.6 },
+      { condition: { id: 'ce', code: 'EXCELLENT', name: 'ممتاز', sort_order: 1 }, price: 0.9 },
     ]);
   });
 
@@ -146,7 +146,7 @@ describe('mapTierPrices', () => {
       GuestAudience.FACTORY,
       [row(PricingTier.FACTORY, 0.75, null)],
       'p2',
-      labels,
+      grades,
     );
 
     expect(out.factory).toEqual({ price: 0.75 });
@@ -161,7 +161,7 @@ describe('mapTierPrices', () => {
       GuestAudience.USER,
       [row(PricingTier.INDIVIDUAL, 0.3)],
       'p1',
-      labels,
+      grades,
     );
 
     expect(out.company).toBeUndefined();
@@ -169,7 +169,7 @@ describe('mapTierPrices', () => {
   });
 
   it('returns nothing at all for a material priced for neither tier', () => {
-    expect(mapTierPrices(GuestAudience.USER, [], 'p1', labels)).toEqual({});
+    expect(mapTierPrices(GuestAudience.USER, [], 'p1', grades)).toEqual({});
   });
 
   it('takes the newest effective row when a flat tier has several live', () => {
@@ -180,21 +180,26 @@ describe('mapTierPrices', () => {
         row(PricingTier.INDIVIDUAL, 0.35, null, '2026-06-01'),
       ],
       'p1',
-      labels,
+      grades,
     );
 
     expect(out.individual).toEqual({ price: 0.35 });
   });
 
-  it('falls back to the raw code when a grade has no label', () => {
+  it('falls back to a code-only object when a grade is not in the map', () => {
     const out = mapTierPrices(
       GuestAudience.FACTORY,
       [row(PricingTier.FACTORY, 0.5, 'UNLABELLED')],
       'p1',
-      labels,
+      grades,
     );
 
-    expect(out.factory.conditions![0].condition_label).toBe('UNLABELLED');
+    expect(out.factory.conditions![0].condition).toEqual({
+      id: null,
+      code: 'UNLABELLED',
+      name: 'UNLABELLED',
+      sort_order: null,
+    });
   });
 });
 

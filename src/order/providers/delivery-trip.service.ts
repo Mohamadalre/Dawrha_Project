@@ -1582,9 +1582,12 @@ export class DeliveryTripService {
       status: trip.status,
       origin_warehouse_id: trip.originWarehouseId,
       truck_odoo_id: trip.odooTruckId ?? null,
-      driver_odoo_id: trip.odooDriverId ?? null,
-      driver_name: trip.driverName ?? null,
-      driver_phone: trip.driverPhone ?? null,
+      // The driver as one object — odoo id, name, phone — not a scattered trio.
+      driver: {
+        odoo_id: trip.odooDriverId ?? null,
+        name: trip.driverName ?? null,
+        phone: trip.driverPhone ?? null,
+      },
       route_distance_km: Number(trip.routeDistanceKm),
       delivery_cost: Number(trip.deliveryCost),
       currency: trip.currency,
@@ -1632,9 +1635,12 @@ export class DeliveryTripService {
       status: trip.status,
       origin_warehouse_id: trip.originWarehouseId,
       truck_odoo_id: trip.odooTruckId ?? null,
-      driver_odoo_id: trip.odooDriverId ?? null,
-      driver_name: trip.driverName ?? null,
-      driver_phone: trip.driverPhone ?? null,
+      // The driver as one object — odoo id, name, phone — not a scattered trio.
+      driver: {
+        odoo_id: trip.odooDriverId ?? null,
+        name: trip.driverName ?? null,
+        phone: trip.driverPhone ?? null,
+      },
       route_distance_km: Number(trip.routeDistanceKm),
       delivery_cost: Number(trip.deliveryCost),
       rate_per_km: Number(trip.ratePerKm),

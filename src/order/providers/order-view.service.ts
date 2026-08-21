@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
+import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
 import { Order } from '../entities/order.entity';
 import { OrderPart } from '../entities/order-part.entity';
 import { OrderPartLine } from '../entities/order-part-line.entity';
@@ -54,6 +55,7 @@ export class OrderViewService {
     private readonly odooSync: OdooSyncService,
     private readonly trips: DeliveryTripService,
     private readonly wallet: PointsWalletService,
+    private readonly conditions: ConditionsService,
   ) {}
 
   async listMine(accountId: string, page = 1, limit = 10, status?: OrderStatus) {
@@ -158,6 +160,17 @@ export class OrderViewService {
 
     const live = parts.filter((p) => !FAILED_PART_STATUSES.includes(p.status));
 
+    // The canonical grade object per (material, code), so every frozen line
+    // returns its grade in the SAME shape the catalogue does — an object, or
+    // null. A since-deleted grade falls back to a code-only object, never a
+    // bare string, so a historical order still renders consistently.
+    const orderLines = await this.lineRepo.find({
+      where: { partId: In(live.map((p) => p.id)) },
+    });
+    const gradeMap = await this.conditions.gradeMapFor([
+      ...new Set(orderLines.map((l) => l.productId)),
+    ]);
+
     const detailedParts = await Promise.all(
       live.map(async (part) => {
         const lines = await this.lineRepo.find({ where: { partId: part.id } });
@@ -186,8 +199,10 @@ export class OrderViewService {
           can_rate:
             part.status === OrderPartStatus.DELIVERED && !ratedParts.has(part.id),
           lines: lines.map((l) => ({
+            // Snapshot name (the material may since have been renamed or
+            // deleted); the grade as the single canonical object, or null.
             product_name: l.productName,
-            condition: l.conditionCode,
+            condition: ConditionsService.gradeObject(l.productId, l.conditionCode, gradeMap),
             quantity: Number(l.quantity),
             unit: l.unitType,
             unit_price: Number(l.unitPrice),
@@ -407,6 +422,90 @@ export class OrderViewService {
   }
 
   /** Queue a notification to the warehouse's manager in Odoo. */
+  /**
+   * Files a complaint against the WHOLE order — the buyer-facing way.
+   *
+   * The buyer sees one order, never the warehouse split, so they complain about
+   * the order, not a part. One complaint row is written with no part and no
+   * single warehouse; a warehouse-routed kind (shortage / quality) is then fanned
+   * out to EVERY warehouse that fulfilled the order, so each manager sees the
+   * dispute against their own deduction log. Delivery / billing kinds stay with
+   * the admin desk exactly as before.
+   */
+  async fileOrderComplaint(
+    accountId: string,
+    orderId: string,
+    input: { kind: ComplaintKind; description: string; claimedShortfall?: number },
+  ) {
+    const order = await this.mineOrThrow(accountId, orderId);
+    if (
+      order.status !== OrderStatus.DELIVERED &&
+      order.status !== OrderStatus.COMPLETED
+    ) {
+      throw new ConflictException(
+        'A complaint can be filed once the goods have been handed over',
+      );
+    }
+
+    const route = routeFor(input.kind);
+    const complaint = await this.complaintRepo.save(
+      this.complaintRepo.create({
+        // Whole-order scope: no part, no single warehouse.
+        orderId,
+        partId: undefined,
+        warehouseId: undefined,
+        kind: input.kind,
+        route,
+        status: ComplaintStatus.OPEN,
+        description: input.description,
+        claimedShortfall:
+          input.claimedShortfall != null ? String(input.claimedShortfall) : undefined,
+      }),
+    );
+
+    if (route === ComplaintRoute.WAREHOUSE) {
+      await this.notifyOrderWarehousesOfComplaint(complaint.id, order).catch((e) =>
+        winstonLogger.warn(
+          `Order complaint ${complaint.id} filed but not sent to the warehouses: ${(e as Error).message}`,
+          { context: 'COMPLAINT', channel: 'orders' },
+        ),
+      );
+    }
+
+    return {
+      message: 'Complaint filed',
+      complaint_id: complaint.id,
+      order_id: orderId,
+      routed_to: complaint.route,
+    };
+  }
+
+  /**
+   * Fans a whole-order warehouse complaint out to every warehouse that fulfilled
+   * it — one push per distinct warehouse of the order's live parts, so no
+   * manager is left out and none is told twice.
+   */
+  private async notifyOrderWarehousesOfComplaint(complaintId: string, order: Order) {
+    const complaint = await this.complaintRepo.findOne({ where: { id: complaintId } });
+    if (!complaint) return;
+    const parts = await this.partRepo.find({ where: { orderId: order.id } });
+    const live = parts.filter((p) => !FAILED_PART_STATUSES.includes(p.status));
+    const warehouseIds = [...new Set(live.map((p) => p.warehouseId))];
+    if (!warehouseIds.length) return;
+
+    const warehouses = await this.warehouseRepo.find({ where: { id: In(warehouseIds) } });
+    for (const warehouse of warehouses) {
+      if (!warehouse.odooWarehouseId) continue; // not mirrored → nothing to notify
+      await this.odooSync.enqueuePushComplaint({
+        complaintId,
+        odooWarehouseId: warehouse.odooWarehouseId,
+        kind: complaint.kind,
+        description: complaint.description,
+        orderNumber: order.orderNumber ?? '',
+      });
+    }
+  }
+
   private async notifyWarehouseOfComplaint(complaintId: string, part: OrderPart) {
     const complaint = await this.complaintRepo.findOne({ where: { id: complaintId } });
     if (!complaint) return;

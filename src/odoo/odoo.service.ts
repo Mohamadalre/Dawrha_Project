@@ -122,7 +122,6 @@ export class OdooService {
   // working.
   private username: string;
   private password: string;
-  private readonly groupId: number;
 
   constructor(
     private readonly httpService: HttpService,
@@ -133,7 +132,10 @@ export class OdooService {
     this.db = this.configService.get<string>('ODOO_DB')!;
     this.username = this.configService.get<string>('ODOO_USERNAME')!;
     this.password = this.configService.get<string>('ODOO_PASSWORD')!;
-    this.groupId = this.configService.get<number>('ODOO_GROUP_ID')!;
+    // NOTE: no ODOO_GROUP_ID. The admin group is resolved at runtime from its
+    // stable external id (`base.group_system`) in createAdminUser — a numeric
+    // group id changes with every fresh Odoo database, so hard-configuring one
+    // meant re-editing .env after every rebuild. The xmlid never changes.
   }
 
   // ---------------------------------------------------------------------------
@@ -266,6 +268,20 @@ export class OdooService {
 
   async updateProduct(odooId: number, values: Record<string, any>): Promise<void> {
     await this.callKw('recycle.product', 'write', [[odooId], values]);
+  }
+
+  /**
+   * Reads a product's master fields from Odoo — for the REVERSE sync, where an
+   * edit made on the Odoo screen is mirrored back to the backend. Only the
+   * fields the backend is willing to accept from Odoo travel (the name); pricing
+   * and existence stay the backend's to own.
+   */
+  async fetchProductInfo(odooId: number): Promise<{ name: string } | null> {
+    const rows = await this.callKw<any[]>('recycle.product', 'read', [
+      [odooId],
+      ['name'],
+    ]);
+    return rows?.[0] ? { name: rows[0].name } : null;
   }
 
   async deleteProduct(odooId: number): Promise<void> {
@@ -451,7 +467,10 @@ export class OdooService {
         email: values.email ?? false,
         phone: values.phone ?? false,
         // (6, 0, ids) REPLACES the user's groups with exactly this set.
-        groups_id: [[6, 0, [groupId]]],
+        // Odoo 19 renamed res.users.groups_id → group_ids (the groups system
+        // was refactored); the old name raises "Invalid field 'groups_id'",
+        // which is what made every additional-admin creation fail.
+        group_ids: [[6, 0, [groupId]]],
       },
     ]);
     if (!id) throw new InternalServerErrorException('Odoo did not return a user id');
@@ -937,6 +956,9 @@ export class OdooService {
         'year',
         'plate_number',
         'max_payload_kg',
+        // Bed dimensions authored in Odoo, mirrored onto the backend truck row.
+        'length_m',
+        'width_m',
         'warehouse_id',
         'is_active',
         'truck_type',

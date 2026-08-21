@@ -85,6 +85,29 @@ export class OdooWebhookController {
   }
 
   /**
+   * REVERSE product sync: a product's master field (its name) was edited on the
+   * Odoo screen. Odoo posts the product's own id here and the job mirrors the
+   * change back — the backend stays the master for a product's existence and its
+   * pricing, this only keeps the shared name from drifting. Ignored quietly when
+   * the id is absent (a malformed automated action must not 500 the Odoo write).
+   */
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Post('products')
+  @HttpCode(202)
+  async productChanged(
+    @Headers('x-odoo-webhook-secret') secret: string | undefined,
+    @Body() body: { odoo_product_id?: number },
+  ) {
+    this.assertAuthorized(secret);
+    const odooProductId = Number(body?.odoo_product_id);
+    if (Number.isInteger(odooProductId) && odooProductId > 0) {
+      await this.odooSync.enqueueSyncProductFromOdoo({ odooProductId });
+      return { message: 'Product mirror queued', result: { queued: 1 } };
+    }
+    return { message: 'Ignored — no product id', result: { queued: 0 } };
+  }
+
+  /**
    * A warehouse acted on one part of a buyer's order.
    *
    * This route was the missing half of the ordering flow: Odoo has always

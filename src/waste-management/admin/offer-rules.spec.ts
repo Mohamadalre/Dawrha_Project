@@ -7,35 +7,32 @@ import { OfferAudience } from '../enums/offer-audience.enum';
 /**
  * What an offer MEANS, and therefore what may be sent to create one.
  *
- * An offer names a SIDE of the trade and an AMOUNT. There is no offer aimed at
- * everybody, because the two sides move in opposite directions:
+ * An offer names a SIDE of the trade and a PERCENTAGE — and a percentage is the
+ * ONLY size it is ever given. There is no offer aimed at everybody, because the
+ * two sides move in opposite directions:
  *
  *   SELLERS — citizens and institutions — hand material in and are PAID. An
- *   offer to them is a rise: the amount is ADDED to what they already get;
+ *   offer to them is a rise: the percentage is ADDED to what they already get;
  *
  *   BUYERS — factories and free facilities — take material away and PAY. An
- *   offer to them is a reduction: the amount comes OFF what they already pay.
+ *   offer to them is a reduction: the percentage comes OFF what they already pay.
  *
- * The number is not a final price, and that is the whole reason it is an
- * amount. One offer reaches two roles who are priced differently, so a single
- * final price cannot be right for both — 7.50 is a discount off a factory's 10
- * and a rise on a free facility's 6. An amount applies to whatever each of
- * them already pays.
+ * A percentage, not an amount, on purpose. One offer reaches roles priced
+ * differently, and a percentage is the one figure fair to all of them — "10%
+ * off" is 10% of each role's OWN price, and on a graded material 10% of EACH
+ * grade's own price (a different amount per grade). The amount is DERIVED from
+ * the percentage against every price the offer touches, and the percentage is
+ * kept as the promise so a later price edit recomputes the amount.
  *
  * Two things follow, and everything below tests one of them:
  *
- *   only BUYERS are priced per GRADE, so only a buyer offer may name one — a
- *   seller is paid before the material is ever sorted;
+ *   a graded buyer offer applies its one percentage to EVERY grade, taken
+ *   against each grade's own price;
  *
- *   a buyer amount larger than a price does not produce a small price, it
- *   produces a NEGATIVE one, which means paying somebody to take the material
- *   away. It has to hold against every tier and grade the row faces.
- *
- * The PERCENTAGE is never accepted, only derived — from the amount and the
- * material's own price, every time either moves — so a "biggest offers" list
- * ranks by money rather than by somebody's arithmetic.
+ *   a buyer percentage of 100 or more would take the price to zero or below —
+ *   paying somebody to take the material away — so it is refused.
  */
-describe('offer rules — audience, amount, grades and the derived percentage', () => {
+describe('offer rules — audience, percentage, grades and the derived amount', () => {
   let service: AdminCatalogService;
   let offerRepo: any;
   let pricingRepo: any;
@@ -103,22 +100,13 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
     conditions = {
       hasConditions: jest.fn().mockResolvedValue(true),
       validateActiveCode: jest.fn(async (_p: string, c: string) => c.toUpperCase()),
-      // Every grade of the material, for the case where ONE amount is given and
-      // has to be applied — and separately checked — against each of them.
+      // Every grade of the material — a graded buyer offer applies its one
+      // percentage to each of them, taken against that grade's own price.
       activeForProduct: jest.fn(async () => [
         { id: 'cond-excellent', code: 'EXCELLENT' },
         { id: 'cond-good', code: 'GOOD' },
       ]),
-      // Resolves an ID against the material and hands back the row, so the
-      // service copies the CODE from what it resolved rather than trusting one
-      // sent alongside it.
-      resolveActiveById: jest.fn(async (_p: string, id: string) => {
-        const code = String(id).replace(/^cond-/, '').toUpperCase();
-        if (!['EXCELLENT', 'GOOD'].includes(code)) {
-          throw new BadRequestException('unknown condition for this material');
-        }
-        return { id, code };
-      }),
+      gradeMapFor: jest.fn(async () => new Map()),
     };
     odooSync = { enqueueUpdatePricing: jest.fn() };
     const noop = { invalidate: jest.fn(), record: jest.fn() };
@@ -141,6 +129,7 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
       {} as any, productRepo, {} as any, {} as any, {} as any, {} as any,
       pricingRepo, offerRepo, odooSync as any, noop as any, noop as any,
       {} as any, conditions, {} as any, dataSource as any,
+      { count: jest.fn().mockResolvedValue(0) } as any,
     );
   };
 
@@ -152,31 +141,31 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
   // ══════════════════════════════════════════════════════════════════
   // The audience decides the DIRECTION
   // ══════════════════════════════════════════════════════════════════
-  it('stores a seller offer as an amount ADDED, ONE ROW PER ROLE', async () => {
+  it('stores a seller offer as a percentage ADDED, ONE ROW PER ROLE', async () => {
     // Citizens list at 100 and institutions at 90. Naming no role means BOTH,
-    // and the offer is split into one row per role — each priced from its OWN
-    // price — rather than one shared row derived from whichever is cheapest.
-    const res: any = await create({ audience: OfferAudience.SELLERS, amount: 10 });
+    // and the offer is split into one row per role — each derived from its OWN
+    // price — so the SAME 10% becomes a different amount for each.
+    const res: any = await create({ audience: OfferAudience.SELLERS, percentage: 10 });
 
     expect(res.offers).toHaveLength(2);
     const byRole = Object.fromEntries(saved.map((o) => [o.targetRoles[0], o]));
-    // Same +10 to each, but a different derived percentage from each price:
-    // 10/100 = 10% for the citizen, 10/90 = 11.11% for the institution.
+    // 10% of 100 = 10 for the citizen, 10% of 90 = 9 for the institution — the
+    // percentage is the same, the amount is not.
     expect(Number(byRole[Role.CITIZEN].amount)).toBe(10);
     expect(Number(byRole[Role.CITIZEN].discountPercentage)).toBeCloseTo(10, 1);
-    expect(Number(byRole[Role.INSTITUTIONS].amount)).toBe(10);
-    expect(Number(byRole[Role.INSTITUTIONS].discountPercentage)).toBeCloseTo(11.11, 1);
+    expect(Number(byRole[Role.INSTITUTIONS].amount)).toBe(9);
+    expect(Number(byRole[Role.INSTITUTIONS].discountPercentage)).toBeCloseTo(10, 1);
     // Each row carries exactly its own role.
     expect(saved.map((o) => o.targetRoles)).toEqual([[Role.CITIZEN], [Role.INSTITUTIONS]]);
     expect(saved.every((o) => o.audience === OfferAudience.SELLERS)).toBe(true);
   });
 
-  it('lets a seller amount exceed the price — it is a rise, not a cut', async () => {
-    // The negative-price rule is about BUYERS only. Adding 500 to what a
+  it('lets a seller percentage exceed 100 — it is a rise, not a cut', async () => {
+    // The negative-price rule is about BUYERS only. Adding 500% to what a
     // citizen is paid is generous, not impossible, and refusing it would apply
     // a buyer's arithmetic to the opposite side of the trade.
     await expect(
-      create({ audience: OfferAudience.SELLERS, amount: 500 }),
+      create({ audience: OfferAudience.SELLERS, percentage: 500 }),
     ).resolves.toBeDefined();
   });
 
@@ -187,7 +176,7 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
       create({
         audience: OfferAudience.SELLERS,
         target_roles: [Role.CITIZEN, Role.FACTORY],
-        amount: 10,
+        percentage: 10,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -196,244 +185,129 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
     const res: any = await create({
       audience: OfferAudience.SELLERS,
       target_roles: [Role.INSTITUTIONS],
-      amount: 10,
+      percentage: 10,
     });
 
     expect(res.offers).toHaveLength(1);
-    // Measured against the INSTITUTION price of 90 alone — 11.11% — not
-    // against the citizen price it does not touch.
-    expect(Number(saved[0].discountPercentage)).toBeCloseTo(11.11, 1);
+    // 10% of the INSTITUTION price of 90 = 9, at 10%.
+    expect(Number(saved[0].amount)).toBe(9);
+    expect(Number(saved[0].discountPercentage)).toBeCloseTo(10, 1);
     expect(saved[0].targetRoles).toEqual([Role.INSTITUTIONS]);
   });
 
   // ══════════════════════════════════════════════════════════════════
-  // Only buyers have grades
+  // Only buyers have grades — and the percentage applies to all of them
   // ══════════════════════════════════════════════════════════════════
-  it('refuses a grade on a SELLER offer', async () => {
-    // A citizen is paid when the material is handed in, before it is sorted —
-    // there is no grade yet to price, so the request describes a distinction
-    // their price list does not have.
-    await expect(
-      create({
-        audience: OfferAudience.SELLERS,
-        amount: 10,
-        conditions: [{ condition_id: 'cond-excellent', amount: 10 }],
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('refuses a grade on a material that has none', async () => {
+  it('takes one percentage for buyers when the material has NO grades', async () => {
     conditions.hasConditions.mockResolvedValue(false);
 
-    await expect(
-      create({
-        audience: OfferAudience.BUYERS,
-        conditions: [{ condition_id: 'cond-excellent', amount: 10 }],
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('takes one flat amount for buyers when the material has NO grades', async () => {
-    conditions.hasConditions.mockResolvedValue(false);
-
-    const res: any = await create({ audience: OfferAudience.BUYERS, amount: 10 });
+    const res: any = await create({ audience: OfferAudience.BUYERS, percentage: 10 });
 
     // One row per buyer role (factory + free-facility), each flat (no grade).
     expect(res.offers).toHaveLength(2);
     expect(saved.every((o) => o.conditionCode === null && o.conditionId === null)).toBe(true);
+    // 10% of the flat buyer price of 80 = 8.
+    expect(saved.every((o) => Number(o.amount) === 8)).toBe(true);
   });
 
-  it('accepts SEVERAL grades of the same material, each with its own amount', async () => {
-    const res: any = await create({
-      audience: OfferAudience.BUYERS,
-      conditions: [
-        { condition_id: 'cond-excellent', amount: 20 },
-        { condition_id: 'cond-good', amount: 10 },
-      ],
-    });
-
-    // Two grades × two buyer roles (factory + free-facility) = four rows.
-    expect(res.offers).toHaveLength(4);
-    expect(saved.map((o) => o.conditionCode).sort()).toEqual(['EXCELLENT', 'EXCELLENT', 'GOOD', 'GOOD']);
-    // The named amount is the same for both roles of a grade; 20 for EXCELLENT,
-    // 10 for GOOD.
-    expect(saved.filter((o) => o.conditionCode === 'EXCELLENT').every((o) => Number(o.amount) === 20)).toBe(true);
-    expect(saved.filter((o) => o.conditionCode === 'GOOD').every((o) => Number(o.amount) === 10)).toBe(true);
-  });
-
-  it('applies ONE amount to EVERY grade when none is named', async () => {
-    // Naming no grade is not an error and not "the flat price" — a graded
-    // material has no flat buyer price. It means all of them, for every role.
-    const res: any = await create({ audience: OfferAudience.BUYERS, amount: 10 });
+  it('applies ONE percentage to EVERY grade for buyers', async () => {
+    // A graded material has no flat buyer price; a buyer offer therefore lands
+    // on all of its grades, for every buyer role.
+    const res: any = await create({ audience: OfferAudience.BUYERS, percentage: 10 });
 
     // Two grades × two buyer roles = four rows.
     expect(res.offers).toHaveLength(4);
     expect(saved.map((o) => o.conditionCode).sort()).toEqual(['EXCELLENT', 'EXCELLENT', 'GOOD', 'GOOD']);
+    // 10% of each grade's OWN price: 7 off EXCELLENT (70), 6 off GOOD (60).
+    expect(saved.filter((o) => o.conditionCode === 'EXCELLENT').every((o) => Number(o.amount) === 7)).toBe(true);
+    expect(saved.filter((o) => o.conditionCode === 'GOOD').every((o) => Number(o.amount) === 6)).toBe(true);
   });
 
-  it('refuses the same grade listed twice', async () => {
-    // Two amounts for one grade have no defined winner, so the buyer's quote
-    // would depend on nothing they can see.
-    await expect(
-      create({
-        audience: OfferAudience.BUYERS,
-        conditions: [
-          { condition_id: 'cond-excellent', amount: 20 },
-          { condition_id: 'cond-excellent', amount: 10 },
-        ],
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
+  it('stores each grade’s ID, not only its code', async () => {
+    // The code is not an identifier — it is unique only inside its own material
+    // — so the id is the link, and the foreign key behind it is what stops a
+    // grade being deleted while a live offer names it. The ids come from the
+    // resolved grades, never from the request.
+    await create({ audience: OfferAudience.BUYERS, percentage: 10 });
 
-  it('checks every grade belongs to THIS material', async () => {
-    // A code alone names nothing — two materials may each have a "GOOD" — and
-    // an offer filed under another material's grade would never match a cart
-    // line, so it would simply never apply to anything.
-    await expect(
-      create({
-        audience: OfferAudience.BUYERS,
-        conditions: [{ condition_id: 'cond-from-another-material', amount: 10 }],
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('stores the grade’s ID, not only its code', async () => {
-    // The code is not an identifier — it is unique only inside its own
-    // material — so the id is the link, and the foreign key behind it is what
-    // stops a grade being deleted while a live offer names it.
-    await create({
-      audience: OfferAudience.BUYERS,
-      conditions: [{ condition_id: 'cond-excellent', amount: 10 }],
-    });
-
-    expect(saved[0].conditionId).toBe('cond-excellent');
-    expect(saved[0].conditionCode).toBe('EXCELLENT');
-  });
-
-  it('copies the code FROM the resolved grade, never from the request', async () => {
-    // Sent alongside, a code could disagree with the id — and the code is the
-    // join key the price sheet and the basket use, so the offer would match
-    // the wrong price while looking correct.
-    await create({
-      audience: OfferAudience.BUYERS,
-      conditions: [
-        { condition_id: 'cond-excellent', amount: 10, condition: 'GOOD' } as any,
-      ],
-    });
-
-    expect(saved[0].conditionCode).toBe('EXCELLENT');
+    const byCode = Object.fromEntries(saved.map((o) => [o.conditionCode, o.conditionId]));
+    expect(byCode.EXCELLENT).toBe('cond-excellent');
+    expect(byCode.GOOD).toBe('cond-good');
   });
 
   it('leaves the grade link empty on a seller row', async () => {
     // A seller row names no grade, so it must hold no link either — a dangling
     // one would block that grade from ever being deleted.
-    await create({ audience: OfferAudience.SELLERS, amount: 10 });
+    await create({ audience: OfferAudience.SELLERS, percentage: 10 });
 
     expect(saved[0].conditionId).toBeNull();
     expect(saved[0].conditionCode).toBeNull();
   });
 
   // ══════════════════════════════════════════════════════════════════
-  // The amount can never drive a price negative
+  // The percentage can never drive a price to zero or below
   // ══════════════════════════════════════════════════════════════════
-  it('refuses a buyer amount equal to the grade’s price', async () => {
-    // Factory "excellent" lists at 70. Taking 70 off is not a free material,
-    // it is a price of zero — nothing is being sold.
+  it('refuses a buyer percentage of 100', async () => {
+    // At 100% the price reaches zero — nothing is being sold; beyond it the
+    // buyer would be paid to take the material away.
     await expect(
-      create({
-        audience: OfferAudience.BUYERS,
-        conditions: [{ condition_id: 'cond-excellent', amount: 70 }],
-      }),
+      create({ audience: OfferAudience.BUYERS, percentage: 100 }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('names the offending grade when one amount is spread over all of them', async () => {
-    // 65 is a fair cut off "excellent" at 70 and would take "good" at 60 to
-    // MINUS five — paying the factory to take the material away. The message
-    // has to say which grade, or the admin cannot tell what to change.
+  it('explains that a buyer offer at 100% reaches zero', async () => {
     await expect(
-      create({ audience: OfferAudience.BUYERS, amount: 65 }),
-    ).rejects.toThrow(/GOOD/);
-  });
-
-  it('explains the loss rather than only refusing', async () => {
-    await expect(
-      create({ audience: OfferAudience.BUYERS, amount: 65 }),
-    ).rejects.toThrow(/zero or below|paying the buyer/i);
-  });
-
-  it('checks a buyer amount against the CHEAPEST tier it faces', async () => {
-    // A buyer row faces both FACTORY and FREE_FACILITY. Make the free-facility
-    // grade cheaper than the factory one and an amount that clears the factory
-    // must still be refused — the row reaches both.
-    priceSheet[key(PricingTier.FREE_FACILITY, 'EXCELLENT')] = 15;
-
-    await expect(
-      create({
-        audience: OfferAudience.BUYERS,
-        conditions: [{ condition_id: 'cond-excellent', amount: 20 }],
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+      create({ audience: OfferAudience.BUYERS, percentage: 100 }),
+    ).rejects.toThrow(/100%|zero|paid to take/i);
   });
 
   it('refuses an offer on a material with no live price to move', async () => {
     priceSheet = {};
 
     await expect(
-      create({ audience: OfferAudience.SELLERS, amount: 10 }),
+      create({ audience: OfferAudience.SELLERS, percentage: 10 }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   // ══════════════════════════════════════════════════════════════════
-  // The percentage is DERIVED
+  // The amount is DERIVED from the percentage
   // ══════════════════════════════════════════════════════════════════
-  it('computes the percentage from the amount and the material’s own price', async () => {
-    // Factory "excellent" lists at 70; 35 off is exactly half.
-    await create({
-      audience: OfferAudience.BUYERS,
-      conditions: [{ condition_id: 'cond-excellent', amount: 35 }],
-    });
+  it('derives the amount from the percentage and the material’s own price', async () => {
+    // Factory "excellent" lists at 70; 50% off is exactly 35.
+    await create({ audience: OfferAudience.BUYERS, percentage: 50 });
 
-    expect(Number(saved[0].discountPercentage)).toBe(50);
+    const excellent = saved.find((o) => o.conditionCode === 'EXCELLENT');
+    expect(Number(excellent.amount)).toBe(35);
+    expect(Number(excellent.discountPercentage)).toBe(50);
   });
 
-  it('measures each grade against ITS OWN price, not the cheapest', async () => {
-    // "excellent" lists at 70 and "good" at 60. 30 off each is ~43% and 50%,
-    // not one figure for both.
-    await create({
-      audience: OfferAudience.BUYERS,
-      conditions: [
-        { condition_id: 'cond-excellent', amount: 30 },
-        { condition_id: 'cond-good', amount: 30 },
-      ],
-    });
+  it('applies the percentage to each grade against ITS OWN price', async () => {
+    // "excellent" lists at 70 and "good" at 60. 30% off is 21 and 18 — the same
+    // share, a different amount per grade.
+    await create({ audience: OfferAudience.BUYERS, percentage: 30 });
 
     const byGrade = Object.fromEntries(
-      saved.map((o) => [o.conditionCode, Number(o.discountPercentage)]),
+      saved
+        .filter((o) => o.targetRoles?.[0] === Role.FACTORY || !o.targetRoles)
+        .map((o) => [o.conditionCode, Number(o.amount)]),
     );
-    expect(byGrade.EXCELLENT).toBeCloseTo(42.86, 1);
-    expect(byGrade.GOOD).toBe(50);
+    expect(byGrade.EXCELLENT).toBeCloseTo(21, 5);
+    expect(byGrade.GOOD).toBeCloseTo(18, 5);
+    // Every row advertises the same 30%.
+    expect(saved.every((o) => Number(o.discountPercentage) === 30)).toBe(true);
   });
 
-  it('reports the SMALLEST percentage across a mixed audience', async () => {
-    // Citizens list at 100 and institutions at 90, so +45 is 45% for one and
-    // 50% for the other. The honest headline is the one every targeted seller
-    // is guaranteed to get at least.
-    await create({ audience: OfferAudience.SELLERS, amount: 45 });
-
-    expect(Number(saved[0].discountPercentage)).toBe(45);
-  });
-
-  it('ignores any percentage the caller tries to send', async () => {
-    // The field is gone from the DTO; even smuggled past validation, nothing
-    // reads it. Ranking by a typed percentage ranks by arithmetic, not money.
+  it('ignores a smuggled amount field — only the percentage is read', async () => {
+    // `amount` is gone from the DTO; even smuggled past validation, nothing
+    // reads it. The stored amount is derived from the percentage alone.
     await create({
       audience: OfferAudience.BUYERS,
-      conditions: [{ condition_id: 'cond-excellent', amount: 35 }],
-      discount_percentage: 99,
+      percentage: 50,
+      amount: 999,
     });
 
-    expect(Number(saved[0].discountPercentage)).toBe(50);
+    const excellent = saved.find((o) => o.conditionCode === 'EXCELLENT');
+    expect(Number(excellent.amount)).toBe(35); // 50% of 70, not 999
   });
 
   // ══════════════════════════════════════════════════════════════════
@@ -444,7 +318,7 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
     // MATERIAL PRICE changed, so an offer left that screen showing the old
     // figure while the apps sold at another — for as long as nobody happened
     // to edit that material's price.
-    await create({ audience: OfferAudience.SELLERS, amount: 10 });
+    await create({ audience: OfferAudience.SELLERS, percentage: 10 });
 
     expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: GRADED });
   });
@@ -452,7 +326,7 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
   it('does not push a material Odoo has never seen', async () => {
     productRepo.findOne.mockResolvedValue({ id: GRADED, odooProductId: null, isActive: true });
 
-    await create({ audience: OfferAudience.SELLERS, amount: 10 });
+    await create({ audience: OfferAudience.SELLERS, percentage: 10 });
 
     expect(odooSync.enqueueUpdatePricing).not.toHaveBeenCalled();
   });
@@ -461,7 +335,9 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
   // One live offer per (material, grade, audience)
   // ══════════════════════════════════════════════════════════════════
   it('refuses a second live offer on the same grade and audience', async () => {
-    // Both are role-specific on FACTORY, so they clash at the SAME level.
+    // A factory-specific offer already covers EXCELLENT. A new factory-specific
+    // buyer offer lands on EXCELLENT too (its percentage applies to every
+    // grade), so the two clash at the SAME level.
     offerRepo.find.mockResolvedValue([
       { id: 'existing', conditionCode: 'EXCELLENT', targetRoles: [Role.FACTORY], roleSpecific: true },
     ]);
@@ -470,7 +346,7 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
       create({
         audience: OfferAudience.BUYERS,
         target_roles: [Role.FACTORY],
-        conditions: [{ condition_id: 'cond-excellent', amount: 10 }],
+        percentage: 10,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
@@ -481,13 +357,14 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
     // factories at read time, so this is not a duplicate.
     offerRepo.find.mockResolvedValue([
       { id: 'general', conditionCode: 'EXCELLENT', targetRoles: [Role.FACTORY], roleSpecific: false },
+      { id: 'general2', conditionCode: 'GOOD', targetRoles: [Role.FACTORY], roleSpecific: false },
     ]);
 
     await expect(
       create({
         audience: OfferAudience.BUYERS,
         target_roles: [Role.FACTORY],
-        conditions: [{ condition_id: 'cond-excellent', amount: 10 }],
+        percentage: 10,
       }),
     ).resolves.toBeDefined();
   });
@@ -502,20 +379,17 @@ describe('offer rules — audience, amount, grades and the derived percentage', 
     await expect(
       create({
         audience: OfferAudience.BUYERS,
-        conditions: [{ condition_id: 'cond-excellent', amount: 10 }],
+        percentage: 10,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });
 
 /**
- * The two narrow edits: when an offer ends, and how much it moves the price.
- *
- * Separate routes from the general update because they are the edits made under
- * time pressure, and the general one requires re-sending the audience — where a
- * slip silently flips the direction the price moves in.
+ * Editing an offer: its window, and its size — where size is a PERCENTAGE only,
+ * exactly as on create. There is no amount input on edit either.
  */
-describe('offer validity and amount edits', () => {
+describe('offer validity and percentage edits', () => {
   let service: AdminCatalogService;
   let offerRepo: any;
   let productRepo: any;
@@ -544,7 +418,8 @@ describe('offer validity and amount edits', () => {
     service = new AdminCatalogService(
       {} as any, productRepo, {} as any, {} as any, {} as any, {} as any,
       pricingRepo, offerRepo, odooSync as any, { record: jest.fn() } as any,
-      cache as any, {} as any, {} as any, {} as any, {} as any,
+      cache as any, {} as any, { gradeMapFor: jest.fn(async () => new Map()) } as any, {} as any, {} as any,
+      { count: jest.fn().mockResolvedValue(0) } as any,
     );
   });
 
@@ -616,34 +491,34 @@ describe('offer validity and amount edits', () => {
     expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: 'p1' });
   });
 
-  // ── amount ────────────────────────────────────────────────────────
-  it('changes the amount and re-derives the percentage', async () => {
-    // The list price is 100, so 40 off is 40%. Leaving the stored 10% would
-    // advertise a saving this amount does not give.
+  // ── percentage ──────────────────────────────────────────────────────
+  it('changes the percentage and re-derives the amount', async () => {
+    // The list price is 100, so 40% off is an amount of 40. Leaving the stored
+    // 10% would advertise a saving this size does not give.
     offerRepo.findOne.mockResolvedValue(existing());
 
-    await service.updateOffer('a', 'off-1', { amount: 40 } as any);
+    await service.updateOffer('a', 'off-1', { percentage: 40 } as any);
 
     expect(offerRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({ amount: '40', discountPercentage: '40' }),
     );
   });
 
-  it('refuses an amount that would take the price to zero or below', async () => {
+  it('refuses a buyer percentage that would take the price to zero or below', async () => {
     offerRepo.findOne.mockResolvedValue(existing());
 
     await expect(
-      service.updateOffer('a', 'off-1', { amount: 100 } as any),
+      service.updateOffer('a', 'off-1', { percentage: 100 } as any),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('moves the window in the SAME request as the amount', async () => {
-    // Two calls would leave the offer live at the new amount on the old dates
+  it('moves the window in the SAME request as the percentage', async () => {
+    // Two calls would leave the offer live at the new size on the old dates
     // in between — long enough for a real order to be priced by it.
     offerRepo.findOne.mockResolvedValue(existing());
 
     await service.updateOffer('a', 'off-1', {
-      amount: 40,
+      percentage: 40,
       valid_until: '2026-12-31T00:00:00Z',
     } as any);
 
@@ -655,33 +530,59 @@ describe('offer validity and amount edits', () => {
     );
   });
 
-  it('refuses an amount edit that also ends the offer before it starts', async () => {
+  it('refuses a percentage edit that also ends the offer before it starts', async () => {
     offerRepo.findOne.mockResolvedValue(existing());
 
     await expect(
       service.updateOffer('a', 'off-1', {
-        amount: 40,
+        percentage: 40,
         valid_until: '2025-01-01T00:00:00Z',
       } as any),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('leaves the window alone when only the amount is sent', async () => {
+  it('leaves the window alone when only the percentage is sent', async () => {
     offerRepo.findOne.mockResolvedValue(existing());
 
-    await service.updateOffer('a', 'off-1', { amount: 40 } as any);
+    await service.updateOffer('a', 'off-1', { percentage: 40 } as any);
 
     expect(offerRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({ validUntil: new Date('2026-06-01T00:00:00Z') }),
     );
   });
 
-  it('tells Odoo when the amount moves', async () => {
+  it('tells Odoo when the percentage moves', async () => {
     offerRepo.findOne.mockResolvedValue(existing());
 
-    await service.updateOffer('a', 'off-1', { amount: 40 } as any);
+    await service.updateOffer('a', 'off-1', { percentage: 40 } as any);
 
     expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: 'p1' });
+  });
+
+  // ── deactivate / reactivate ────────────────────────────────────────
+  it('deactivates an offer without deleting it, and tells Odoo', async () => {
+    // The "turn it off" switch: the row survives (admin still sees it), but it
+    // is no longer live, so it drops out of every buyer catalogue — and Odoo's
+    // sheet is refreshed so the offer price disappears there too.
+    offerRepo.findOne.mockResolvedValue(existing());
+
+    await service.updateOffer('a', 'off-1', { is_active: false } as any);
+
+    expect(offerRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ isActive: false }),
+    );
+    expect(offerRepo.delete).not.toHaveBeenCalled();
+    expect(odooSync.enqueueUpdatePricing).toHaveBeenCalledWith({ productId: 'p1' });
+  });
+
+  it('reactivates a switched-off offer', async () => {
+    offerRepo.findOne.mockResolvedValue(existing({ isActive: false }));
+
+    await service.updateOffer('a', 'off-1', { is_active: true } as any);
+
+    expect(offerRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ isActive: true }),
+    );
   });
 
   // ── delete ────────────────────────────────────────────────────────

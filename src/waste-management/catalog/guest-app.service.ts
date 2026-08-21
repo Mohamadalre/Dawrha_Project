@@ -40,7 +40,10 @@ export interface TierPrice {
   /** Graded tiers only: cheapest grade, so a list can show "from X". */
   price_from?: number;
   /** Graded tiers only: every grade of THIS material with its own price. */
-  conditions?: { condition: string; condition_label: string; price: number }[];
+  conditions?: {
+    condition: { id: string | null; code: string; name: string; sort_order: number | null } | null;
+    price: number;
+  }[];
 }
 
 /** The subset of a pricing row this shaping needs — keeps the function testable. */
@@ -73,7 +76,7 @@ export function mapTierPrices(
   audience: GuestAudience,
   rows: PriceRowView[],
   productId: string,
-  conditionLabels: Map<string, string>,
+  conditionGrades: Map<string, { id: string; code: string; name: string; sort_order: number }>,
 ): Record<string, TierPrice> {
   const out: Record<string, TierPrice> = {};
 
@@ -85,10 +88,8 @@ export function mapTierPrices(
       const graded = tierRows
         .filter((r) => r.conditionCode)
         .map((r) => ({
-          condition: r.conditionCode as string,
-          condition_label:
-            conditionLabels.get(`${productId}:${r.conditionCode}`) ??
-            (r.conditionCode as string),
+          // The single canonical grade object, the same shape every route uses.
+          condition: ConditionsService.gradeObject(productId, r.conditionCode, conditionGrades),
           price: Number(r.price),
         }))
         .sort((a, b) => a.price - b.price);
@@ -208,7 +209,14 @@ export class GuestAppService {
       })),
       pagination: buildPagination(total, query.page, query.limit),
     };
-    await this.cache.set('categories', cacheKey, result);
+    // Never cache an EMPTY catalogue. An empty result is almost always a
+    // transient startup state (data not seeded / synced yet); pinning it for the
+    // 12h TTL is exactly how "the default page (limit 10) shows nothing while
+    // other limits work" happened — the empty page was cached before any data
+    // arrived through a path that does not bump the version (a seed, a migration,
+    // an out-of-band insert). Skipping the write costs one cheap query while the
+    // catalogue is empty and makes the first real data appear immediately.
+    if (total > 0) await this.cache.set('categories', cacheKey, result);
     return result;
   }
 
@@ -252,7 +260,9 @@ export class GuestAppService {
       products: await this.mapProducts(audience, rows),
       pagination: buildPagination(total, query.page, query.limit),
     };
-    await this.cache.set('products', cacheKey, result);
+    // Same guard as `categories`: an empty list is a transient state, never
+    // worth pinning for the TTL. See the note there.
+    if (total > 0) await this.cache.set('products', cacheKey, result);
     return result;
   }
 
@@ -311,15 +321,22 @@ export class GuestAppService {
       .take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
+    const gradeMap = await this.conditions.gradeMapFor([
+      ...new Set(rows.map((o) => o.productId)),
+    ]);
     return {
       offers: rows.map((o) => ({
         offer_id: o.id,
-        product_id: o.productId,
-        product_name: o.product?.name ?? null,
-        product_image: o.product?.imageURL ?? null,
+        // The material as one object — id, name, image — not a scattered trio.
+        product: {
+          id: o.productId,
+          name: o.product?.name ?? null,
+          image: o.product?.imageURL ?? null,
+        },
         amount: Number(o.amount),
         discount_percentage: Number(o.discountPercentage),
-        condition: o.conditionCode ?? null,
+        // The grade as the single canonical object, or null.
+        condition: ConditionsService.gradeObject(o.productId, o.conditionCode, gradeMap),
         description: o.description ?? null,
         valid_from: o.validFrom,
         valid_until: o.validUntil ?? null,
@@ -445,13 +462,13 @@ export class GuestAppService {
     if (!rows.length) return [];
     const ids = rows.map((p) => p.id);
 
-    const [prices, unitLabels, offers, conditionLabels] = await Promise.all([
+    const [prices, unitLabels, offers, conditionGrades] = await Promise.all([
       preloaded ?? this.livePrices(audience, ids),
       this.units.labelMap(),
       this.bestOffers(audience, ids),
-      // Keyed by (material, code): the same code names different grades on
-      // different materials, so a bare code cannot be labelled.
-      this.conditions.labelMapFor(ids),
+      // The canonical grade object per (material, code): the same code names
+      // different grades on different materials.
+      this.conditions.gradeMapFor(ids),
     ]);
 
     return rows.map((p) => {
@@ -461,11 +478,11 @@ export class GuestAppService {
         name: p.name,
         description: p.description ?? null,
         image: p.imageURL ?? null,
-        category_id: p.categoryId,
-        category_name: p.category?.name ?? null,
-        unit_type: p.unitType,
-        unit_label: unitLabels.get(p.unitType) ?? p.unitType,
-        prices: mapTierPrices(audience, prices.get(p.id) ?? [], p.id, conditionLabels),
+        // The category as one object, matching the authenticated catalogue.
+        category: { id: p.categoryId, name: p.category?.name ?? null },
+        // The unit as one object — code AND label — not a scattered pair.
+        unit: { code: p.unitType, label: unitLabels.get(p.unitType) ?? p.unitType },
+        prices: mapTierPrices(audience, prices.get(p.id) ?? [], p.id, conditionGrades),
         has_offer: !!offer,
         offer_amount: offer ? Number(offer.amount) : null,
         discount_percentage: offer ? Number(offer.discountPercentage) : null,

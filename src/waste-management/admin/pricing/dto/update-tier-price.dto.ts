@@ -52,4 +52,17 @@ export class UpdateTierPriceDto {
   @IsOptional()
   @IsDateString()
   effective_from?: string;
+
+  /**
+   * Optional END date, set at the moment the price is added.
+   *
+   * The price is live from `effective_from` until this instant, then the expiry
+   * job sweeps it to history and the material falls out of the catalogues for
+   * that tier. Omit for an open-ended price (the usual case). Must be in the
+   * future — a past end date is rejected rather than creating a price already
+   * dead on arrival.
+   */
+  @IsOptional()
+  @IsDateString()
+  effective_until?: string;
 }

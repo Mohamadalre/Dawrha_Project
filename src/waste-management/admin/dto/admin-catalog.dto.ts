@@ -16,7 +16,6 @@ import {
   MaxLength,
   Max,
   Min,
-  ValidateNested,
 } from 'class-validator';
 import { PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 import { Role } from '@src/user/enums/role.enum';
@@ -240,32 +239,6 @@ export class CreateUnitDto {
   allows_tolerance?: boolean;
 }
 
-/**
- * One grade of a material, and what it costs under the offer.
- *
- * Graded buyers are priced per condition, so an offer aimed at them is not one
- * number — it is a number per grade they are actually being offered. A single
- * price would have to stand for "excellent" and "poor" alike, which is the
- * distinction the grades exist to draw.
- */
-export class OfferConditionAmountDto {
-  /**
-   * The grade, BY ID.
-   *
-   * A code is unique only inside its own material, so "GOOD" says nothing
-   * about whose GOOD it is. An offer accepted by code could be filed against
-   * another material's grade, where it would never match a basket line.
-   */
-  @IsUUID()
-  condition_id: string;
-
-  /** How much comes OFF this grade's price. */
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0.001)
-  amount: number;
-}
-
 export class OfferConditionPriceDto {
   /**
    * The grade, BY ID.
@@ -315,64 +288,28 @@ export class CreateOfferDto {
   target_roles?: Role[];
 
   /**
-   * The AMOUNT the price moves by — added for sellers, taken off for buyers.
+   * The offer as a PERCENTAGE of the price — the ONLY way an offer is stated.
    *
-   * Not a final price. One offer reaches two roles who are priced differently,
-   * and a single final price cannot be right for both: 7.50 is a discount off
-   * a factory's 10 and a rise on a free facility's 6. An amount applies to
-   * whatever each of them already pays.
+   * A percentage, not an amount, on purpose. One offer reaches roles priced
+   * differently, and a percentage is the one figure that is fair to all of them:
+   * "20% off" is 20% of each role's OWN price, and on a graded material it is
+   * 20% of EACH grade's own price (a different amount per grade) — which is what
+   * "a fifth off" actually means and what a single flat amount could never say.
    *
-   * Optional here and resolved by the SERVICE, because a buyer offer on a
-   * graded material states its amounts per grade instead — which a DTO cannot
-   * know, since only the material knows whether it is graded.
+   * The stored amount is DERIVED from this percentage against every price the
+   * offer touches, and the percentage is kept as the promise: when the
+   * material's price is later edited, the amount is recomputed so the discount
+   * stays the same share it was created as.
+   *
+   * Required. Sellers may exceed 100% (a generous rise); a buyer offer is capped
+   * below 100 by the negative-price rule in the service, and the bound here
+   * catches a typo before any price is read.
    */
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0.001)
-  amount?: number;
-
-  /**
-   * The offer expressed as a PERCENTAGE of the price instead of an amount.
-   *
-   * Mutually exclusive with `amount` — sending both is refused rather than
-   * silently preferring one, because the two would disagree the moment a price
-   * moved and there would be no way to tell which the administrator meant.
-   *
-   * The stored amount is derived from it against each price the offer touches,
-   * so a percentage offer on a graded material yields a DIFFERENT amount per
-   * grade — 25% of a 70 grade is 17.50 and of a 60 grade is 15 — which is what
-   * "a quarter off" actually means and what a single flat amount could not say.
-   *
-   * The difference from `amount` shows up LATER: when the material's price is
-   * edited, a percentage offer keeps its percentage and has its amount
-   * recomputed, while an amount offer keeps its amount.
-   *
-   * Capped at 100 for a buyer offer by the negative-price rule anyway; the
-   * bound here catches the typo before any price is read.
-   */
-  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
   @Max(1000)
-  percentage?: number;
-
-  /**
-   * Per-grade amounts, for a BUYER offer on a graded material.
-   *
-   * Several grades may be offered at once, each with its own reduction. Every
-   * grade named must belong to this material.
-   *
-   * Omitting it on a graded material is legitimate and means "every grade" —
-   * the flat `amount` above is then applied to each of them, and refused if it
-   * would drive any single grade below zero.
-   */
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => OfferConditionAmountDto)
-  conditions?: OfferConditionAmountDto[];
+  percentage: number;
 
   @IsOptional()
   @IsString()
@@ -412,12 +349,10 @@ export class UpdateOfferDto {
   @MaxLength(1000)
   description?: string;
 
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0.001)
-  amount?: number;
-
+  /**
+   * The new size of the offer, as a PERCENTAGE — the only way its size is
+   * stated, on edit exactly as on create. There is no amount input.
+   */
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -433,6 +368,19 @@ export class UpdateOfferDto {
   @IsOptional()
   @IsDateString()
   valid_until?: string | null;
+
+  /**
+   * Deactivate (`false`) or reactivate (`true`) the offer WITHOUT deleting it.
+   *
+   * A deactivated offer stops being live immediately — it drops out of every
+   * buyer/guest catalogue and offers list at once, while the admin still sees it
+   * (status=all) and can switch it back on. This is the deliberate "turn it off"
+   * that a past end-date cannot express (the window must end after it starts),
+   * and unlike delete it keeps the row and its history.
+   */
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
 }
 
 export class CreateConditionDto {

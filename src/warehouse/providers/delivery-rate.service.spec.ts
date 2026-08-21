@@ -31,7 +31,6 @@ describe('DeliveryRateService', () => {
     isActive: true,
     effectiveFrom: new Date('2026-01-01'),
     effectiveUntil: null,
-    note: null,
     createdAt: new Date('2026-01-01'),
     ...over,
   });
@@ -88,26 +87,35 @@ describe('DeliveryRateService', () => {
   });
 
   it('records who set it and when', async () => {
-    await service.set({ rate_per_km: 0.4, note: 'Fuel increase' }, ADMIN);
+    await service.set({ rate_per_km: 0.4 }, ADMIN);
 
     expect(saved[0]).toMatchObject({
       createdBy: ADMIN,
-      note: 'Fuel increase',
       effectiveFrom: expect.any(Date),
     });
   });
 
   // ------------------------------------------------------------------
-  // Correcting the current rate
+  // Editing the current rate — VERSIONED, not in place
   // ------------------------------------------------------------------
-  it('corrects the rate in force', async () => {
+  it('edits by closing the old version and opening a new one', async () => {
     repo.findOne.mockResolvedValue(rate());
 
     const res: any = await service.update('r1', { rate_per_km: 0.9 }, ADMIN);
 
+    // The edited row is CLOSED and its expiry stamped to the edit time — the
+    // timeline records exactly when it stopped being in force.
+    expect(repo.update).toHaveBeenCalledWith(
+      { id: 'r1' },
+      expect.objectContaining({ isActive: false, effectiveUntil: expect.any(Date) }),
+    );
+    // A new active version carries the corrected figure; untouched fields keep
+    // their value — an edit is not a reset.
     expect(res.result.rate_per_km).toBe(0.9);
-    // Untouched fields keep their value — a correction is not a reset.
     expect(res.result.base_fee).toBe(2);
+    expect(saved[0]).toMatchObject({ ratePerKm: '0.9', isActive: true });
+    // The whole thing is one transaction — two active rows must never exist.
+    expect(dataSource.transaction).toHaveBeenCalledTimes(1);
   });
 
   it('refuses to rewrite a SUPERSEDED rate', async () => {

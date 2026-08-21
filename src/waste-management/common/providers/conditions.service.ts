@@ -148,6 +148,77 @@ export class ConditionsService {
     return map;
   }
 
+  /**
+   * `productId:code` → the grade's sort order, for a set of materials at once.
+   *
+   * The order the admin arranged their grades in is part of a grade's identity
+   * to a buyer — it is how "best" sits above "good" on their screen — so every
+   * catalogue view that lists grades ships it alongside the label. Keyed by the
+   * (material, code) pair for the same reason the labels are: a code is unique
+   * only inside its own material.
+   */
+  async sortOrderMapFor(productIds: string[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (!productIds.length) return map;
+
+    const rows = await this.conditionRepo.find({
+      where: { productId: In(productIds) },
+    });
+    for (const row of rows) {
+      map.set(`${row.productId}:${row.code}`, row.sortOrder);
+    }
+    return map;
+  }
+
+  /**
+   * `productId:code` → the CANONICAL grade object every response returns a grade
+   * in: `{ id, code, name, sort_order }`.
+   *
+   * One builder so no two routes disagree on how a grade looks. `name` is the
+   * Arabic label (the app is Arabic-first, and this is what the old scattered
+   * `condition_label` already showed). Keyed by the (material, code) pair
+   * because a code is unique only inside its own material.
+   */
+  async gradeMapFor(
+    productIds: string[],
+  ): Promise<Map<string, { id: string; code: string; name: string; sort_order: number }>> {
+    const map = new Map<
+      string,
+      { id: string; code: string; name: string; sort_order: number }
+    >();
+    if (!productIds.length) return map;
+
+    const rows = await this.conditionRepo.find({
+      where: { productId: In(productIds) },
+    });
+    for (const r of rows) {
+      map.set(`${r.productId}:${r.code}`, {
+        id: r.id,
+        code: r.code,
+        name: r.nameAr,
+        sort_order: r.sortOrder,
+      });
+    }
+    return map;
+  }
+
+  /**
+   * The canonical grade object for one (material, code), from a map built by
+   * `gradeMapFor`. Falls back to a code-only object when the grade is unknown —
+   * a frozen order/cart line naming a since-deleted grade, or the `UNGRADED`
+   * placeholder — so the SHAPE is always the same, never a bare string.
+   */
+  static gradeObject(
+    productId: string,
+    code: string | null | undefined,
+    gradeMap: Map<string, { id: string; code: string; name: string; sort_order: number }>,
+  ): { id: string | null; code: string; name: string; sort_order: number | null } | null {
+    if (!code) return null;
+    const found = gradeMap.get(`${productId}:${code}`);
+    if (found) return found;
+    return { id: null, code, name: code, sort_order: null };
+  }
+
   /** Called by the admin write-side after any grade mutation. */
   invalidate(productId?: string): void {
     if (productId) this.byProduct.delete(productId);

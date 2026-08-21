@@ -22,6 +22,8 @@ describe('PointsWalletService', () => {
       rates ?? ({ forRole: jest.fn().mockResolvedValue(null) } as any),
       notifications ?? ({ createNotification: jest.fn().mockResolvedValue({}) } as any),
       stageRepo ?? ({ find: jest.fn().mockResolvedValue([]) } as any),
+      // Snapshot baseline: none by default → every row trends SAME.
+      { previousRanks: jest.fn().mockResolvedValue(new Map()), refreshBaseline: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
   describe('eligibility', () => {

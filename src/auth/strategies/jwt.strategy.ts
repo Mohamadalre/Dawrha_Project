@@ -6,6 +6,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Account } from '@src/user/entities/account.entity';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
+import { UserDevice } from '@src/auth/entities/user-device.entity';
 import { RedisService } from '@src/core/redis/redis.service';
 
 
@@ -15,6 +16,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly configService: ConfigService,
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
+    @InjectRepository(UserDevice)
+    private readonly deviceRepository: Repository<UserDevice>,
     private readonly redisService: RedisService
   ) {
     super({
@@ -57,8 +60,19 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
 
 
-    // `language` is read FRESH from the account (not the token) so a language
-    // change in settings takes effect on the very next request, no re-login.
-    return { id: account.id, role: payload.role, email: account.email, accountStatus: account.accountStatus, language: account.language, jti: payload.jti };
+    // The EFFECTIVE language is per DEVICE, with the account as the fallback: the
+    // token carries the deviceId, so each device this account signed in from can
+    // read responses in its own language, and a device that never chose one
+    // inherits the account default. Read fresh (not from the token) so a change
+    // in settings takes effect on the very next request, no re-login.
+    let language = account.language;
+    if (payload.deviceId) {
+      const device = await this.deviceRepository.findOne({
+        where: { accountId: account.id, deviceId: payload.deviceId },
+        select: ['id', 'language'],
+      });
+      if (device?.language) language = device.language;
+    }
+    return { id: account.id, role: payload.role, email: account.email, accountStatus: account.accountStatus, language, deviceId: payload.deviceId, jti: payload.jti };
   }
 }

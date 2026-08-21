@@ -15,16 +15,27 @@ import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { Account } from '@src/user/entities/account.entity';
 import { OdooService } from '@src/odoo/odoo.service';
-import { CreateOdooAdminDto, UpdateOdooAdminDto } from './dto/update-odoo-admin.dto';
+import {
+  CreateOdooAdminDto,
+  UpdateOdooAdminCredentialsDto,
+  UpdateOdooAdminDto,
+} from './dto/update-odoo-admin.dto';
+import { BadRequestException } from '@nestjs/common';
 
 /**
  * The Odoo admin account, managed from the backend by the platform admin.
  *
- * "Two-way consistency": an edit here writes to BOTH sides in one call — the
- * Odoo `res.users` the backend connects as, AND the caller's own backend admin
- * account — so the same person's name / email / phone never drift apart between
- * the two systems. `login` and `password` are intentionally not touchable: they
- * are the credentials the backend authenticates to Odoo with.
+ * "Two-way consistency": a profile edit here writes to BOTH sides in one call —
+ * the Odoo `res.users` the backend connects as, AND the caller's own backend
+ * admin account — so the same person's name / email / phone never drift apart
+ * between the two systems.
+ *
+ * The sign-in credentials (`login` / `password`) are ALSO changeable, but only
+ * through the dedicated `PATCH credentials` endpoint below — never as a side
+ * effect of a routine profile edit. That endpoint is exactly for changing the
+ * account the Odoo admin signs into their Odoo page with; because those are the
+ * same credentials the backend connects with, the service re-authenticates with
+ * the new values (and rolls back on failure) before persisting them.
  */
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller({ path: 'account-management/odoo-account', version: '1' })
@@ -53,8 +64,11 @@ export class OdooAdminAccountController {
   async createAdmin(@Body() dto: CreateOdooAdminDto) {
     try {
       const created = await this.odoo.createAdminUser({
+        // The email is the sign-in login AND the contact email — one value, so
+        // the new admin signs into Odoo with exactly the address the invite is
+        // sent to, and the two Odoo fields cannot disagree.
         name: dto.name,
-        login: dto.login,
+        login: dto.email,
         email: dto.email,
         phone: dto.phone,
       });
@@ -64,8 +78,9 @@ export class OdooAdminAccountController {
       };
     } catch (err: any) {
       // Odoo's unique-login constraint → a clean 409 rather than a raw 500.
+      // The login IS the email, so the message names the email.
       if (/login|unique|already|exist/i.test(String(err?.message ?? ''))) {
-        throw new ConflictException('An Odoo admin with this login already exists');
+        throw new ConflictException('An Odoo admin with this email already exists');
       }
       throw err;
     }
@@ -109,6 +124,34 @@ export class OdooAdminAccountController {
           ? { id: account.id, name: account.name, email: account.email, phone: account.phone ?? '' }
           : null,
       },
+    };
+  }
+
+  /**
+   * Change the Odoo admin's SIGN-IN credentials — the login and/or password used
+   * to sign into the Odoo page.
+   *
+   * Separate from the profile edit above on purpose: this is the deliberate act
+   * of rotating the connection, not a contact-details tidy-up. Because these are
+   * the same credentials the backend authenticates to Odoo with, the service
+   * writes them to Odoo, RE-AUTHENTICATES with the new values to prove they work
+   * (restoring the old ones and failing loudly if they do not), and only then
+   * persists them to `.env` — so the backend can never lock itself out.
+   */
+  @Patch('credentials')
+  @Permissions('admin.accounts.manage')
+  async updateCredentials(@Body() dto: UpdateOdooAdminCredentialsDto) {
+    if (dto.login === undefined && dto.password === undefined) {
+      throw new BadRequestException('Provide a new login, a new password, or both');
+    }
+    await this.odoo.updateAdminCredentials({
+      login: dto.login,
+      password: dto.password,
+    });
+    const odoo = await this.odoo.getConnectedAdminUser();
+    return {
+      message: 'Odoo admin sign-in credentials updated successfully',
+      result: { odoo },
     };
   }
 }

@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { CatalogService } from './catalog.service';
+import { ConditionsNotForRoleException } from '../exceptions/waste.exceptions';
 import { Role } from '@src/user/enums/role.enum';
 import { PricingTier } from '../enums/pricing-tier.enum';
 import { OfferAudience } from '../enums/offer-audience.enum';
@@ -57,6 +58,11 @@ describe('CatalogService', () => {
       labelMapFor: jest.fn(async () => new Map([
         ['p1:EXCELLENT', 'ممتازة'],
         ['UNGRADED', 'غير مفروزة'],
+      ])),
+      sortOrderMapFor: jest.fn(async () => new Map([['p1:EXCELLENT', 1]])),
+      gradeMapFor: jest.fn(async () => new Map([
+        ['p1:EXCELLENT', { id: 'ce', code: 'EXCELLENT', name: 'ممتازة', sort_order: 1 }],
+        ['p1:GOOD', { id: 'cg', code: 'GOOD', name: 'جيدة', sort_order: 2 }],
       ])),
       activeForProduct: jest.fn(async () => []),
       hasConditions: jest.fn(async () => false),
@@ -166,20 +172,46 @@ describe('CatalogService', () => {
       expect(effectivePrice.effectivePrice).toHaveBeenCalledWith('p1', Role.FACTORY, 'EXCELLENT');
     });
 
-    it('hides grades entirely from a flat-tier caller (citizen), even when the material has them', async () => {
+    it('OMITS a grade that has no price for this tier — an unpriced grade is not offered', async () => {
       productRepo.findOne.mockResolvedValue({ id: 'p1', categoryId: 'c1', odooProductId: 5 });
       assigned.getAssignedCategoryIds.mockResolvedValue(null);
       conditionsService.activeForProduct.mockResolvedValue([
         { id: 'ce', code: 'EXCELLENT', nameEn: 'Excellent', nameAr: 'ممتاز', sortOrder: 1 },
+        { id: 'cg', code: 'GOOD', nameEn: 'Good', nameAr: 'جيد', sortOrder: 2 },
       ]);
+      buyerProfiles.provinceForBuyer.mockResolvedValue('pv1');
+      const invQb = makeQb();
+      invQb.getMany.mockResolvedValue([]);
+      inventoryRepo.createQueryBuilder.mockReturnValue(invQb);
+      // EXCELLENT is priced; GOOD returns no effective price (null) → hidden.
+      effectivePrice.effectivePrice.mockImplementation(
+        async (_p: string, _r: string, code: string) =>
+          code === 'EXCELLENT' ? { basePrice: 10, offer: null, price: 10 } : null,
+      );
 
-      const res: any = await service.getConditions({ id: 'u2', role: Role.CITIZEN }, 'p1');
+      const res: any = await service.getConditions(FACTORY_CALLER, 'p1');
 
-      // Grades are a graded-buyer concern: a citizen sees none, and no price is
-      // even looked up.
-      expect(res.has_conditions).toBe(false);
-      expect(res.conditions).toEqual([]);
+      expect(res.conditions).toHaveLength(1);
+      expect(res.conditions[0].code).toBe('EXCELLENT');
+      expect(res.conditions.some((c: any) => c.code === 'GOOD')).toBe(false);
+    });
+
+    it('REFUSES the grades route entirely for a flat-tier caller (citizen)', async () => {
+      // Grades are a graded-buyer concern: the route is not a citizen's at all,
+      // so it throws rather than returning an empty list — a citizen/institution
+      // client must not be able to build a grade UI around data it never gets.
+      // Nothing is even looked up (the role check is first).
+      await expect(
+        service.getConditions({ id: 'u2', role: Role.CITIZEN }, 'p1'),
+      ).rejects.toBeInstanceOf(ConditionsNotForRoleException);
+      expect(productRepo.findOne).not.toHaveBeenCalled();
       expect(effectivePrice.effectivePrice).not.toHaveBeenCalled();
+    });
+
+    it('REFUSES the grades route for an institution caller too', async () => {
+      await expect(
+        service.getConditions({ id: 'u3', role: Role.INSTITUTIONS }, 'p1'),
+      ).rejects.toBeInstanceOf(ConditionsNotForRoleException);
     });
   });
 
@@ -377,6 +409,12 @@ describe('CatalogService', () => {
     // so the per-tier caching is asserted on a tier that actually caches.
     cache.get.mockResolvedValue(null);
     assigned.getAssignedCategoryIds.mockResolvedValue(null);
+    // A NON-empty result, so caching actually happens: an empty listing is
+    // deliberately never cached (a transient empty catalogue must not be pinned
+    // for the TTL), so the cache key can only be asserted on a populated list.
+    const qb = makeQb();
+    qb.getManyAndCount.mockResolvedValue([[{ id: 'c1', name: 'Plastic' }], 1]);
+    categoryRepo.createQueryBuilder.mockReturnValueOnce(qb);
 
     await service.getCategories(
       { id: 'u1', role: Role.CITIZEN },
@@ -456,7 +494,7 @@ describe('CatalogService', () => {
       expect(res.categories).toHaveLength(1);
       expect(res.categories[0]).toMatchObject({ id: 'c1', name: 'Plastic' });
       expect(res.products).toHaveLength(1);
-      expect(res.products[0]).toMatchObject({ id: 'p1', unit_label: 'كغم' });
+      expect(res.products[0]).toMatchObject({ id: 'p1', unit: { label: 'كغم' } });
       // The product query was scoped to the selected categories.
       expect(qb.andWhere).toHaveBeenCalledWith(
         'p.categoryId IN (:...filterCategoryIds)',
@@ -536,8 +574,7 @@ describe('CatalogService', () => {
       expect(res.warehouses).toHaveLength(1);
       expect(res.warehouses[0]).toMatchObject({ warehouse_id: 'w1', available: 70 });
       expect(res.warehouses[0].conditions[0]).toMatchObject({
-        condition: 'EXCELLENT',
-        condition_label: 'ممتازة',
+        condition: { code: 'EXCELLENT', name: 'ممتازة' },
         quantity: 100,
         available: 70,
         price: 10,
@@ -560,7 +597,7 @@ describe('CatalogService', () => {
 
       const res: any = await service.getProductAvailability(factory, 'p1');
 
-      const codes = res.warehouses[0].conditions.map((c: any) => c.condition);
+      const codes = res.warehouses[0].conditions.map((c: any) => c.condition?.code ?? null);
       expect(codes).toEqual(['EXCELLENT']); // GOOD dropped (no price)
       expect(res.total_available).toBe(100);
     });
@@ -696,7 +733,7 @@ describe('CatalogService', () => {
       expect(product).toMatchObject({
         id: 'p1',
         name: 'PET Bottles',
-        unit_label: 'كغم',
+        unit: { label: 'كغم' },
         requires_login: true,
       });
       // Nothing price-shaped survives — checked by key, so a field added to
@@ -779,8 +816,9 @@ describe('CatalogService', () => {
         { id: 'u1', role: Role.FACTORY },
         { page: 1, limit: 10, active_only: true, sort: 'discount' } as any,
       );
-      expect(buyer.offers[0].offer_price).toBe(7.5);
-      expect(buyer.offers[0].discount_percentage).toBe(20);
+      // Offer pricing is grouped under `pricing` now.
+      expect(buyer.offers[0].pricing.offer_price).toBe(7.5);
+      expect(buyer.offers[0].pricing.discount_percentage).toBe(20);
     });
 
     it('prices each offer against ITS OWN material, not another’s', async () => {
@@ -817,10 +855,10 @@ describe('CatalogService', () => {
       const byId = Object.fromEntries(res.offers.map((o: any) => [o.offer_id, o]));
       // A against 200 → 140 left; B against 10 → 8 left. A base of 10 for A
       // (the cross-material leak) would give 0 here.
-      expect(byId.oA.base_price).toBe(200);
-      expect(byId.oA.offer_price).toBe(140);
-      expect(byId.oB.base_price).toBe(10);
-      expect(byId.oB.offer_price).toBe(8);
+      expect(byId.oA.pricing.base_price).toBe(200);
+      expect(byId.oA.pricing.offer_price).toBe(140);
+      expect(byId.oB.pricing.base_price).toBe(10);
+      expect(byId.oB.pricing.offer_price).toBe(8);
     });
 
     it('constrains a buyer’s offers to the BUYERS audience', async () => {
