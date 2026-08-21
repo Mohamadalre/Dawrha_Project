@@ -5,6 +5,7 @@ import { OdooModule } from '@src/odoo/odoo.module';
 import { NotificationModule } from '@src/notification/notification.module';
 import { PlatformSettingsModule } from '@src/platform-settings/platform-settings.module';
 import { SuggestionsModule } from '@src/waste-management/suggestions/suggestions.module';
+import { WasteCommonModule } from '@src/waste-management/common/waste-common.module';
 import { WasteCategory } from '@src/waste-management/entities/waste-category.entity';
 import { Product } from '@src/waste-management/entities/product.entity';
 import { ProductPricing } from '@src/waste-management/entities/product-pricing.entity';
@@ -55,6 +56,7 @@ import { OdooWebhookController } from './odoo-webhook.controller';
     OdooModule,
     NotificationModule,
     PlatformSettingsModule,
+    WasteCommonModule,
     // The product-suggestion webhook files an Odoo proposal through the same
     // service the app's own suggestion endpoint uses.
     SuggestionsModule,

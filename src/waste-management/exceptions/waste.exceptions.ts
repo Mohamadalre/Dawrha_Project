@@ -30,7 +30,8 @@ export class CategoryAlreadyExistsException extends BadRequestException {
 export class CategoryHasProductsException extends BadRequestException {
   constructor() {
     super({
-      message: 'Cannot delete a category that still has products',
+      message:
+        'Cannot delete a category that still has materials — deactivate it instead to hide it and its materials from buyers',
       errorCode: 'CATEGORY_HAS_PRODUCTS',
     });
   }
@@ -75,6 +76,27 @@ export class ProductInCartsException extends BadRequestException {
     super({
       message: 'Cannot delete a product that is in active carts',
       errorCode: 'PRODUCT_IN_ACTIVE_CARTS',
+    });
+  }
+}
+
+/**
+ * A material that has ever been ordered cannot be hard-deleted.
+ *
+ * An order is a contract: `order_part_lines.product_id` is `onDelete: RESTRICT`,
+ * so the database itself refuses to erase a material that any order line still
+ * points at — and it should, because deleting it would tear a hole in a buyer's
+ * receipt. This guard catches it FIRST, so the admin gets a sentence they can
+ * act on ("deactivate it instead") rather than a raw foreign-key violation
+ * surfacing from deep in the driver. Deactivating hides the material from every
+ * buyer while keeping the material — and every order that named it — intact.
+ */
+export class ProductHasOrdersException extends BadRequestException {
+  constructor() {
+    super({
+      message:
+        'Cannot delete a material that has orders in its history — deactivate it instead to hide it from buyers while keeping its order records',
+      errorCode: 'PRODUCT_HAS_ORDERS',
     });
   }
 }
@@ -217,6 +239,25 @@ export class ConditionRequiredException extends BadRequestException {
     super({
       message: 'A material condition is required for this product at your price tier',
       errorCode: 'CONDITION_REQUIRED',
+    });
+  }
+}
+
+/**
+ * A material's grades are a graded-buyer concern only.
+ *
+ * Factories and free facilities buy per grade, so the grade picker is theirs;
+ * citizens and institutions buy a material flat, with one price and nothing for
+ * a grade to distinguish. The grades route therefore does not merely return an
+ * empty list to those roles — it refuses, so a citizen/institution client
+ * cannot build a UI around grade data it is never meant to have.
+ */
+export class ConditionsNotForRoleException extends ForbiddenException {
+  constructor() {
+    super({
+      message:
+        'Material grades are available to factories and free facilities only',
+      errorCode: 'CONDITIONS_NOT_FOR_ROLE',
     });
   }
 }

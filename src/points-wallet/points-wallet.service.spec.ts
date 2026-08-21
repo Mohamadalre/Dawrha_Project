@@ -16,11 +16,14 @@ describe('PointsWalletService', () => {
     save: jest.fn(async (v) => ({ id: 'w1', ...v })),
   });
 
-  const build = (repo: any, rates?: any, notifications?: any) =>
+  const build = (repo: any, rates?: any, notifications?: any, stageRepo?: any) =>
     new PointsWalletService(
       repo as any,
       rates ?? ({ forRole: jest.fn().mockResolvedValue(null) } as any),
       notifications ?? ({ createNotification: jest.fn().mockResolvedValue({}) } as any),
+      stageRepo ?? ({ find: jest.fn().mockResolvedValue([]) } as any),
+      // Snapshot baseline: none by default → every row trends SAME.
+      { previousRanks: jest.fn().mockResolvedValue(new Map()), refreshBaseline: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
   describe('eligibility', () => {
@@ -132,6 +135,67 @@ describe('PointsWalletService', () => {
       const rates = { forRole: jest.fn().mockResolvedValue({ amountPerPoint: '1000' }) };
       const res = await build(repo, rates).awardForOrder('acc1', Role.FACTORY, 500, 'ORD-1');
       expect(res).toEqual({ points: 0, balance: 2 });
+    });
+  });
+
+  describe('leaderboard', () => {
+    it('ranks users by points (highest first), paginated, with the caller rank', async () => {
+      const rows = [
+        { accountId: 'a1', points: 100, account: { name: 'Alice', role: Role.CITIZEN } },
+        { accountId: 'a2', points: 50, account: { name: 'Bob', role: Role.FACTORY } },
+      ];
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(rows),
+        getCount: jest.fn().mockResolvedValue(2),
+        // The caller (Bob) resolved as an active CITIZEN wallet for the `me` block.
+        getOne: jest.fn().mockResolvedValue({ accountId: 'a2', points: 50, createdAt: new Date() }),
+      };
+      const repo = makeRepo();
+      (repo as any).createQueryBuilder = jest.fn(() => qb);
+      // Both users (100 and 50) fall in the "Silver" band → their stage name.
+      const stageRepo = {
+        find: jest.fn().mockResolvedValue([
+          { name: 'Silver', minPoints: 50, maxPoints: 150, sortOrder: 1 },
+        ]),
+      };
+
+      const res: any = await build(repo, undefined, undefined, stageRepo).leaderboard(1, 20, 'a2');
+
+      expect(res.leaderboard[0]).toMatchObject({ rank: 1, name: 'Alice', points: 100, stage: 'Silver' });
+      expect(res.leaderboard[1]).toMatchObject({ rank: 2, name: 'Bob', points: 50, stage: 'Silver' });
+      expect(res.pagination).toMatchObject({ total: 2, page: 1, limit: 20 });
+      // The caller's own standing, with their stage name.
+      expect(res.me).toMatchObject({ points: 50, stage: 'Silver' });
+    });
+
+    it('returns me = null for an account that holds no wallet', async () => {
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+        getCount: jest.fn().mockResolvedValue(0),
+        getOne: jest.fn().mockResolvedValue(null), // caller is not an active citizen
+      };
+      const repo = makeRepo();
+      (repo as any).createQueryBuilder = jest.fn(() => qb);
+
+      const res: any = await build(repo).leaderboard(1, 20, 'admin1');
+      expect(res.me).toBeNull();
+      expect(res.leaderboard).toEqual([]);
     });
   });
 });

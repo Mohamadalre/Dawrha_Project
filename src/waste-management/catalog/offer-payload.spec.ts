@@ -78,8 +78,12 @@ describe('offer payload on a material', () => {
       PricingTier.INDIVIDUAL,
     );
 
-    expect(out.offer.by_condition[0].offer_price).toBe(150);
-    expect(out.offer.by_condition[0].direction).toBe('INCREASE');
+    // A citizen/institution sees the offer's money but NO per-grade breakdown —
+    // conditions are a factory/free-facility concept, so `by_condition` is absent
+    // here and the seller's added amount reads off the headline instead.
+    expect(out.has_offer).toBe(true);
+    expect(out.offer).not.toHaveProperty('by_condition');
+    expect(out.offer.new_price).toBe(150);
   });
 
   it('reports no discount when the material has no price for this buyer', () => {
@@ -106,7 +110,7 @@ describe('offer payload on a material', () => {
     const out = map(prices, offers);
 
     expect(out.offer.by_condition).toHaveLength(3);
-    expect(out.offer.by_condition.map((o: any) => o.condition)).toEqual(['GOOD', 'POOR', 'EXCELLENT']);
+    expect(out.offer.by_condition.map((o: any) => o.condition?.code)).toEqual(['GOOD', 'POOR', 'EXCELLENT']);
     expect(out.offer.by_condition.map((o: any) => o.discount_percentage)).toEqual([50, 10, 5]);
   });
 
@@ -183,9 +187,11 @@ describe('offer payload on a material', () => {
     const out = map([price()], []);
 
     // No offer → a single null, and NO scattered offer_* keys at all.
-    expect(out.offer).toBeNull();
-    expect(out).not.toHaveProperty('has_offer');
-    expect(out).not.toHaveProperty('offers');
+    // No live offer → the object is OMITTED (not a null placeholder) and the
+    // boolean flag says so.
+    expect(out.has_offer).toBe(false);
+    expect(out.offer).toBeUndefined();
+    // No scattered offer_* keys — the flag replaces them.
     expect(out).not.toHaveProperty('offer_price');
     expect(out).not.toHaveProperty('discount_percentage');
     expect(out).not.toHaveProperty('offer_valid_until');

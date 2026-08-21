@@ -34,26 +34,34 @@ export class OrderComplaint {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => OrderPart, { onDelete: 'CASCADE' })
+  /**
+   * The buyer files a complaint against their WHOLE ORDER, not a part — they see
+   * one order and never the warehouse split behind it. `part_id` / `warehouse_id`
+   * are therefore NULLABLE: an order-level complaint carries neither, and a
+   * warehouse-routed one fans out to every warehouse that fulfilled the order.
+   * They stay on the row only so a complaint that IS about one specific part
+   * (e.g. raised internally) can still name it.
+   */
+  @ManyToOne(() => OrderPart, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'part_id' })
-  part: OrderPart;
+  part?: OrderPart;
 
   @Index()
-  @Column({ name: 'part_id' })
-  partId: string;
+  @Column({ name: 'part_id', type: 'uuid', nullable: true })
+  partId?: string;
 
-  /** Denormalised for the buyer's "my complaints" listing. */
+  /** The order the complaint is about — always present; the primary scope. */
   @Index()
   @Column({ name: 'order_id', type: 'uuid' })
   orderId: string;
 
-  @ManyToOne(() => Warehouse, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Warehouse, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'warehouse_id' })
-  warehouse: Warehouse;
+  warehouse?: Warehouse;
 
   @Index()
-  @Column({ name: 'warehouse_id' })
-  warehouseId: string;
+  @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
+  warehouseId?: string;
 
   @Column({ type: 'enum', enum: ComplaintKind })
   kind: ComplaintKind;

@@ -24,6 +24,7 @@ import { UpdatePricingTableDto } from './dto/update-pricing-table.dto';
 import { UpdateTierPriceDto } from './dto/update-tier-price.dto';
 import {
   CorrectPricingDto,
+  DeletePricingDto,
   PriceHistoryQueryDto,
   SetPricingExpiryDto,
 } from './dto/pricing-admin.dto';
@@ -156,22 +157,29 @@ export class PricingController {
     @Param('productId', ParseUUIDPipe) productId: string,
     @Body() dto: SetPricingExpiryDto,
   ) {
+    // `tiers` (the multi-role selection, empty = all) wins; the deprecated
+    // single `tier` is folded into it so old callers keep working.
+    const tiers = dto.tiers ?? (dto.tier ? [dto.tier] : undefined);
     return this.pricingService.expireCurrentPricing(
       user.id,
       productId,
       new Date(dto.effective_until),
-      dto.tier,
+      tiers,
     );
   }
 
-  /** Delete the whole price list — it is moved to history. */
+  /**
+   * Delete the price list — moved to history. Send `tiers` to withdraw only some
+   * roles; omit it to withdraw every role (full suspension).
+   */
   @Delete(':productId/pricing')
   @Permissions('admin.pricing.manage')
   async deletePricing(
     @CurrentUser() user,
     @Param('productId', ParseUUIDPipe) productId: string,
+    @Body() dto: DeletePricingDto,
   ) {
-    return this.pricingService.deletePricing(user.id, productId);
+    return this.pricingService.deletePricing(user.id, productId, dto.tiers);
   }
 
   /** Current (live) price per tier. */

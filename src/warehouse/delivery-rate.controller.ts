@@ -9,13 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import {
-  IsNumber,
-  IsOptional,
-  IsString,
-  Min,
-  MaxLength,
-} from 'class-validator';
+import { IsNumber, IsOptional, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
@@ -39,11 +33,6 @@ export class SetDeliveryRateDto {
 
   // Currency is not accepted per rate: it comes from the central platform
   // setting (PATCH /v1/admin/platform-settings).
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  note?: string;
 }
 
 export class UpdateDeliveryRateDto {
@@ -61,11 +50,6 @@ export class UpdateDeliveryRateDto {
 
   // Currency is not accepted per rate: it comes from the central platform
   // setting (PATCH /v1/admin/platform-settings).
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  note?: string;
 }
 
 /**

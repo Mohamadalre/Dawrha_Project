@@ -181,7 +181,8 @@ export class CloudinaryService {
     }
 
     try {
-      const result =  await this.cloudinaryClient.uploader.destroy(publicId);
+         const result = await this.cloudinaryClient.uploader.destroy(publicId);
+         ///{invalidate: true, }
 
       if (result.result === 'ok') {
         this.logger.debug(`File deleted successfully: ${publicId}`);

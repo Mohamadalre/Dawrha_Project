@@ -39,7 +39,7 @@ import { Province } from './entities/location/province.entity';
 import { UserDevice } from '@src/auth/entities/user-device.entity';
 import { Not, IsNull } from 'typeorm';
 import { Language } from '@src/common/enums/language.enum';
-import { LocationDto } from '@src/onboarding/dto/location.dto';
+import { AddLocationDto } from './dto/add-location.dto';
 import { UserCacheService } from './providers/user-cache.service';
 import { CloudinaryService } from '@src/core/cloudinary/cloudinary.service';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
@@ -269,6 +269,7 @@ export class UserService {
     );
 
     const previous = this.cloudinaryPublicId(account.profileImage);
+    console.log('previous', previous, account.profileImage, uploaded.imageUrl);
     account.profileImage = uploaded.imageUrl;
     await this.accountRepository.save(account);
     await this.userCache.invalidate(accountId, 'profile');
@@ -399,12 +400,29 @@ export class UserService {
    * "current" one is the most recently used device's; the request language is
    * the fallback before any device has been recorded.
    */
-  async getAppSettings(accountId: string, _requestLang?: string) {
+  async getAppSettings(accountId: string, deviceId?: string) {
     const account = await this.accountRepository.findOne({ where: { id: accountId } });
-    // The account's SAVED language is the source of truth now — it is what every
-    // response is returned in, so the settings screen must show the same value.
+    // The EFFECTIVE language is resolved exactly as the response pipeline resolves
+    // it: the CURRENT device's language (identified by the token's deviceId),
+    // falling back to the account default. So the settings screen shows the same
+    // value every response is actually returned in — never a different one.
+    let language = account?.language ?? Language.EN;
+    let source: 'device' | 'account' = 'account';
+    if (deviceId) {
+      const device = await this.deviceRepo.findOne({
+        where: { accountId, deviceId },
+        select: ['id', 'language'],
+      });
+      if (device?.language) {
+        language = device.language;
+        source = 'device';
+      }
+    }
     return {
-      language: account?.language ?? Language.EN,
+      language,
+      // Where the active language came from, and which device it is scoped to.
+      source,
+      device_id: deviceId ?? null,
       available_languages: [Language.EN, Language.AR],
     };
   }
@@ -413,12 +431,23 @@ export class UserService {
    * Change the account's language. From the next request on, every response
    * comes back in it — the client never sends a language header again.
    */
-  async setLanguage(accountId: string, language: Language) {
+  async setLanguage(accountId: string, language: Language, deviceId?: string) {
     const account = await this.accountRepository.findOne({ where: { id: accountId } });
     if (!account) throw new NotFoundException('Account not found');
+
+    // The choice applies to the CURRENT device (each device may differ), and the
+    // account default is kept in step too so a device that never chose one — and
+    // any future device — inherits the most recent preference.
+    if (deviceId) {
+      await this.deviceRepo.update({ accountId, deviceId }, { language });
+    }
     account.language = language;
     await this.accountRepository.save(account);
-    return { message: 'Language updated successfully', result: { language } };
+
+    return {
+      message: 'Language updated successfully',
+      result: { language, device_id: deviceId ?? null },
+    };
   }
 
   /**
@@ -487,6 +516,7 @@ export class UserService {
   private mapLocation(loc: Location) {
     return {
       id: loc.id,
+      name: loc.name ?? null,
       address: loc.address ?? null,
       description: loc.DesscriptLocation ?? null,
       coordinates: loc.coordinates?.coordinates ?? null,
@@ -505,7 +535,7 @@ export class UserService {
   }
 
   /** Adds a new location for the current citizen (same fields as onboarding). */
-  async addLocation(accountId: string, role: Role, dto: LocationDto) {
+  async addLocation(accountId: string, role: Role, dto: AddLocationDto) {
     this.assertCitizen(role);
 
     const province = await this.provinceRepo.findOne({ where: { id: dto.provinceId } });
@@ -514,10 +544,29 @@ export class UserService {
     const profile = await this.getOrCreateCitizenProfile(accountId);
     const [lng, lat] = dto.coordinates;
 
+    // A label is the citizen's own name for the place, so it must be unique
+    // among THEIR locations — otherwise the checkout picker shows two "Home"s
+    // and they cannot tell which pin is which. Checked case-insensitively here
+    // for a clean message; a partial unique index is the last-line guarantee.
+    const name = dto.name?.trim();
+    if (name) {
+      const clash = await this.locationRepo
+        .createQueryBuilder('l')
+        .where('l.cititzen_profile_id = :pid', { pid: profile.id })
+        .andWhere('LOWER(l.name) = LOWER(:name)', { name })
+        .getExists();
+      if (clash) {
+        throw new BadRequestException(
+          'You already have a location with this name — choose a different name',
+        );
+      }
+    }
+
     const location = await this.locationRepo.save(
       this.locationRepo.create({
         cititzenProfile: profile,
         province,
+        name: name || undefined,
         address: dto.address,
         DesscriptLocation: dto.descriptionAddress,
         coordinates: { type: 'Point', coordinates: [lng, lat] },

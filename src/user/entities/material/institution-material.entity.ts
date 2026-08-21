@@ -11,6 +11,7 @@ import {
 import { InstitutionProfile } from '../profile/institution-profile.entity';
 import { CollectionFrequeny } from '@src/user/enums/collectionFrequeny.enum';
 import { InstitutionWasteCategory } from '@src/waste-management/entities/institution-waste-category.entity';
+import { DeliveryTimeSlot } from './factory-material.entity';
 
 @Entity('institution_materials')
 export class InstitutionMaterial {
@@ -36,8 +37,10 @@ export class InstitutionMaterial {
   })
   collectionFrequney: CollectionFrequeny;
 
-  @Column('text', { array: true })
-  preferredCollectionTime: string[];
+  // Detailed collection windows (weekday + start→end time). Was a text[] of
+  // free strings; now the same structured slot a factory's delivery windows use.
+  @Column({ type: 'jsonb', nullable: true })
+  preferredCollectionTime?: DeliveryTimeSlot[] | null;
 
   @CreateDateColumn()
   createdAt: Date;

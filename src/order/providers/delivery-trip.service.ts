@@ -809,6 +809,9 @@ export class DeliveryTripService {
       backend_trip_id: trip.id,
       trip_number: trip.tripNumber,
       order_number: order?.orderNumber ?? '',
+      // The order's UUID — the join key Odoo uses to hang this trip's delivery
+      // cost onto the order (recycle.order.backend_order_id holds the same id).
+      backend_order_id: order?.id ?? '',
       buyer_name: order ? await this.buyerName(order.buyerAccountId) : '',
       origin_warehouse_odoo_id: whInfo.get(trip.originWarehouseId) ?? null,
       truck_odoo_id: trip.odooTruckId ?? null,
@@ -1579,9 +1582,12 @@ export class DeliveryTripService {
       status: trip.status,
       origin_warehouse_id: trip.originWarehouseId,
       truck_odoo_id: trip.odooTruckId ?? null,
-      driver_odoo_id: trip.odooDriverId ?? null,
-      driver_name: trip.driverName ?? null,
-      driver_phone: trip.driverPhone ?? null,
+      // The driver as one object — odoo id, name, phone — not a scattered trio.
+      driver: {
+        odoo_id: trip.odooDriverId ?? null,
+        name: trip.driverName ?? null,
+        phone: trip.driverPhone ?? null,
+      },
       route_distance_km: Number(trip.routeDistanceKm),
       delivery_cost: Number(trip.deliveryCost),
       currency: trip.currency,
@@ -1629,9 +1635,12 @@ export class DeliveryTripService {
       status: trip.status,
       origin_warehouse_id: trip.originWarehouseId,
       truck_odoo_id: trip.odooTruckId ?? null,
-      driver_odoo_id: trip.odooDriverId ?? null,
-      driver_name: trip.driverName ?? null,
-      driver_phone: trip.driverPhone ?? null,
+      // The driver as one object — odoo id, name, phone — not a scattered trio.
+      driver: {
+        odoo_id: trip.odooDriverId ?? null,
+        name: trip.driverName ?? null,
+        phone: trip.driverPhone ?? null,
+      },
       route_distance_km: Number(trip.routeDistanceKm),
       delivery_cost: Number(trip.deliveryCost),
       rate_per_km: Number(trip.ratePerKm),

@@ -5,6 +5,7 @@ import { OnboardingService } from '../onboarding.service';
 import { Account } from '@src/user/entities/account.entity';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { InformationInstitutionDto, WasteInstitutionDto } from '../dto/institutions-onboarding.dto';
+import { assertValidTimeSlots } from '../dto/delivery-time-slot.dto';
 import { InstitutionProfile } from '@src/user/entities/profile/institution-profile.entity';
 import { InstitutionMaterial } from '@src/user/entities/material/institution-material.entity';
 import { InstitutionType } from '@src/institution/entities/institution-type.entity';
@@ -162,10 +163,13 @@ export class InstitutionOnboardingService extends OnboardingService {
     if (step !== 'materials') {
       throw new ForbiddenException('You cannot add materials data,you must add data from the previous');
     }
+    // A window that ends before it starts is rejected before anything is saved.
+    assertValidTimeSlots(dto.preferredCollectionTime);
+
     const wasteTypesEntities = await this.checkWasteType(dto.wasteCategoryId);
 
     const wasteTypes = wasteTypesEntities.map((wt) => {
-      const pivot = new InstitutionWasteCategory(); 
+      const pivot = new InstitutionWasteCategory();
       pivot.wasteType = wt;
       return pivot;
     });

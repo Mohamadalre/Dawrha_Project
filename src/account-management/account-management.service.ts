@@ -132,6 +132,9 @@ export class AccountManagementService {
     page: number;
     limit: number;
     include_archived?: boolean;
+    /** Show ONLY archived accounts (the dedicated archived listing). Wins over
+     *  include_archived when set. */
+    only_archived?: boolean;
   }) {
     const page = Math.max(1, Math.floor(query.page) || 1);
     const limit = Math.min(Math.max(1, Math.floor(query.limit) || 10), 100);
@@ -139,7 +142,8 @@ export class AccountManagementService {
     const where: Record<string, unknown> = {};
     if (query.role) where.role = query.role;
     if (query.status) where.accountStatus = query.status;
-    if (!query.include_archived) where.archivedAt = IsNull();
+    if (query.only_archived) where.archivedAt = Not(IsNull());
+    else if (!query.include_archived) where.archivedAt = IsNull();
 
     const [rows, total] = await this.accountRepo.findAndCount({
       where,

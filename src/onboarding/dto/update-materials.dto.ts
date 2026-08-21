@@ -49,10 +49,13 @@ export class UpdateMaterialsInstitutionDto {
   @IsEnum(CollectionFrequeny)
   collectionFrequney?: CollectionFrequeny;
 
+  // Detailed collection windows — a weekday + a start→end time, like
+  // [{ "day": "MONDAY", "from": "08:00", "to": "12:00" }].
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  preferredCollectionTime?: string[];
+  @ValidateNested({ each: true })
+  @Type(() => DeliveryTimeSlotDto)
+  preferredCollectionTime?: DeliveryTimeSlotDto[];
 }
 
 /**

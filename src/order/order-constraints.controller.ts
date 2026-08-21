@@ -58,7 +58,6 @@ export class OrderConstraintsController {
       role,
       {
         minOrderValue: dto.min_order_value,
-        currency: dto.currency,
         isActive: dto.is_active,
       },
       user.id,
@@ -95,7 +94,6 @@ export class OrderConstraintsController {
       {
         maxAmount: dto.max_amount,
         period: dto.period,
-        currency: dto.currency,
         isActive: dto.is_active,
       },
       user.id,

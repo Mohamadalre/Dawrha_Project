@@ -151,12 +151,12 @@ export class AdminComplaintService {
   ) {
     return {
       id: c.id,
-      order_id: c.orderId,
-      order_number: ctx?.orderNumber ?? null,
-      buyer_account_id: ctx?.buyerAccountId ?? null,
+      // The order, the buyer and the warehouse each as one object — id AND name
+      // together — instead of scattered *_id / *_name / *_number pairs.
+      order: { id: c.orderId, number: ctx?.orderNumber ?? null },
+      buyer: { account_id: ctx?.buyerAccountId ?? null },
       part_id: c.partId,
-      warehouse_id: c.warehouseId,
-      warehouse_name: c.warehouse?.name ?? null,
+      warehouse: { id: c.warehouseId, name: c.warehouse?.name ?? null },
       kind: c.kind,
       route: c.route,
       status: c.status,

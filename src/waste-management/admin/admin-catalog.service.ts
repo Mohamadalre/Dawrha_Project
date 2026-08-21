@@ -9,9 +9,12 @@ import { WasteCategory } from '../entities/waste-category.entity';
 import { Product } from '../entities/product.entity';
 import { CartItem } from '../entities/cart-item.entity';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
+import { OrderPartLine } from '@src/order/entities/order-part-line.entity';
 import { MeasurementUnit } from '../entities/measurement-unit.entity';
 import { MaterialCondition } from '../entities/material-condition.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
+import { ProductPricingHistory } from '../entities/product-pricing-history.entity';
+import { PricingArchiveReason } from '../enums/pricing-archive-reason.enum';
 import { Offer } from '../entities/offer.entity';
 import { Role } from '@src/user/enums/role.enum';
 import { OdooSyncStatus } from '../enums/odoo-sync-status.enum';
@@ -35,6 +38,7 @@ import {
   CategoryNotFoundException,
   OfferNotFoundException,
   ProductInCartsException,
+  ProductHasOrdersException,
   ProductHasStockException,
   ProductNotFoundException,
   ProductAlreadyExistsException,
@@ -140,6 +144,11 @@ export class AdminCatalogService {
     // Offer creation writes SEVERAL rows for one request; they commit together
     // or not at all, so a graded offer can never land half-priced.
     private readonly dataSource: DataSource,
+    // Deleting a material has to know whether any ORDER ever named it: an order
+    // line is a frozen contract (RESTRICT foreign key), so a material with order
+    // history can only be deactivated, never erased.
+    @InjectRepository(OrderPartLine)
+    private readonly orderLineRepo: Repository<OrderPartLine>,
   ) {}
 
   // --- Categories -----------------------------------------------------------
@@ -173,8 +182,15 @@ export class AdminCatalogService {
       relations: ['category', 'unit'],
     });
     if (!product) throw new ProductNotFoundException();
-    const priced = await this.livePricedProductIds([product.id]);
-    return this.mapAdminProduct(product, priced.has(product.id));
+    const [priced, offered] = await Promise.all([
+      this.livePricedProductIds([product.id]),
+      this.liveOfferedProductIds([product.id]),
+    ]);
+    return this.mapAdminProduct(
+      product,
+      priced.has(product.id),
+      offered.has(product.id),
+    );
   }
 
   /**
@@ -308,9 +324,15 @@ export class AdminCatalogService {
       .take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
-    const priced = await this.livePricedProductIds(rows.map((p) => p.id));
+    const ids = rows.map((p) => p.id);
+    const [priced, offered] = await Promise.all([
+      this.livePricedProductIds(ids),
+      this.liveOfferedProductIds(ids),
+    ]);
     return {
-      products: rows.map((p) => this.mapAdminProduct(p, priced.has(p.id))),
+      products: rows.map((p) =>
+        this.mapAdminProduct(p, priced.has(p.id), offered.has(p.id)),
+      ),
       pagination: buildPagination(total, query.page, query.limit),
     };
   }
@@ -515,6 +537,9 @@ export class AdminCatalogService {
     const product = await this.productRepo.findOne({ where: { id } });
     if (!product) throw new ProductNotFoundException();
 
+    // Remember the unit so a change can be pushed into any live basket line.
+    const prevUnitType = product.unitType;
+
     if (dto.name !== undefined && dto.name !== product.name) {
       const clash = await this.productRepo.findOne({
         where: { name: ILike(dto.name), id: Not(id) },
@@ -553,6 +578,19 @@ export class AdminCatalogService {
 
     if (oldImageUrl) await this.cloudinary.deleteByUrl(oldImageUrl);
 
+    // A basket line snapshots the unit code at add-time, so changing the
+    // material's unit would leave every live basket quoting the OLD unit (a
+    // line reading "3 PIECE" of a material now sold by KG). Push the new unit
+    // into every line that holds this material so the basket and the catalogue
+    // never disagree. The name is read live through the product link, so it
+    // needs no such push; the price is repriced by the pricing routes.
+    if (product.unitType !== prevUnitType) {
+      await this.cartItemRepo.update(
+        { productId: id },
+        { unitType: product.unitType },
+      );
+    }
+
     await this.odooSync.enqueueSyncProduct({ productId: id });
     await this.audit.record({
       userId: adminId,
@@ -574,6 +612,20 @@ export class AdminCatalogService {
     const inCart = await this.cartItemRepo.count({ where: { productId: id } });
     if (inCart > 0) {
       throw new ProductInCartsException();
+    }
+
+    // A material that has EVER been ordered cannot be hard-deleted.
+    //
+    // Every order line snapshots what the buyer was charged and keeps a RESTRICT
+    // link to the material (order-part-line.entity.ts) — so an order is a
+    // permanent receipt, and erasing the material would either tear a hole in
+    // that receipt or be refused by the database with a raw constraint error the
+    // admin cannot read. Caught here first, the admin is told the deliberate
+    // step instead: deactivate the material, which removes it from every buyer's
+    // catalogue and basket while leaving it — and its orders — on the record.
+    const orderedLines = await this.orderLineRepo.count({ where: { productId: id } });
+    if (orderedLines > 0) {
+      throw new ProductHasOrdersException();
     }
 
     // A material still sitting on a warehouse floor cannot be deleted.
@@ -599,10 +651,53 @@ export class AdminCatalogService {
       }
     }
 
+    // Past the three hard blockers (cart, orders, stock) the material has no
+    // physical or contractual tie left — so its own catalogue metadata comes
+    // down WITH it rather than blocking the delete: the price list (archived to
+    // history first), every offer, and every grade. Each grade is safe to drop
+    // because the material's whole-warehouse stock is already zero, so none of
+    // its grades can be holding any. Placed orders are untouched — every order
+    // line froze the code, name and price at checkout. All in one transaction
+    // so the material never half-disappears.
+    //
+    // Order matters: pricing rows carry a RESTRICT link to the grade rows, so
+    // prices must go before grades, and the product last.
+    await this.dataSource.transaction(async (manager) => {
+      const pricingRepo = manager.getRepository(ProductPricing);
+      const historyRepo = manager.getRepository(ProductPricingHistory);
+      const offerRepo = manager.getRepository(Offer);
+      const conditionRepo = manager.getRepository(MaterialCondition);
+      const productRepo = manager.getRepository(Product);
+
+      const livePrices = await pricingRepo.find({ where: { productId: id } });
+      if (livePrices.length) {
+        await historyRepo.save(
+          livePrices.map((p) =>
+            historyRepo.create({
+              productId: p.productId,
+              tier: p.tier,
+              conditionCode: p.conditionCode,
+              price: p.price,
+              currency: p.currency,
+              effectiveFrom: p.effectiveFrom,
+              archivedReason: PricingArchiveReason.DELETED,
+              archivedBy: adminId,
+            }),
+          ),
+        );
+        await pricingRepo.remove(livePrices);
+      }
+
+      await offerRepo.delete({ productId: id });
+      await conditionRepo.delete({ productId: id });
+      await productRepo.delete(id);
+    });
+
+    // Odoo: unlink the product, which cascades its grades and price rows on that
+    // side (both are FK ondelete='cascade' to the product there).
     if (product.odooProductId) {
       await this.odooSync.enqueueDeleteProduct({ odooProductId: product.odooProductId });
     }
-    await this.productRepo.delete(id);
     await this.audit.record({
       userId: adminId,
       action: 'DELETE_PRODUCT',
@@ -781,8 +876,11 @@ export class AdminCatalogService {
       .take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
+    const gradeMap = await this.conditionsService.gradeMapFor([
+      ...new Set(rows.map((o) => o.productId)),
+    ]);
     return {
-      offers: rows.map((o) => this.mapAdminOffer(o)),
+      offers: rows.map((o) => this.mapAdminOffer(o, gradeMap)),
       pagination: buildPagination(total, query.page, query.limit),
     };
   }
@@ -875,11 +973,12 @@ export class AdminCatalogService {
       })),
     });
 
+    const createdGradeMap = await this.conditionsService.gradeMapFor([product.id]);
     return {
       // The material the offer is on, named — the client no longer has to hold
       // the id it sent just to show "offer on <material>" back to the admin.
       material: { id: product.id, name: product.name },
-      offers: created.map((o) => this.mapAdminOffer(o)),
+      offers: created.map((o) => this.mapAdminOffer(o, createdGradeMap)),
       message:
         created.length > 1
           ? `Offer created successfully across ${created.length} lines`
@@ -908,10 +1007,8 @@ export class AdminCatalogService {
     dto: {
       audience: OfferAudience;
       target_roles?: Role[];
-      amount?: number;
-      /** Alternative to `amount` — the offer stated as a share of the price. */
-      percentage?: number;
-      conditions?: { condition_id: string; amount: number }[];
+      /** The offer as a share of the price — the ONLY way it is stated. */
+      percentage: number;
     },
   ): Promise<OfferPlanRow[]> {
     const audience = dto.audience;
@@ -923,54 +1020,21 @@ export class AdminCatalogService {
     const roleSpecific = !!dto.target_roles?.length;
     const plan: OfferPlanRow[] = [];
 
-    /**
-     * How the offer was expressed — an amount, or a percentage to derive one
-     * from. Exactly one.
-     *
-     * Sending both is refused rather than resolved by preference: the two
-     * disagree the moment a price moves, and nothing afterwards could say which
-     * the administrator meant to hold. Sending neither is caught per-branch
-     * below, where the message can name what that branch actually needs.
-     */
-    if (dto.amount != null && dto.percentage != null) {
-      throw new BadRequestException(
-        'Give an amount OR a percentage, not both — they would disagree the first time the price changed, and nothing would say which one you meant',
-      );
-    }
-    const spec: { amount?: number; percentage?: number } =
-      dto.percentage != null ? { percentage: dto.percentage } : { amount: dto.amount };
-    const given = dto.amount != null || dto.percentage != null;
+    // An offer is ALWAYS a percentage now — one figure, fair to every role and
+    // every grade it touches, because it is taken against each of their OWN
+    // prices. The amount is derived per row and never entered.
+    const spec: { percentage: number } = { percentage: dto.percentage };
 
-    // ── SELLERS: one amount, never a grade ─────────────────────────────
+    // ── SELLERS: a percentage added to each seller's price, never per grade ──
     if (audience === OfferAudience.SELLERS) {
-      if (dto.conditions?.length) {
-        throw new BadRequestException(
-          'A seller offer cannot name a grade. Citizens and institutions are paid for the material as delivered — it is graded afterwards, during sorting, so there is no grade to price at the moment they are paid.',
-        );
-      }
-      if (!given) {
-        throw new BadRequestException(
-          'An amount or a percentage is required — it is what is ADDED to what these sellers are already paid',
-        );
-      }
-      // One row per seller role — each amount/percentage from its own price.
       plan.push(
         ...(await this.buildPerRoleRows(productId, audience, roles, null, null, spec, roleSpecific)),
       );
       return plan;
     }
 
-    // ── BUYERS on an UNGRADED material: one amount, and no grade exists ──
+    // ── BUYERS on an UNGRADED material: one percentage off each buyer's price ──
     if (!isGraded) {
-      if (dto.conditions?.length) {
-        throw new BadRequestException(
-          'This material has no grades, so an offer on it cannot name one',
-        );
-      }
-      if (!given) {
-        throw new BadRequestException('An amount or a percentage is required');
-      }
-      // One row per buyer role — each amount/percentage from its own price.
       plan.push(
         ...(await this.buildPerRoleRows(productId, audience, roles, null, null, spec, roleSpecific)),
       );
@@ -979,47 +1043,12 @@ export class AdminCatalogService {
 
     // ── BUYERS on a GRADED material ────────────────────────────────────
     //
-    // Either the grades are named one by one with their own amounts, or a
-    // single amount is given and applies to EVERY grade. The second is not a
-    // shortcut for the first: it is checked against each grade separately, so
-    // an amount that is a fair reduction on the dearest grade and would drive
-    // the cheapest below zero is refused rather than clamped.
-    if (dto.conditions?.length) {
-      const seen = new Set<string>();
-      for (const entry of dto.conditions) {
-        // Resolved BY ID against THIS material. An id names one row for good,
-        // where a code names one only inside its own material — so a grade
-        // borrowed from another material is refused here rather than stored
-        // and then silently matching nothing for the rest of its life.
-        const grade = await this.conditionsService.resolveActiveById(
-          productId,
-          entry.condition_id,
-        );
-        if (seen.has(grade.id)) {
-          throw new BadRequestException(
-            `The grade "${grade.code}" is listed twice — one amount per grade`,
-          );
-        }
-        seen.add(grade.id);
-        // One row per buyer role for this grade — the fixed amount is the same,
-        // but each role's percentage is derived from its OWN price for the grade.
-        plan.push(
-          ...(await this.buildPerRoleRows(
-            productId, audience, roles, grade.id, grade.code,
-            { amount: entry.amount }, roleSpecific,
-          )),
-        );
-      }
-      return plan;
-    }
-
-    if (!given) {
-      throw new BadRequestException(
-        'This material is graded — give an amount for each grade, or one amount (or percentage) to apply to every grade',
-      );
-    }
+    // The one percentage applies to EVERY grade, taken against each grade's own
+    // price — so "20% off" is a different amount per grade, which is exactly
+    // what a share (rather than a flat number) is for. Each grade is still
+    // checked separately, so a percentage that would somehow drive one below
+    // zero is refused rather than clamped.
     for (const grade of await this.conditionsService.activeForProduct(productId)) {
-      // One row per buyer role per grade — each from its own price for the grade.
       plan.push(
         ...(await this.buildPerRoleRows(
           productId, audience, roles, grade.id, grade.code, spec, roleSpecific,
@@ -1290,24 +1319,20 @@ export class AdminCatalogService {
     const offer = await this.offerRepo.findOne({ where: { id } });
     if (!offer) throw new OfferNotFoundException();
 
-    const touchesSize = dto.amount != null || dto.percentage != null;
+    const touchesSize = dto.percentage != null;
     const touchesWindow = dto.valid_from !== undefined || dto.valid_until !== undefined;
     const touchesDescription = dto.description !== undefined;
-    if (!touchesSize && !touchesWindow && !touchesDescription) {
+    const touchesActive = dto.is_active !== undefined;
+    if (!touchesSize && !touchesWindow && !touchesDescription && !touchesActive) {
       throw new BadRequestException('Send at least one field to update');
     }
 
     const previous = Number(offer.amount);
 
-    // Size — amount XOR percentage, rebuilt through the create-time validator.
-    if (dto.amount != null && dto.percentage != null) {
-      throw new BadRequestException(
-        'Give an amount OR a percentage, not both — they would disagree the first time the price changed, and nothing would say which one you meant',
-      );
-    }
+    // Size — a PERCENTAGE only, rebuilt through the create-time validator so the
+    // same negative-price guard applies. There is no amount input.
     if (touchesSize) {
-      const spec =
-        dto.percentage != null ? { percentage: dto.percentage } : { amount: dto.amount };
+      const spec = { percentage: dto.percentage as number };
       const rebuilt = await this.buildOfferRow(
         offer.productId,
         offer.audience,
@@ -1342,6 +1367,11 @@ export class AdminCatalogService {
     // Description.
     if (dto.description !== undefined) offer.description = dto.description;
 
+    // Deactivate / reactivate — the "turn it off without deleting" switch. A
+    // deactivated offer is not live, so it leaves every buyer catalogue at once
+    // (the reader queries all filter isActive = true) while the admin keeps it.
+    if (dto.is_active !== undefined) offer.isActive = dto.is_active;
+
     const saved = await this.offerRepo.save(offer);
     // Every reader of an offer is cached; an edit that did not clear them would
     // leave the old size / window / text quoted until the cache aged out.
@@ -1360,7 +1390,8 @@ export class AdminCatalogService {
       },
     );
 
-    return { offer: this.mapAdminOffer(saved) };
+    const savedGradeMap = await this.conditionsService.gradeMapFor([saved.productId]);
+    return { offer: this.mapAdminOffer(saved, savedGradeMap) };
   }
 
   /**
@@ -1404,6 +1435,7 @@ export class AdminCatalogService {
       .take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
+    const historyGradeMap = await this.conditionsService.gradeMapFor([product.id]);
     return {
       product: { id: product.id, name: product.name },
       filter: {
@@ -1411,7 +1443,7 @@ export class AdminCatalogService {
         to: query.to ?? null,
       },
       offers: rows.map((o) => ({
-        ...this.mapAdminOffer(o),
+        ...this.mapAdminOffer(o, historyGradeMap),
         basis: o.basis,
         basis_percentage: o.basisPercentage == null ? null : Number(o.basisPercentage),
         created_at: o.createdAt,
@@ -1574,15 +1606,18 @@ export class AdminCatalogService {
    * has simply run out must read as finished the moment it does, without
    * anything having to expire it.
    */
-  private mapAdminOffer(o: Offer) {
+  private mapAdminOffer(
+    o: Offer,
+    gradeMap: Map<string, { id: string; code: string; name: string; sort_order: number }> = new Map(),
+  ) {
     const now = Date.now();
     const started = new Date(o.validFrom).getTime() <= now;
     const notEnded = !o.validUntil || new Date(o.validUntil).getTime() > now;
 
     return {
       offer_id: o.id,
-      product_id: o.productId,
-      product_name: o.product?.name ?? null,
+      // The material as one object — id AND name — not a scattered pair.
+      product: { id: o.productId, name: o.product?.name ?? null },
 
       audience: {
         type: o.audience,
@@ -1603,9 +1638,10 @@ export class AdminCatalogService {
         scope: o.roleSpecific ? 'SPECIFIC' : 'GENERAL',
       },
 
-      grade: o.conditionId
-        ? { id: o.conditionId, code: o.conditionCode }
-        : null,
+      // The grade as the single canonical object every route uses (id, code,
+      // name, sort order), or null. Renamed from `grade` to `condition` so it
+      // matches the key every other response uses for the same fact.
+      condition: ConditionsService.gradeObject(o.productId, o.conditionCode, gradeMap),
 
       effect: {
         amount: Number(o.amount),
@@ -1652,7 +1688,7 @@ export class AdminCatalogService {
     };
   }
 
-  private mapAdminProduct(p: Product, hasPrice?: boolean) {
+  private mapAdminProduct(p: Product, hasPrice?: boolean, hasOffer?: boolean) {
     return {
       id: p.id,
       name: p.name,
@@ -1677,6 +1713,10 @@ export class AdminCatalogService {
       // materials still appear in this admin listing (they are the ones that
       // need pricing) — this flag is what tells them apart from priced ones.
       has_price: hasPrice ?? false,
+      // Whether the material carries a LIVE offer right now — the admin's answer
+      // to "is this material on offer or not?" without opening the offers list.
+      // Same live-window as the buyer sees, so the two never disagree.
+      has_offer: hasOffer ?? false,
       is_active: p.isActive,
       odoo_product_id: p.odooProductId ?? null,
       odoo_sync_status: p.odooSyncStatus,
@@ -1698,6 +1738,25 @@ export class AdminCatalogService {
       .where('pp.productId IN (:...ids)', { ids })
       .andWhere('pp.effectiveFrom <= NOW()')
       .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())')
+      .getRawMany<{ productId: string }>();
+    return new Set(rows.map((r) => r.productId));
+  }
+
+  /**
+   * Of the given materials, which carry at least one LIVE offer right now —
+   * active, started, and not yet ended. The same live-window definition the
+   * buyer catalogue and the offers listing use, so `has_offer` on the admin
+   * screen agrees with what a buyer would actually see. One query, no N+1.
+   */
+  private async liveOfferedProductIds(ids: string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    const rows = await this.offerRepo
+      .createQueryBuilder('o')
+      .select('DISTINCT o.productId', 'productId')
+      .where('o.productId IN (:...ids)', { ids })
+      .andWhere('o.isActive = true')
+      .andWhere('o.validFrom <= NOW()')
+      .andWhere('(o.validUntil IS NULL OR o.validUntil > NOW())')
       .getRawMany<{ productId: string }>();
     return new Set(rows.map((r) => r.productId));
   }

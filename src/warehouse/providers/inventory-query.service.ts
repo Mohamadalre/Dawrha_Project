@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Product } from '@src/waste-management/entities/product.entity';
-import { MaterialCondition } from '@src/waste-management/entities/material-condition.entity';
+import { MaterialCondition, UNGRADED_CONDITION } from '@src/waste-management/entities/material-condition.entity';
 import { MeasurementUnit } from '@src/waste-management/entities/measurement-unit.entity';
 import { ConditionsService } from '@src/waste-management/common/providers/conditions.service';
 import { UnitsService } from '@src/waste-management/common/providers/units.service';
@@ -360,9 +360,8 @@ export class InventoryQueryService {
     const { backendIdByOdooId, productByOdooId, labels } = ctx;
 
     interface Card {
-      product_id: string | null;
+      product: { id: string | null; name: string | null };
       odoo_product_id?: number;
-      product_name?: string;
       unit: UnitRef | null;
       quantity: number;
       reserved_quantity: number;
@@ -371,8 +370,7 @@ export class InventoryQueryService {
       stock_status: StockStatus;
       last_sync?: Date | null;
       conditions: {
-        condition_id: string | null;
-        condition: string;
+        condition: { id: string | null; code: string; name: string; sort_order: number | null } | null;
         quantity: number;
         reserved_quantity: number;
         available: number;
@@ -386,9 +384,14 @@ export class InventoryQueryService {
       let card = byProduct.get(key);
       if (!card) {
         card = {
-          product_id: backendProduct?.id ?? null,
+          // The material as one object — id AND name — instead of a scattered
+          // product_id / product_name pair. The Odoo mirror id stays a separate
+          // top-level field: it is a cross-system reference, not the material.
+          product: {
+            id: backendProduct?.id ?? null,
+            name: backendProduct?.name ?? r.productName,
+          },
           odoo_product_id: r.odooProductId,
-          product_name: backendProduct?.name ?? r.productName,
           unit: this.unitRefOf(backendProduct, ctx),
           quantity: 0,
           reserved_quantity: 0,
@@ -414,17 +417,21 @@ export class InventoryQueryService {
 
       const backendProductId = backendIdByOdooId.get(r.odooProductId);
       const conditionKey = `${backendProductId}:${r.conditionCode}`;
+      const grade = ctx.conditionsByKey.get(conditionKey);
       card.conditions.push({
-        // Null for UNGRADED, which is a real state and not a grade: stock that
-        // has not been sorted yet, or a material that has no grades at all.
-        // There is no row to point at, and inventing one would put an id on
-        // the response that nothing else in the system would recognise.
-        condition_id: ctx.conditionsByKey.get(conditionKey)?.id ?? null,
-        // The CODE only. `condition_label` was here beside it and is gone: the
-        // id addresses the grade and the code names it, and the label was a
-        // third spelling of the same fact that a caller then had to choose
-        // between. Whoever needs it reads the grade by its id.
-        condition: r.conditionCode,
+        // The grade as the single canonical object every route returns, or null
+        // for UNGRADED stock (unsorted, or a material with no grades) — there is
+        // no grade row to point at, so inventing one would put an id on the
+        // response nothing else recognises.
+        condition:
+          r.conditionCode && r.conditionCode !== UNGRADED_CONDITION
+            ? {
+                id: grade?.id ?? null,
+                code: r.conditionCode,
+                name: grade?.nameAr ?? r.conditionCode,
+                sort_order: grade?.sortOrder ?? null,
+              }
+            : null,
         quantity: qty,
         reserved_quantity: reserved,
         available,
@@ -437,9 +444,13 @@ export class InventoryQueryService {
       reserved_quantity: round3(card.reserved_quantity),
       available: round3(card.available),
       stock_status: stockStatus(card.quantity, card.reorder_level),
-      conditions: card.conditions.sort((a, b) =>
-        a.condition.localeCompare(b.condition),
-      ),
+      // In the admin's arranged grade order, then by code; ungraded (null) last.
+      conditions: card.conditions.sort((a, b) => {
+        const ao = a.condition?.sort_order ?? Number.MAX_SAFE_INTEGER;
+        const bo = b.condition?.sort_order ?? Number.MAX_SAFE_INTEGER;
+        if (ao !== bo) return ao - bo;
+        return (a.condition?.code ?? '').localeCompare(b.condition?.code ?? '');
+      }),
     }));
   }
 
@@ -581,8 +592,7 @@ export class InventoryQueryService {
       available: 0,
       stock_status: StockStatus.OUT_OF_STOCK,
       conditions: [] as {
-        condition_id: string | null;
-        condition: string;
+        condition: { id: string | null; code: string; name: string; sort_order: number | null } | null;
         quantity: number;
         reserved_quantity: number;
         available: number;

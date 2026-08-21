@@ -1,7 +1,8 @@
-import { Transform } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import { normalizeSyrianPhoneNumber } from "@src/common/utils/phone-normalization.provider";
 import { CollectionFrequeny } from "@src/user/enums/collectionFrequeny.enum";
-import { IsNotEmpty, IsString, IsOptional, Matches, IsEnum,IsUUID, IsArray, ArrayNotEmpty } from "class-validator";
+import { IsNotEmpty, IsString, IsOptional, Matches, IsEnum,IsUUID, IsArray, ArrayNotEmpty, ValidateNested } from "class-validator";
+import { DeliveryTimeSlotDto } from "./delivery-time-slot.dto";
 
 export class InformationInstitutionDto {
     @IsNotEmpty()
@@ -71,10 +72,14 @@ export class WasteInstitutionDto {
     @IsString()
     collectionFrequney: CollectionFrequeny;
 
+    // Detailed collection windows — a weekday + a start→end time, as many as the
+    // institution wants (e.g. [{ "day": "MONDAY", "from": "08:00", "to": "12:00" }]).
+    // Replaces the old free-text list so a window is a real, checkable slot.
     @IsArray()
     @ArrayNotEmpty()
-    @IsString({ each: true })
-    preferredCollectionTime: string[];
+    @ValidateNested({ each: true })
+    @Type(() => DeliveryTimeSlotDto)
+    preferredCollectionTime: DeliveryTimeSlotDto[];
 
 
 }

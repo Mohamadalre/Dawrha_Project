@@ -42,7 +42,7 @@ describe('CartService', () => {
     // The material carries its own unit now — the cart reads product.unitType
     // instead of taking a unit from the request.
     productRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'p1', isActive: true, unitType: 'KG' }),
+      findOne: jest.fn().mockResolvedValue({ id: 'p1', isActive: true, unitType: 'KG', odooProductId: 1 }),
     };
     units = {
       weightCodes: jest.fn(async () => new Set(['KG'])),
@@ -55,6 +55,7 @@ describe('CartService', () => {
         id,
         code: 'GRADE_' + id.toUpperCase(),
       })),
+      gradeMapFor: jest.fn(async () => new Map()),
     };
 
     // Answers from the SAME price mock the rest of this file drives, so the
@@ -69,9 +70,23 @@ describe('CartService', () => {
       }),
     };
 
+    // The stock guard runs only for factories / free facilities; the citizen
+    // tests here never reach it, so a permissive stub is enough.
+    const inventoryRepo: any = {
+      createQueryBuilder: jest.fn(() => ({
+        innerJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn(async () => ({ available: '1000000' })),
+      })),
+    };
+    const buyerProfiles: any = { provinceForBuyer: jest.fn(async () => 'prov1') };
+
     service = new CartService(
       cartRepo, itemRepo, productRepo, units,
       conditionsService, effectivePriceService,
+      inventoryRepo, buyerProfiles,
     );
   });
 
@@ -89,7 +104,8 @@ describe('CartService', () => {
     // The unit is the material's own, and no offer means the list price.
     expect(res.item.unit_type).toBe('KG');
     expect(res.item.unit_price).toBe(0.3);
-    expect(res.item.is_offer).toBe(false);
+    expect(res.item.has_offer).toBe(false);
+    expect(res.item).not.toHaveProperty('offer');
     expect(res.cart_summary.can_proceed_to_checkout).toBe(true);
   });
 
@@ -103,8 +119,8 @@ describe('CartService', () => {
 
     const res = await service.addItem(citizen, { product_id: 'p1', quantity: 10 });
 
-    expect(res.item.is_offer).toBe(true);
-    expect(res.item.offer_id).toBe('off1');
+    expect(res.item.has_offer).toBe(true);
+    expect(res.item.offer.id).toBe('off1');
     expect(res.item.unit_price).toBe(0.2);
     const savedLine = itemRepo.save.mock.calls[0][0];
     expect(savedLine.offerId).toBe('off1');

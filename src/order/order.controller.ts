@@ -211,9 +211,29 @@ export class OrderController {
   }
 
   /**
-   * Reports a problem with one part. The kind decides who answers: a shortage
-   * or a quality dispute goes to the warehouse, where the deduction log is;
-   * delivery and billing go to the admin.
+   * Reports a problem with the WHOLE order — the buyer-facing complaint route.
+   *
+   * The buyer complains about their order, not a warehouse part they cannot see.
+   * The kind decides who answers: a shortage or quality dispute is fanned out to
+   * every warehouse that fulfilled the order (each sees it against its own
+   * deduction log); delivery and billing go to the admin desk.
+   */
+  @Post(':orderId/complaints')
+  async fileOrderComplaint(
+    @CurrentUser() user: any,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @Body() dto: FileComplaintDto,
+  ) {
+    return this.view.fileOrderComplaint(user.id, orderId, {
+      kind: dto.kind,
+      description: dto.description,
+      claimedShortfall: dto.claimed_shortfall,
+    });
+  }
+
+  /**
+   * Reports a problem with one specific part. Kept for internal / targeted use;
+   * buyers file order-level complaints via `POST /orders/:orderId/complaints`.
    */
   @Post('parts/:partId/complaints')
   async fileComplaint(

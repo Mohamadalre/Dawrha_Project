@@ -331,9 +331,10 @@ export class WarehouseAdminService {
           },
           capacity: w.capacity ?? null,
           current_load: Number(w.currentLoad),
-          // Fleet at this warehouse, split by type (mirrored from Odoo).
+          // Fleet at this warehouse, split by type (mirrored from Odoo). The
+          // separate `truck_count` field was removed — it only repeated
+          // `trucks.total`, so two fields carried the same number.
           trucks: truckCounts.get(w.id) ?? { collection: 0, delivery: 0, total: 0 },
-          truck_count: (truckCounts.get(w.id)?.total) ?? 0,
           // Mirrored from Odoo — shipments only exist there.
           shipment_count: w.shipmentCount ?? 0,
           // Counted here — orders are placed on this side.
@@ -389,7 +390,6 @@ export class WarehouseAdminService {
       capacity: w.capacity ?? null,
       current_load: Number(w.currentLoad),
       trucks: truckCounts.get(w.id) ?? { collection: 0, delivery: 0, total: 0 },
-      truck_count: (truckCounts.get(w.id)?.total) ?? 0,
       shipment_count: w.shipmentCount ?? 0,
       order_count: orderCounts.get(w.id) ?? 0,
       load_percentage: w.capacity

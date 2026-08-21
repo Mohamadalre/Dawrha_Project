@@ -26,12 +26,11 @@ describe('OrderConstraintsController', () => {
   it('sets a minimum, mapping the DTO to the service shape', async () => {
     await controller.setMinimum(admin, Role.FACTORY, {
       min_order_value: 50,
-      currency: 'JOD',
       is_active: true,
     });
     expect(minimums.upsert).toHaveBeenCalledWith(
       Role.FACTORY,
-      { minOrderValue: 50, currency: 'JOD', isActive: true },
+      { minOrderValue: 50, isActive: true },
       'admin1',
     );
   });
@@ -44,7 +43,7 @@ describe('OrderConstraintsController', () => {
     });
     expect(caps.upsert).toHaveBeenCalledWith(
       Role.EXTERNAL_PARTNER,
-      { maxAmount: 1000, period: SpendingCapPeriod.DAILY, currency: undefined, isActive: true },
+      { maxAmount: 1000, period: SpendingCapPeriod.DAILY, isActive: true },
       'admin1',
     );
   });

@@ -27,7 +27,14 @@ export class PricingExpiryCron {
     return process.env.MAINTENANCE_WORKER === 'true';
   }
 
-  @Cron(CronExpression.EVERY_5_MINUTES)
+  // Every MINUTE, not every five: an admin-set expiry must take effect as close
+  // to its instant as a cron allows. The catalogue QUERY already excludes an
+  // expired price immediately (it filters `effective_until > NOW()`), so a
+  // cache-miss never shows a stale price; this sweep is what ARCHIVES the row and
+  // INVALIDATES the cache, so the tighter interval bounds how long a cached page
+  // can still quote a just-expired price to ≤ 1 minute. The sweep is cheap when
+  // there is nothing to expire (one indexed lookup that returns no rows).
+  @Cron(CronExpression.EVERY_MINUTE)
   async sweep(): Promise<void> {
     if (!this.isEnabled()) return;
     try {

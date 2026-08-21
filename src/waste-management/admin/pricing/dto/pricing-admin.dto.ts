@@ -1,5 +1,6 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
   IsDateString,
   IsEnum,
   IsInt,
@@ -9,6 +10,7 @@ import {
   Min,
 } from 'class-validator';
 import { PricingTier } from '@src/waste-management/enums/pricing-tier.enum';
+import { clampPageParam, MAX_PAGE_LIMIT } from '@src/waste-management/common/dto/pagination.dto';
 
 /**
  * Give the live price list an end date.
@@ -22,10 +24,35 @@ export class SetPricingExpiryDto {
   @IsDateString()
   effective_until: string;
 
-  /** Omit to expire every tier together. */
+  /**
+   * Which buyer roles/tiers the expiry applies to. Omit (or send an empty list)
+   * to expire EVERY tier together — the "all roles" case. `tier` is kept for
+   * backward compatibility with the old single-tier callers; when both are sent,
+   * `tiers` wins.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsEnum(PricingTier, { each: true })
+  tiers?: PricingTier[];
+
+  /** @deprecated use `tiers`. Omit to expire every tier together. */
   @IsOptional()
   @IsEnum(PricingTier)
   tier?: PricingTier;
+}
+
+/**
+ * Withdraw (archive) a material's price list — optionally only for some roles.
+ *
+ * Omit `tiers` (or send an empty list) to withdraw EVERY tier at once (the
+ * material is then fully suspended). Name specific tiers to withdraw only those,
+ * leaving the material sellable to the roles still priced.
+ */
+export class DeletePricingDto {
+  @IsOptional()
+  @IsArray()
+  @IsEnum(PricingTier, { each: true })
+  tiers?: PricingTier[];
 }
 
 /**
@@ -59,15 +86,15 @@ export class PriceHistoryQueryDto {
   as_of?: string;
 
   @IsOptional()
-  @Type(() => Number)
+  @Transform(({ value }) => clampPageParam(value, 1, Number.MAX_SAFE_INTEGER, 1))
   @IsInt()
   @Min(1)
   page?: number = 1;
 
   @IsOptional()
-  @Type(() => Number)
+  @Transform(({ value }) => clampPageParam(value, 1, MAX_PAGE_LIMIT, 20))
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(MAX_PAGE_LIMIT)
   limit?: number = 20;
 }

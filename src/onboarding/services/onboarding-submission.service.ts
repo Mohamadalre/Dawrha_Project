@@ -501,6 +501,18 @@ export class OnboardingSubmissionService {
 
     const profile = await this.getProfile(accountId, role, cfg);
 
+    // EDIT means change what is there — so a location must already exist. The
+    // location step writes the coordinates, so their absence is the signal it
+    // was never done: the applicant is trying to CREATE a location through the
+    // edit route, skipping the ordered add step. They are told to add it first.
+    // (In PENDING_APPROVAL this never trips — a submitted application has been
+    // through every step — so it only guards a mid-onboarding shortcut.)
+    if (!(profile as any).coordinates) {
+      throw new BadRequestException(
+        'Add your location first — there is nothing to edit yet',
+      );
+    }
+
     if (dto.provinceId !== undefined) {
       const province = await this.provinceRepo.findOne({ where: { id: dto.provinceId } });
       if (!province) throw new BadRequestException('province invalid');
@@ -578,6 +590,10 @@ export class OnboardingSubmissionService {
     // as first submission.
     if (role === Role.FACTORY && dto.deliveryTimeSlots !== undefined) {
       assertValidTimeSlots(dto.deliveryTimeSlots);
+    }
+    // An institution's edited collection windows follow the same rule.
+    if (role === Role.INSTITUTIONS && dto.preferredCollectionTime !== undefined) {
+      assertValidTimeSlots(dto.preferredCollectionTime);
     }
 
     // Replacing the chosen waste categories: verify every id exists first, so a

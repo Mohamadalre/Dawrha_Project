@@ -72,6 +72,15 @@ export class OdooSyncService {
     return this.queue.add(ODOO_JOBS.DELETE_PRODUCT, payload, this.opts(ODOO_JOBS.DELETE_PRODUCT));
   }
 
+  /** REVERSE: a product was edited in Odoo — mirror the change to the backend. */
+  enqueueSyncProductFromOdoo(payload: { odooProductId: number }) {
+    return this.queue.add(
+      ODOO_JOBS.SYNC_PRODUCT_FROM_ODOO,
+      payload,
+      this.opts(ODOO_JOBS.SYNC_PRODUCT_FROM_ODOO),
+    );
+  }
+
   enqueueUpdatePricing(payload: UpdatePricingPayload) {
     return this.queue.add(ODOO_JOBS.UPDATE_PRICING, payload, this.opts(ODOO_JOBS.UPDATE_PRICING));
   }

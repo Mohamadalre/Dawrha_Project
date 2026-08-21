@@ -457,7 +457,12 @@ export class AuthService {
     // from there on every request (see AccountStatusGuard). A token that carried
     // the status would keep reporting the value it held at login long after the
     // account moved on — the bug this removal fixes.
-    const payload = { id: accountId, role: role, jti: randomBytes(16).toString('base64url') };
+    //
+    // `deviceId` DOES travel: it lets a request be traced to the exact device it
+    // was signed in from (audit, per-device logout, spotting a token used from a
+    // device it was never issued to). An identifier, not a secret — the
+    // (accountId, deviceId) pair is already unique per device.
+    const payload = { id: accountId, role: role, deviceId, jti: randomBytes(16).toString('base64url') };
 
     const [accessToken, refreshTokenRaw] = await Promise.all([
       this.jwtService.signAsync(payload, {

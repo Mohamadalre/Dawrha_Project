@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Role } from '@src/user/enums/role.enum';
+import { PlatformSettingsService } from '@src/platform-settings/platform-settings.service';
 import { OrderSpendingCap } from '../entities/order-spending-cap.entity';
 import { SpendingCapPeriod } from '../enums/spending-cap-period.enum';
 import { Order } from '../entities/order.entity';
@@ -33,6 +34,7 @@ export class OrderSpendingCapService {
     private readonly capRepo: Repository<OrderSpendingCap>,
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
+    private readonly settings: PlatformSettingsService,
   ) {}
 
   /** The active cap for a role, or null when none is configured/enabled. */
@@ -61,7 +63,8 @@ export class OrderSpendingCapService {
         cap: null,
         incoming: round3(incomingGoodsTotal),
         remaining: Infinity,
-        currency: 'SYP',
+        // No cap configured → quote the LIVE central currency, not a hardcode.
+        currency: await this.settings.defaultCurrency(),
       };
     }
 
@@ -118,7 +121,6 @@ export class OrderSpendingCapService {
     values: {
       maxAmount: number;
       period: SpendingCapPeriod;
-      currency?: string;
       isActive?: boolean;
     },
     adminId: string,
@@ -127,7 +129,8 @@ export class OrderSpendingCapService {
     if (!row) row = this.capRepo.create({ role });
     row.maxAmount = String(values.maxAmount);
     row.period = values.period;
-    if (values.currency) row.currency = values.currency;
+    // Currency is the central platform currency, never taken from the request.
+    row.currency = await this.settings.defaultCurrency();
     if (values.isActive !== undefined) row.isActive = values.isActive;
     row.updatedBy = adminId;
     return this.capRepo.save(row);

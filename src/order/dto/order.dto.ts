@@ -16,26 +16,14 @@ import {
 import { FulfilmentMode } from '../enums/fulfilment-mode.enum';
 import { ComplaintKind } from '../enums/complaint-kind.enum';
 import { OrderStatus } from '../enums/order-status.enum';
+import { PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 
 /**
  * Listing a buyer's own orders, optionally narrowed to one status — so a factory
  * or free facility can pull just their rejected orders, just what is being
  * prepared, and so on, rather than filtering a full list on the client.
  */
-export class ListOrdersQueryDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number;
-
+export class ListOrdersQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(OrderStatus)
   status?: OrderStatus;
@@ -88,20 +76,7 @@ export class ApplyModificationDto {
 }
 
 /** Admin listing of all orders, optionally narrowed to one status. */
-export class AdminListOrdersQueryDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number;
-
+export class AdminListOrdersQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(OrderStatus)
   status?: OrderStatus;

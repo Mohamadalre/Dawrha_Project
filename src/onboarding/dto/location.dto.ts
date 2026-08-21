@@ -12,7 +12,7 @@ export class LocationDto {
   @IsArray()
   @ArrayMinSize(2)
   @ArrayMaxSize(2)
-  coordinates: number[]; 
+  coordinates: number[];
 
 
 

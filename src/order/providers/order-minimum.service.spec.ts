@@ -21,7 +21,7 @@ describe('OrderMinimumService', () => {
 
   beforeEach(() => {
     repo = { findOne: jest.fn(), find: jest.fn(), create: jest.fn(), save: jest.fn(), delete: jest.fn() };
-    service = new OrderMinimumService(repo);
+    service = new OrderMinimumService(repo, { defaultCurrency: jest.fn().mockResolvedValue('SYP') } as any);
   });
 
   it('passes any value when no minimum is configured (null = no floor)', async () => {

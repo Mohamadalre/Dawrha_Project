@@ -32,6 +32,7 @@ import { OrderPartOffer } from '@src/order/entities/order-part-offer.entity';
 import { latestRoundWasSplit } from '@src/order/latest-round-split';
 import { FulfilmentMode } from '@src/order/enums/fulfilment-mode.enum';
 import { DeliveryRateService } from '@src/warehouse/providers/delivery-rate.service';
+import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
 import {
   OrderStatus,
   canTransition,
@@ -195,6 +196,9 @@ export class OdooSyncProcessor extends WorkerHost {
     // Re-prices a reassigned split part's delivery leg. Provided by THIS module
     // (see the module note) to avoid a cycle with WarehouseModule.
     private readonly rates: DeliveryRateService,
+    // Drops cached catalogue pages when a reverse product edit lands, so the
+    // mirrored name is visible at once instead of at the next TTL.
+    private readonly cache: CatalogCacheService,
   ) {
     super();
   }
@@ -205,6 +209,8 @@ export class OdooSyncProcessor extends WorkerHost {
     [ODOO_JOBS.DELETE_CATEGORY]: (job) => this.deleteCategory(job.data as DeleteCategoryPayload),
     [ODOO_JOBS.SYNC_PRODUCT]: (job) => this.syncProduct(job.data as SyncProductPayload),
     [ODOO_JOBS.DELETE_PRODUCT]: (job) => this.deleteProduct(job.data as DeleteProductPayload),
+    [ODOO_JOBS.SYNC_PRODUCT_FROM_ODOO]: (job) =>
+      this.syncProductFromOdoo(job.data as { odooProductId: number }),
     [ODOO_JOBS.UPDATE_PRICING]: (job) => this.updatePricing(job.data as UpdatePricingPayload),
     [ODOO_JOBS.CREATE_WAREHOUSE]: (job) => this.createWarehouse(job.data as CreateWarehousePayload),
     [ODOO_JOBS.SYNC_WAREHOUSE]: (job) => this.syncWarehouse(job.data as SyncWarehousePayload),
@@ -292,7 +298,17 @@ export class OdooSyncProcessor extends WorkerHost {
     if (!product) return;
 
     if (product.odooProductId) {
-      await this.odoo.updateProduct(product.odooProductId, { name: product.name });
+      // Push EVERY mutable field the backend owns, not just the name — an edit
+      // to the unit or the category never reached Odoo before, so a renamed
+      // material synced but a re-measured one silently did not. `unit_code` is
+      // resolved to Odoo's uom_id inside recycle.product.write; the category is
+      // sent only once it has an Odoo id to point at.
+      const values: Record<string, any> = { name: product.name };
+      if (product.unitType) values.unit_code = product.unitType;
+      if (product.category?.odooCategoryId) {
+        values.category_id = product.category.odooCategoryId;
+      }
+      await this.odoo.updateProduct(product.odooProductId, values);
     } else {
       // recycle.product requires a category — the category must be synced first.
       if (!product.category?.odooCategoryId) {
@@ -315,6 +331,42 @@ export class OdooSyncProcessor extends WorkerHost {
 
     // Whenever the product is (re)synced, keep its tier prices in Odoo current.
     await this.pushTierPrices(product);
+  }
+
+  /**
+   * REVERSE sync: a product's master field was edited on the Odoo screen; mirror
+   * it back to the backend row.
+   *
+   * The backend stays the master for a product's EXISTENCE and its PRICING — this
+   * only copies the editable master fields (the name) the other way, so the two
+   * screens agree instead of the Odoo edit being silently lost.
+   *
+   * Loop-safe by construction: the write happens ONLY when the value actually
+   * differs, and it NEVER enqueues a push back to Odoo. So the backend→Odoo push
+   * (which also writes only on a real change) and this Odoo→backend mirror
+   * converge after one hop and then both fall silent — there is no ping-pong.
+   */
+  private async syncProductFromOdoo(payload: { odooProductId: number }) {
+    const product = await this.productRepo.findOne({
+      where: { odooProductId: payload.odooProductId },
+    });
+    // Unknown here means Odoo authored a product the backend does not mirror —
+    // and the backend is the only place a product may be BORN, so this is not
+    // adopted. Nothing to do.
+    if (!product) return;
+
+    const info = await this.odoo.fetchProductInfo(payload.odooProductId);
+    if (!info?.name) return;
+
+    if (info.name !== product.name) {
+      product.name = info.name;
+      await this.productRepo.save(product);
+      await this.cache.invalidate('products', 'categories', 'offers');
+      winstonLogger.info(
+        `Product ${product.id} name mirrored FROM Odoo (${payload.odooProductId})`,
+        LOG_META,
+      );
+    }
   }
 
   private async deleteProduct(payload: DeleteProductPayload) {
@@ -427,14 +479,25 @@ export class OdooSyncProcessor extends WorkerHost {
     return map;
   }
 
-  /** All currently-effective pricing rows of a product for a given tier. */
+  /**
+   * All currently-effective pricing rows of a product for a given tier —
+   * EXCLUDING those on a deactivated grade.
+   *
+   * A deactivated grade is hidden everywhere a buyer looks, and Odoo's price
+   * sheet is one of those places: leaving its price here would show the grade,
+   * struck through or not, on the sorter's and the buyer's Odoo view while the
+   * apps hide it. The ungraded row (null condition) always stays — it is the
+   * material's plain price, not a grade.
+   */
   private async livePricingRows(productId: string, tier: PricingTier) {
     return this.pricingRepo
       .createQueryBuilder('pp')
+      .leftJoin('pp.condition', 'c')
       .where('pp.productId = :productId', { productId })
       .andWhere('pp.tier = :tier', { tier })
       .andWhere('pp.effectiveFrom <= NOW()')
       .andWhere('(pp.effectiveUntil IS NULL OR pp.effectiveUntil > NOW())')
+      .andWhere('(pp.conditionId IS NULL OR c.isActive = true)')
       .getMany();
   }
 
@@ -1536,6 +1599,11 @@ export class OdooSyncProcessor extends WorkerHost {
       truck.year = ot.year ?? truck.year ?? 0;
       truck.plateNumber = ot.plate_number ?? truck.plateNumber;
       truck.maxPayloadKg = ot.max_payload_kg ?? truck.maxPayloadKg;
+      // Bed dimensions mirror Odoo. Odoo returns 0.0 for an unset Float, which
+      // is a real "not recorded" here, so a 0 is stored as null to keep the
+      // backend row honest rather than claiming a zero-length truck.
+      truck.lengthM = ot.length_m ? Number(ot.length_m) : null;
+      truck.widthM = ot.width_m ? Number(ot.width_m) : null;
       truck.warehouseId = warehouse?.id ?? null;
       if (ot.is_active === false) truck.status = TruckStatus.DISABLED;
       else if (truck.status === TruckStatus.DISABLED) truck.status = TruckStatus.ACTIVE;
@@ -2184,6 +2252,20 @@ export class OdooSyncProcessor extends WorkerHost {
         condition.odooSyncStatus = OdooSyncStatus.FAILED;
         await this.conditionRepo.save(condition);
       }
+    }
+
+    // Any of the four catalogue branches above may have DELETED a category /
+    // product / unit / condition (compensation for a create that never reached
+    // Odoo) or flipped its sync status — a change the cached catalogue must not
+    // keep serving. Drop the catalogue cache whenever the failed job was a
+    // catalogue one, exactly as the admin CRUD and the reverse-sync do.
+    if (
+      job.name === ODOO_JOBS.SYNC_CATEGORY ||
+      job.name === ODOO_JOBS.SYNC_PRODUCT ||
+      job.name === ODOO_JOBS.SYNC_UNIT ||
+      job.name === ODOO_JOBS.SYNC_CONDITION
+    ) {
+      await this.cache.invalidate('categories', 'products', 'offers');
     }
 
     if (job.name === ODOO_JOBS.CREATE_WAREHOUSE) {

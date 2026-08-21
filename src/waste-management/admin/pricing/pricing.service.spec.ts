@@ -50,6 +50,7 @@ describe('PricingService', () => {
       // Grade NAMES are resolved per material — two materials may both have a
       // 'GOOD' and they are different grades of different things.
       labelMapFor: jest.fn(async () => new Map([['p1:GOOD', 'جيدة']])),
+      sortOrderMapFor: jest.fn(async () => new Map([['p1:GOOD', 1]])),
     };
     // The material decides the pricing shape now, so the spec has to say which
     // grades the material under test actually has.
@@ -65,6 +66,7 @@ describe('PricingService', () => {
       resolveForProduct: jest.fn(async (id: string) => ({
         id,
         code: 'EXCELLENT',
+        isActive: true,
       })),
     };
 
@@ -110,10 +112,20 @@ describe('PricingService', () => {
       // invoice is read from, so a line linked to the wrong grade is money
       // charged for something the buyer did not order.
       expect(result.pricing.factory).toEqual([
-        { pricing_id: 'pp', condition: 'EXCELLENT', condition_id: 'cond-excellent', price: 0.25, currency: 'SYP' },
+        {
+          pricing_id: 'pp',
+          condition: { id: 'cond-excellent', code: 'EXCELLENT', name: 'EXCELLENT', sort_order: null },
+          price: 0.25,
+          currency: 'SYP',
+        },
       ]);
       expect(result.pricing.free_facility).toEqual([
-        { pricing_id: 'pp', condition: 'EXCELLENT', condition_id: 'cond-excellent', price: 0.26, currency: 'SYP' },
+        {
+          pricing_id: 'pp',
+          condition: { id: 'cond-excellent', code: 'EXCELLENT', name: 'EXCELLENT', sort_order: null },
+          price: 0.26,
+          currency: 'SYP',
+        },
       ]);
     });
 
@@ -127,8 +139,8 @@ describe('PricingService', () => {
         free_facility: [{ condition_id: 'cond-excellent', price: 0.26 }],
       } as any);
 
-      expect(res.pricing.factory[0].condition_id).toBe('cond-excellent');
-      expect(res.pricing.factory[0].condition).toBe('EXCELLENT');
+      expect(res.pricing.factory[0].condition.id).toBe('cond-excellent');
+      expect(res.pricing.factory[0].condition.code).toBe('EXCELLENT');
     });
 
     it('refuses an id and a code that disagree', async () => {
@@ -153,7 +165,7 @@ describe('PricingService', () => {
         free_facility: [{ condition: 'EXCELLENT', price: 0.26 }],
       } as any);
 
-      expect(res.pricing.factory[0].condition_id).toBe('cond-excellent');
+      expect(res.pricing.factory[0].condition.id).toBe('cond-excellent');
     });
 
     it('archives the previous live rows before replacing them', async () => {
@@ -252,6 +264,41 @@ describe('PricingService', () => {
         service.updateTierPrice('admin1', 'missing', PricingTier.FACTORY, { price: 1 }),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
+
+    it('accepts an expiry date at add-time and stores it on the new row', async () => {
+      const future = new Date(Date.now() + 7 * 864e5).toISOString();
+      await service.updateTierPrice('admin1', 'p1', PricingTier.INDIVIDUAL, {
+        price: 0.4,
+        effective_until: future,
+      } as any);
+      const saved = pricingRepo.save.mock.calls.at(-1)[0];
+      expect(saved.effectiveUntil).toBeInstanceOf(Date);
+    });
+
+    it('refuses an expiry in the past', async () => {
+      await expect(
+        service.updateTierPrice('admin1', 'p1', PricingTier.INDIVIDUAL, {
+          price: 0.4,
+          effective_until: '2000-01-01T00:00:00.000Z',
+        } as any),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('refuses to price a DEACTIVATED grade (id path) — pricing must not resurrect it', async () => {
+      productConditions.resolveForProduct.mockResolvedValueOnce({
+        id: 'cond-x',
+        code: 'EXCELLENT',
+        isActive: false,
+      });
+      await expect(
+        service.updateTierPrice('admin1', 'p1', PricingTier.FACTORY, {
+          price: 1,
+          condition_id: 'cond-x',
+        } as any),
+      ).rejects.toMatchObject({ status: 400 });
+      // Nothing was archived or written — the price never got created.
+      expect(pricingRepo.save).not.toHaveBeenCalled();
+    });
   });
 
   describe('deletePricing', () => {
@@ -279,7 +326,7 @@ describe('PricingService', () => {
     it('returns the live price per tier (null when unpriced)', async () => {
       pricingRepo.find.mockResolvedValueOnce([
         { id: 'pp-ind', tier: PricingTier.INDIVIDUAL, price: '0.30', conditionCode: null },
-        { id: 'pp-fac', tier: PricingTier.FACTORY, price: '0.25', conditionCode: 'GOOD' },
+        { id: 'pp-fac', tier: PricingTier.FACTORY, price: '0.25', conditionCode: 'GOOD', conditionId: 'cond-good' },
       ]);
 
       const result: any = await service.getCurrentPricing('p1');
@@ -290,12 +337,13 @@ describe('PricingService', () => {
       expect(result.pricing.individual.pricing_id).toBeDefined();
       expect(result.pricing.factory).toHaveLength(1);
       expect(result.pricing.factory[0]).toMatchObject({
-        condition: 'GOOD',
-        // Named as well as coded: a code alone identifies nothing to a reader,
-        // because it is unique only within its material.
-        condition_name: 'جيدة',
+        // The grade is ONE object now — id, code, name and sort order together —
+        // not a scattered condition / condition_id / condition_name trio.
+        condition: { id: 'cond-good', code: 'GOOD', name: 'جيدة', sort_order: 1 },
         price: 0.25,
       });
+      expect(result.pricing.factory[0]).not.toHaveProperty('condition_name');
+      expect(result.pricing.factory[0]).not.toHaveProperty('condition_id');
       expect(result.pricing.company).toBeNull();
       expect(result.pricing.free_facility).toEqual([]);
     });
@@ -314,6 +362,39 @@ describe('PricingService', () => {
       expect(result.tiers.individual).toHaveLength(2);
       expect(result.tiers.individual[0].price).toBe(0.2);
       expect(result.tiers.factory).toHaveLength(0);
+    });
+
+    it('nests the grade as one {id, code, name} object for a graded row', async () => {
+      pricingRepo.find.mockResolvedValueOnce([
+        {
+          id: 'pr-1',
+          tier: PricingTier.FACTORY,
+          conditionId: 'cond-good',
+          conditionCode: 'GOOD',
+          price: '0.30',
+          currency: 'SYP',
+          effectiveFrom: new Date(),
+        },
+      ]);
+      historyRepo.find.mockResolvedValueOnce([]);
+
+      const result: any = await service.getPriceHistory('p1');
+
+      const row = result.tiers.factory[0];
+      expect(row.condition).toEqual({ id: 'cond-good', code: 'GOOD', name: 'جيدة', sort_order: 1 });
+      // The old scattered fields are gone.
+      expect(row).not.toHaveProperty('condition_id');
+      expect(row).not.toHaveProperty('condition_name');
+    });
+
+    it('leaves condition null for a flat (individual) row', async () => {
+      pricingRepo.find.mockResolvedValueOnce([
+        { id: 'pr-2', tier: PricingTier.INDIVIDUAL, price: '0.10', currency: 'SYP', effectiveFrom: new Date() },
+      ]);
+      historyRepo.find.mockResolvedValueOnce([]);
+
+      const result: any = await service.getPriceHistory('p1');
+      expect(result.tiers.individual[0].condition).toBeNull();
     });
 
     it('throws NotFound when the product is missing', async () => {

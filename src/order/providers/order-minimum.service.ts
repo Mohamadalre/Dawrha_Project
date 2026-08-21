@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Role } from '@src/user/enums/role.enum';
+import { PlatformSettingsService } from '@src/platform-settings/platform-settings.service';
 import { OrderMinimum } from '../entities/order-minimum.entity';
 
 /** Outcome of the minimum-value check, with the numbers the buyer needs. */
@@ -24,6 +25,7 @@ export class OrderMinimumService {
   constructor(
     @InjectRepository(OrderMinimum)
     private readonly minimumRepo: Repository<OrderMinimum>,
+    private readonly settings: PlatformSettingsService,
   ) {}
 
   /**
@@ -53,7 +55,9 @@ export class OrderMinimumService {
       goodsTotal,
       required,
       shortfall: round3(shortfall),
-      currency: minimum?.currency ?? 'SYP',
+      // The stored row keeps the currency it was saved with; when there is no
+      // row, fall back to the LIVE central currency rather than a hardcode.
+      currency: minimum?.currency ?? (await this.settings.defaultCurrency()),
     };
   }
 
@@ -69,13 +73,16 @@ export class OrderMinimumService {
    */
   async upsert(
     role: Role,
-    values: { minOrderValue: number; currency?: string; isActive?: boolean },
+    values: { minOrderValue: number; isActive?: boolean },
     adminId: string,
   ): Promise<OrderMinimum> {
     let row = await this.minimumRepo.findOne({ where: { role } });
     if (!row) row = this.minimumRepo.create({ role });
     row.minOrderValue = String(values.minOrderValue);
-    if (values.currency) row.currency = values.currency;
+    // Currency is never taken from the request — it is the central platform
+    // currency, refreshed on every write so a change to the setting reaches this
+    // row too. (History/archive rows are separate and keep their own currency.)
+    row.currency = await this.settings.defaultCurrency();
     if (values.isActive !== undefined) row.isActive = values.isActive;
     row.updatedBy = adminId;
     return this.minimumRepo.save(row);

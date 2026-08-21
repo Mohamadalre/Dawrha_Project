@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { StagesService } from './stages.service';
+import { Role } from '@src/user/enums/role.enum';
 
 /**
  * Points stages (مراحل) — the citizen loyalty ladder.
@@ -25,6 +26,7 @@ describe('StagesService', () => {
     const o: any = {
       where: jest.fn(() => o),
       andWhere: jest.fn(() => o),
+      innerJoin: jest.fn(() => o),
       orderBy: jest.fn(() => o),
       update: jest.fn(() => o),
       set: jest.fn(() => o),
@@ -216,5 +218,56 @@ describe('StagesService', () => {
     // The shift ran (block moved), and the stage landed on its new number.
     expect(moveQb.set).toHaveBeenCalled();
     expect(stageRepo.update).toHaveBeenCalledWith('s-3', { sortOrder: 1 });
+  });
+
+  // ── myStage rank within the stage (CITIZENS only) ─────────────────
+  it('returns a CITIZEN caller rank within their own stage (highest points first)', async () => {
+    // The caller has 80 points and lands in "Silver" (50–150).
+    walletRepo.findOne.mockResolvedValue({ points: 80 });
+    stageRepo.createQueryBuilder.mockReturnValue(
+      qb({
+        getOne: jest.fn().mockResolvedValue({
+          id: 's2', name: 'Silver', minPoints: 50, maxPoints: 150,
+          sortOrder: 2, isActive: true,
+        }),
+      }),
+    );
+    // First wallet query = citizens in the band (20); second = those ahead (2).
+    walletRepo.createQueryBuilder
+      .mockReturnValueOnce(qb({ getCount: jest.fn().mockResolvedValue(20) }))
+      .mockReturnValueOnce(qb({ getCount: jest.fn().mockResolvedValue(2) }));
+
+    const res: any = await service.myStage('acc1', Role.CITIZEN);
+
+    expect(res.current_stage.name).toBe('Silver');
+    expect(res.stage_users_count).toBe(20);
+    expect(res.stage_rank).toBe(3); // 2 ahead + 1
+  });
+
+  it('gives a NON-citizen no rank even when they fall in a stage band', async () => {
+    walletRepo.findOne.mockResolvedValue({ points: 80 });
+    stageRepo.createQueryBuilder.mockReturnValue(
+      qb({
+        getOne: jest.fn().mockResolvedValue({
+          id: 's2', name: 'Silver', minPoints: 50, maxPoints: 150,
+          sortOrder: 2, isActive: true,
+        }),
+      }),
+    );
+    const res: any = await service.myStage('acc1', Role.FACTORY);
+    expect(res.current_stage.name).toBe('Silver'); // still classified
+    expect(res.stage_rank).toBeNull();             // but not ranked
+    expect(res.stage_users_count).toBe(0);
+  });
+
+  it('has no rank when the caller is in no stage', async () => {
+    walletRepo.findOne.mockResolvedValue({ points: 5 });
+    stageRepo.createQueryBuilder.mockReturnValue(
+      qb({ getOne: jest.fn().mockResolvedValue(null) }),
+    );
+    const res: any = await service.myStage('acc1', Role.CITIZEN);
+    expect(res.current_stage).toBeNull();
+    expect(res.stage_rank).toBeNull();
+    expect(res.stage_users_count).toBe(0);
   });
 });

@@ -76,21 +76,12 @@ describe('offer edit — amount vs percentage', () => {
     service = new AdminCatalogService(
       {} as any, productRepo as any, {} as any, {} as any, {} as any, {} as any,
       pricingRepo as any, offerRepo as any, odooSync as any,
-      noop as any, noop as any, {} as any, {} as any, {} as any, {} as any,
+      noop as any, noop as any, {} as any, { gradeMapFor: jest.fn(async () => new Map()) } as any, {} as any, {} as any,
+      { count: jest.fn().mockResolvedValue(0) } as any,
     );
   });
 
   const edit = (dto: any) => service.updateOffer('admin-1', 'off-1', dto);
-
-  it('edits by AMOUNT — basis AMOUNT, percentage re-derived', async () => {
-    const res = await edit({ amount: 30 });
-
-    expect(saved.basis).toBe(OfferBasis.AMOUNT);
-    expect(saved.basisPercentage).toBeNull();
-    expect(Number(saved.amount)).toBe(30);
-    expect(Number(saved.discountPercentage)).toBe(37.5); // 30/80
-    expect(res.offer.effect.amount).toBe(30);
-  });
 
   it('edits by PERCENTAGE — basis PERCENTAGE, amount derived, promise kept', async () => {
     await edit({ percentage: 25 });
@@ -102,25 +93,15 @@ describe('offer edit — amount vs percentage', () => {
   });
 
   it('a PERCENTAGE edit OVERRIDES a prior amount basis', async () => {
-    // Offer started life amount-based; a percentage edit flips the promise.
+    // An offer created long ago may still be amount-based in the DB; a
+    // percentage edit — the only kind there is now — flips the promise.
     await edit({ percentage: 50 });
     expect(saved.basis).toBe(OfferBasis.PERCENTAGE);
     expect(Number(saved.amount)).toBe(40); // 50% of 80
   });
 
-  it('refuses BOTH an amount and a percentage', async () => {
-    await expect(edit({ amount: 10, percentage: 20 })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
-  });
-
-  it('refuses NEITHER an amount nor a percentage', async () => {
+  it('refuses an empty edit — at least one field is required', async () => {
     await expect(edit({})).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('still refuses a buyer amount that would drive the price negative', async () => {
-    // 90 off an 80 price would pay the buyer to take the material away.
-    await expect(edit({ amount: 90 })).rejects.toThrow(/zero or below|negative|more than/i);
   });
 
   it('refuses a buyer percentage of 100 — the price reaches zero', async () => {
@@ -176,7 +157,8 @@ describe('offer timeline — a material’s offers over time', () => {
     service = new AdminCatalogService(
       {} as any, productRepo as any, {} as any, {} as any, {} as any, {} as any,
       {} as any, offerRepo as any, {} as any,
-      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, { gradeMapFor: jest.fn(async () => new Map()) } as any, {} as any, {} as any,
+      { count: jest.fn().mockResolvedValue(0) } as any,
     );
   };
 
