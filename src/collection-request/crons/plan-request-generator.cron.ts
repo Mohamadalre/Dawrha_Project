@@ -162,6 +162,11 @@ export class PlanRequestGenerator {
       estimatedGrandTotal: String(+grandTotal.toFixed(3)),
       sourcePlanId: plan.id,
       sourcePlanDate: today,
+      lat: plan.lat ?? null,
+      lng: plan.lng ?? null,
+      addressText: plan.addressText ?? null,
+      contactName: plan.contactName ?? null,
+      contactPhone: plan.contactPhone ?? null,
       lines: requestLines,
     });
 

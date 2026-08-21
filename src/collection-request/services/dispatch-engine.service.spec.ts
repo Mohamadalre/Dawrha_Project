@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { getQueueToken } from '@nestjs/bullmq';
 import { NotificationService } from '@src/notification/notification.service';
+import { ShipmentService } from './shipment.service';
 import { CollectionStateService } from '../providers/collection-state.service';
 import { DispatchEngineService } from './dispatch-engine.service';
 import { DispatchCandidatesService } from './dispatch-candidates.service';
@@ -128,6 +129,9 @@ describe('DispatchEngineService', () => {
       createNotification: jest.fn().mockResolvedValue({ id: 'n-1' }),
       enqueueNotification: jest.fn().mockResolvedValue(undefined),
     };
+    const shipmentService = {
+      autoCreateOrAddToShipment: jest.fn().mockResolvedValue(undefined),
+    };
     return {
       queue,
       redis,
@@ -138,6 +142,7 @@ describe('DispatchEngineService', () => {
       candidates,
       events,
       notifications,
+      shipmentService,
       savedRequestStatuses,
       savedAssignmentStatuses,
     };
@@ -157,6 +162,7 @@ describe('DispatchEngineService', () => {
         { provide: DispatchCandidatesService, useValue: m.candidates },
         { provide: DispatchGatewayEvents, useValue: m.events },
         { provide: NotificationService, useValue: m.notifications },
+        { provide: ShipmentService, useValue: m.shipmentService },
       ],
     }).compile();
 

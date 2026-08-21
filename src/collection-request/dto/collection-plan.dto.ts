@@ -72,6 +72,33 @@ export class CreateCollectionPlanDto {
   @MaxLength(500)
   item_note?: string;
 
+  // --- Pickup location ---
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  lng?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  address_text?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  contact_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  contact_phone?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CollectionPlanLineDto)
@@ -123,6 +150,33 @@ export class UpdateCollectionPlanDto {
   @IsString()
   @MaxLength(500)
   item_note?: string;
+
+  // --- Pickup location ---
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  lng?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  address_text?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  contact_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  contact_phone?: string;
 
   @IsOptional()
   @IsArray()

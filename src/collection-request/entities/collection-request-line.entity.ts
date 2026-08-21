@@ -55,6 +55,10 @@ export class CollectionRequestLine {
   @Column({ type: 'decimal', precision: 14, scale: 2, default: 0 })
   total: string;
 
+  /** Actual quantity received by the driver at pickup (null until collected). */
+  @Column({ name: 'actual_quantity', type: 'decimal', precision: 12, scale: 3, nullable: true })
+  actualQuantity?: string | null;
+
   @Column({ length: 255, nullable: true })
   note?: string | null;
 

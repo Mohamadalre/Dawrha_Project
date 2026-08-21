@@ -58,6 +58,11 @@ export class CollectionPlanService {
       endDate: dto.end_date ?? null,
       isActive: dto.is_active ?? true,
       itemNote: dto.item_note ?? null,
+      lat: dto.lat != null ? String(dto.lat) : null,
+      lng: dto.lng != null ? String(dto.lng) : null,
+      addressText: dto.address_text ?? null,
+      contactName: dto.contact_name ?? null,
+      contactPhone: dto.contact_phone ?? null,
       lines: await this.buildLines(dto.lines),
     });
     const saved = await this.planRepo.save(plan);
@@ -102,6 +107,11 @@ export class CollectionPlanService {
     if (dto.end_date !== undefined) plan.endDate = dto.end_date ?? null;
     if (dto.is_active !== undefined) plan.isActive = dto.is_active;
     if (dto.item_note !== undefined) plan.itemNote = dto.item_note ?? null;
+    if (dto.lat !== undefined) plan.lat = dto.lat != null ? String(dto.lat) : null;
+    if (dto.lng !== undefined) plan.lng = dto.lng != null ? String(dto.lng) : null;
+    if (dto.address_text !== undefined) plan.addressText = dto.address_text ?? null;
+    if (dto.contact_name !== undefined) plan.contactName = dto.contact_name ?? null;
+    if (dto.contact_phone !== undefined) plan.contactPhone = dto.contact_phone ?? null;
 
     if (dto.lines !== undefined) {
       await this.planLineRepo.delete({ planId: plan.id });
@@ -177,6 +187,11 @@ export class CollectionPlanService {
       end_date: plan.endDate,
       is_active: plan.isActive,
       item_note: plan.itemNote,
+      lat: plan.lat != null ? Number(plan.lat) : null,
+      lng: plan.lng != null ? Number(plan.lng) : null,
+      address_text: plan.addressText ?? null,
+      contact_name: plan.contactName ?? null,
+      contact_phone: plan.contactPhone ?? null,
       last_generated_date: plan.lastGeneratedDate,
       created_at: plan.createdAt,
       updated_at: plan.updatedAt,

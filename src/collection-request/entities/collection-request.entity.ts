@@ -15,6 +15,7 @@ import { CollectionRoute } from './collection-route.entity';
 import { CollectionPlan } from './collection-plan.entity';
 import { CollectionRequestLine } from './collection-request-line.entity';
 import { CollectionRequestAssignment } from './collection-request-assignment.entity';
+import { Shipment } from './shipment.entity';
 import {
   CollectionRequestStatus,
 } from '../enums/collection-request-status.enum';
@@ -36,6 +37,7 @@ import { CollectionRequestType } from '../enums/collection-request-type.enum';
 @Index(['status'])
 @Index(['accountId'])
 @Index(['routeId'])
+@Index(['shipmentId'])
 @Index(['scheduledAt'])
 export class CollectionRequest {
   @PrimaryGeneratedColumn('uuid')
@@ -114,6 +116,14 @@ export class CollectionRequest {
   /** Position in the tour; stops are ordered by this, never by creation. */
   @Column({ name: 'route_sequence', type: 'int', nullable: true })
   routeSequence?: number | null;
+
+  /** The shipment this request belongs to (set when grouped for warehouse delivery). */
+  @ManyToOne(() => Shipment, (s) => s.requests, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'shipment_id' })
+  shipment?: Shipment | null;
+
+  @Column({ name: 'shipment_id', type: 'uuid', nullable: true })
+  shipmentId?: string | null;
 
   /** The plan that generated this request (ORG_PLAN only). */
   @ManyToOne(() => CollectionPlan, { nullable: true, onDelete: 'SET NULL' })

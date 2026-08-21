@@ -74,6 +74,23 @@ export class CollectionPlan {
   @Column({ name: 'item_note', length: 500, nullable: true })
   itemNote?: string | null;
 
+  // --- Pickup location (snapped from the institution profile at creation) ---
+
+  @Column({ name: 'lat', type: 'decimal', precision: 10, scale: 7, nullable: true })
+  lat?: string | null;
+
+  @Column({ name: 'lng', type: 'decimal', precision: 10, scale: 7, nullable: true })
+  lng?: string | null;
+
+  @Column({ name: 'address_text', length: 500, nullable: true })
+  addressText?: string | null;
+
+  @Column({ name: 'contact_name', length: 255, nullable: true })
+  contactName?: string | null;
+
+  @Column({ name: 'contact_phone', length: 64, nullable: true })
+  contactPhone?: string | null;
+
   /** Last cycle day the generator produced a request for (YYYY-MM-DD). */
   @Column({ name: 'last_generated_date', type: 'date', nullable: true })
   lastGeneratedDate?: string | null;

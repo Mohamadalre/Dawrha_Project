@@ -5,6 +5,8 @@ import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { TruckStatus } from '@src/truck/enums/truck-status.enum';
 import { HandoverStatus } from '@src/truck/enums/handover-status.enum';
 import { TruckHandover } from '@src/truck/entities/truck-handover.entity';
+import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
+import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
 import { CoveragePoint } from '../entities/coverage-point.entity';
 import { DriverCoverageAssignment } from '../entities/driver-coverage-assignment.entity';
 import { CollectionRequest } from '../entities/collection-request.entity';
@@ -45,6 +47,10 @@ export class CoverageService {
     private readonly handoverRepo: Repository<TruckHandover>,
     @InjectRepository(CollectionRequest)
     private readonly requestRepo: Repository<CollectionRequest>,
+    @InjectRepository(TruckAssignmentEntity)
+    private readonly truckAssignmentRepo: Repository<TruckAssignmentEntity>,
+    @InjectRepository(CollectorProfile)
+    private readonly profileRepo: Repository<CollectorProfile>,
   ) {}
 
   /** Re-distributes every eligible idle driver onto the best point. */
@@ -133,6 +139,91 @@ export class CoverageService {
   }
 
   // ---------------------------------------------------------------------------
+  // User-facing: nearby zones
+  // ---------------------------------------------------------------------------
+  async findNearbyZones(
+    lat: number,
+    lng: number,
+    radiusKm: number = 10,
+  ): Promise<any[]> {
+    const points = await this.pointRepo.find({ where: { isActive: true } });
+
+    const withDistance = points
+      .map((p) => ({
+        ...p,
+        distance_km: this.haversineKm(lat, lng, Number(p.lat), Number(p.lng)),
+      }))
+      .filter((p) => p.distance_km <= radiusKm)
+      .sort((a, b) => a.distance_km - b.distance_km || b.priority - a.priority);
+
+    if (!withDistance.length) return [];
+
+    const pointIds = withDistance.map((p) => p.id);
+
+    const assignments = await this.assignmentRepo.find({
+      where: pointIds.map((id) => ({ coveragePointId: id, isActive: true })),
+      relations: ['driver', 'driver.account', 'driver.shift', 'driver.assignment', 'driver.assignment.truck'],
+    });
+
+    const driverIds = assignments.map((a) => a.driverId);
+    const routeWeightMap = await this.activeRouteWeights(driverIds);
+
+    const now = new Date();
+    const result: any[] = [];
+
+    for (const point of withDistance) {
+      const pointAssignments = assignments.filter((a) => a.coveragePointId === point.id);
+      const drivers: any[] = [];
+
+      for (const a of pointAssignments) {
+        const profile = a.driver;
+        if (!profile?.assignment?.truck) continue;
+        const truck = profile.assignment.truck;
+        if (truck.status === TruckStatus.DISABLED) continue;
+
+        const maxKg = Number(truck.maxPayloadKg) || 0;
+        const usedKg = routeWeightMap.get(profile.id) || 0;
+        const remainingKg = Math.max(0, maxKg - usedKg);
+
+        const shift = profile.shift;
+        let shiftRemainingMinutes = 0;
+        if (shift) {
+          shiftRemainingMinutes = this.shiftRemainingMinutes(shift.startTime, shift.endTime, now);
+        }
+
+        drivers.push({
+          driver_id: profile.id,
+          driver_name: profile.account?.name ?? null,
+          account_id: profile.account?.id ?? null,
+          truck_plate: truck.plateNumber,
+          truck_id: truck.id,
+          max_payload_kg: maxKg,
+          current_weight_kg: +usedKg.toFixed(2),
+          remaining_kg: +remainingKg.toFixed(2),
+          remaining_shift_minutes: shiftRemainingMinutes,
+          parked_since: a.assignedFrom,
+        });
+      }
+
+      result.push({
+        point_id: point.id,
+        name: point.name,
+        point_type: point.pointType,
+        lat: Number(point.lat),
+        lng: Number(point.lng),
+        distance_km: +point.distance_km.toFixed(2),
+        available_drivers: drivers.length,
+        drivers_with_capacity: drivers.filter((d) => d.remaining_kg > 0).length,
+        total_capacity_kg: drivers.reduce((s, d) => s + d.max_payload_kg, 0),
+        remaining_capacity_kg: drivers.reduce((s, d) => s + d.remaining_kg, 0),
+        drivers,
+      });
+    }
+
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------
   /** Drivers who are ACTIVE, hold an open truck handover, on a live shift and not mid-pickup. */
@@ -187,5 +278,51 @@ export class CoverageService {
     return start < end
       ? current >= start && current < end
       : current >= start || current < end;
+  }
+
+  private shiftRemainingMinutes(startTime: string, endTime: string, now: Date): number {
+    const toMin = (t: string): number => {
+      const [, h, m, s] = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(t) ?? [];
+      return Number(h) * 60 + Number(m) + (s ? Number(s) / 60 : 0);
+    };
+    const start = toMin(startTime);
+    const end = toMin(endTime);
+    const current = now.getHours() * 60 + now.getMinutes();
+
+    if (start === end) return 24 * 60;
+    if (start < end) {
+      return Math.max(0, end - current);
+    }
+    const tonight = 24 * 60 - start;
+    return Math.max(0, tonight + end - current);
+  }
+
+  private haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  private async activeRouteWeights(driverIds: string[]): Promise<Map<string, number>> {
+    if (!driverIds.length) return new Map();
+    const rows = await this.requestRepo
+      .createQueryBuilder('r')
+      .innerJoin('r.route', 'route')
+      .select('route.driverId', 'driverId')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN r."actual_weight_kg" IS NOT NULL THEN r."actual_weight_kg" ELSE r."estimated_weight_kg" END), 0)`,
+        'weight',
+      )
+      .where('r.status IN (:...statuses)', {
+        statuses: [CollectionRequestStatus.ASSIGNED, CollectionRequestStatus.EN_ROUTE, CollectionRequestStatus.ARRIVED, CollectionRequestStatus.PICKING],
+      })
+      .andWhere('route.driverId IN (:...driverIds)', { driverIds })
+      .groupBy('route.driverId')
+      .getRawMany<{ driverId: string; weight: string }>();
+    return new Map(rows.map((r) => [r.driverId, Number(r.weight)]));
   }
 }

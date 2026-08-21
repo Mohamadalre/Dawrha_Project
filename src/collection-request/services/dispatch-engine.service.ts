@@ -10,6 +10,7 @@ import { NotificationType } from '@src/notification/enums/notification-type.enum
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 import { CollectionRequest } from '../entities/collection-request.entity';
 import { CollectionRequestAssignment } from '../entities/collection-request-assignment.entity';
+import { ShipmentService } from './shipment.service';
 import {
   CollectionRequestNotFoundException,
   CollectionRequestInvalidTransitionException,
@@ -87,6 +88,7 @@ export class DispatchEngineService {
     private readonly candidates: DispatchCandidatesService,
     private readonly events: DispatchGatewayEvents,
     private readonly notifications: NotificationService,
+    private readonly shipmentService: ShipmentService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -219,7 +221,7 @@ export class DispatchEngineService {
       // The merge target must still be an eligible, capable driver.
       const eligible = await this.candidates.findEligible(request, config, [
         route.driverId,
-      ]);
+      ], { allowBusy: true });
       if (!eligible.length) continue;
 
       await this.bindMerged(
@@ -287,7 +289,7 @@ export class DispatchEngineService {
     }
 
     const config = await this.configProvider.get();
-    const candidates = await this.candidates.findEligible(request, config, [driverId]);
+    const candidates = await this.candidates.findEligible(request, config, [driverId], { allowBusy: true });
     if (!candidates.length) throw new CollectionDriverNotEligibleException();
 
     if (request.status === CollectionRequestStatus.NEEDS_ADMIN) {
@@ -325,6 +327,13 @@ export class DispatchEngineService {
     if (to === CollectionRequestAssignmentStatus.ACCEPTED) {
       if (!request || request.status !== CollectionRequestStatus.QUEUED) return;
       await this.bindToRoute(request, assignment.driverId);
+
+      // Auto-create or add to active shipment
+      await this.shipmentService.autoCreateOrAddToShipment(
+        assignment.driverId,
+        request,
+      );
+
       this.events.announceToRequest(
         request.id,
         'request:status',
@@ -622,6 +631,13 @@ export class DispatchEngineService {
       route_sequence: request.routeSequence,
     });
     await this.notifyProducerAssigned(request);
+
+    // Auto-add merged request to the driver's active shipment
+    await this.shipmentService.autoCreateOrAddToShipment(
+      route.driverId,
+      request,
+    );
+
     winstonLogger.info(
       `Collection request ${request.requestNumber}: merged into route ${route.routeNumber} of ${route.driverId} (stop ${fullIndex + 1})`,
       LOG_META,

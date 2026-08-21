@@ -9,6 +9,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '@src/auth/guards/roles.guard';
+import { Roles } from '@src/auth/decorators/roles.decorator';
+import { Role } from '@src/user/enums/role.enum';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
@@ -23,12 +26,13 @@ import {
  * turns its schedule into daily ORG_PLAN requests). Materials are fixed at
  * creation; editing replaces the line set.
  */
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller({ path: 'collection-plans', version: '1' })
 export class CollectionPlanController {
   constructor(private readonly collectionPlanService: CollectionPlanService) {}
 
   @Post()
+  @Roles(Role.INSTITUTIONS)
   @Permissions('collection.plans.manage')
   async create(@CurrentUser() user, @Body() dto: CreateCollectionPlanDto) {
     const result = await this.collectionPlanService.create(user, dto);

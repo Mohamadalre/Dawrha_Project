@@ -10,7 +10,7 @@
 <div class="container wide" style="padding-top: 34px">
   <div style="text-align:center; margin-bottom: 30px">
     <h1 style="font-size:26px; margin-bottom:6px">دورها — نماذج الواجهات <span class="badge blue">Prototype</span></h1>
-    <p class="muted">نماذج HTML لكل واجهة في الأنظمة الثلاثة، مرفقة بمرجعي الـ API التفصيليين: المرجع الكامل (324 endpoint + Socket.IO) ومرجع طلبات التجميع (30 endpoint).</p>
+    <p class="muted">نماذج HTML لكل واجهة في الأنظمة الثلاثة، مرفقة بمرجعي الـ API التفصيليين: المرجع الكامل (324 endpoint + Socket.IO) ومرجع طلبات التجميع والشحنات (37 endpoint).</p>
     <p class="muted">الواجهات محاكاة (Mockup) — كل زر يعرض الطلب الحقيقي المرتبط به بدون اتصال فعلي بالخادم.</p>
   </div>
 
@@ -29,8 +29,8 @@
     </div>
 
     <div class="card" style="border:2px solid #7c3aed">
-      <h3>📋 مرجع طلبات التجميع <span class="badge purple" style="background:#7c3aed;color:#fff">30 endpoint</span></h3>
-      <p class="muted" style="margin-bottom:10px">مرجع تفصيلي لـ 30 واجهة API تخص طلبات التجميع والتوزيع — مقسم حسب الدور: المستخدم (4)، السائق (6)، الأدمن (16) — مع نماذج الطلب والاستجابة.</p>
+      <h3>📋 مرجع طلبات التجميع والشحنات <span class="badge purple" style="background:#7c3aed;color:#fff">37 endpoint</span></h3>
+      <p class="muted" style="margin-bottom:10px">مرجع تفصيلي لـ 37 واجهة API تخص طلبات التجميع والتوزيع والشحنات — مقسم حسب الدور: المستخدم (4)، السائق (12)، الأدمن (16) — مع نماذج الطلب والاستجابة.</p>
       <a class="btn" style="background:#7c3aed;color:#fff" href="api-collection-requests.html">افتح المرجع</a>
     </div>
 
@@ -51,12 +51,13 @@
 
     <div class="card">
       <h3>🚛 تطبيق السائق <span class="badge blue">COLLECTOR</span></h3>
-      <p class="muted" style="margin-bottom:10px">تسجيل دخول، إنهاء ملف (معلومات/موقع/وثائق)، جولة الجمع، استلام الشاحنة، تغيير الوردية، بث مباشر للموقع عبر Socket.IO.</p>
+      <p class="muted" style="margin-bottom:10px">تسجيل دخول، إنهاء ملف (معلومات/موقع/وثائق)، جولة الجمع، استلام الشاحنة، الشحنات، تغيير الوردية، بث مباشر للموقع عبر Socket.IO.</p>
       <div style="display:flex; flex-wrap:wrap; gap:8px">
         <a class="btn driver" href="driver/login.html">تسجيل الدخول</a>
         <a class="btn" href="driver/onboarding.html">إنهاء الملف (Onboarding)</a>
         <a class="btn" href="driver/home.html">الرئيسية</a>
         <a class="btn" href="driver/tour.html">الجولة</a>
+        <a class="btn" href="driver/shipments.html">📦 الشحنات</a>
         <a class="btn" href="driver/profile.html">ملفي</a>
       </div>
       <p class="hint mt-8">ملاحظة: قبول السائق/رفضه يتم في Odoo عبر webhook — لا يملك الأدمن صلاحية تغيير حالة السائق مباشرة.</p>
@@ -64,13 +65,14 @@
 
     <div class="card">
       <h3>🖥️ تطبيق الأدمن <span class="badge gray">ADMIN</span></h3>
-      <p class="muted" style="margin-bottom:10px">لوحة تحكم، إدارة حسابات، طلبات الجمع والإسناد اليدوي، أسطول وورديات (تتبع مباشر)، كتالوج وتسعير، تقارير.</p>
+      <p class="muted" style="margin-bottom:10px">لوحة تحكم، إدارة حسابات، طلبات الجمع والإسناد اليدوي، أسطول وورديات (تتبع مباشر)، الشحنات، كتالوج وتسعير، تقارير.</p>
       <div style="display:flex; flex-wrap:wrap; gap:8px">
         <a class="btn admin" href="admin/login.html">تسجيل الدخول</a>
         <a class="btn" href="admin/dashboard.html">لوحة التحكم</a>
         <a class="btn" href="admin/accounts.html">الحسابات</a>
         <a class="btn" href="admin/requests.html">طلبات الجمع</a>
         <a class="btn" href="admin/fleet.html">الأسطول والورديات</a>
+        <a class="btn" href="admin/shipments.html">📦 الشحنات</a>
         <a class="btn" href="admin/catalog.html">الكتالوج والتسعير</a>
         <a class="btn" href="admin/reports.html">التقارير</a>
       </div>
@@ -84,6 +86,7 @@
 POST /api/v1/auth/register/citizen · POST /api/v1/auth/otp/verify<br>
 POST /api/v1/onboarding/collector/location · POST /api/v1/onboarding/collector/upload-doc (multipart)<br>
 POST /api/v1/admin/collection-requests/:id/assign · PATCH /api/v1/driver/collection-requests/:id/{accept|arrived|collected|delivered}<br>
+POST /api/v1/shipments · GET /api/v1/shipments · PATCH /api/v1/shipments/:id/{depart|deliver|cancel} · GET /api/v1/shipments/admin/all<br>
 Socket.IO: /tracking (truck:location · truck:stop · admin:subscribeAll) · /collection (request:assigned · request:updated)</div>
   </div>
 </div>

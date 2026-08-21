@@ -83,6 +83,7 @@ export class DispatchCandidatesService {
     request: CollectionRequest,
     config: DispatchConfig,
     driverIds?: string[],
+    opts?: { allowBusy?: boolean },
   ): Promise<DriverCandidate[]> {
     const now = new Date();
 
@@ -121,7 +122,7 @@ export class DispatchCandidatesService {
     const requestWeight = Number(request.estimatedWeightKg);
 
     return profiles
-      .filter((p) => !busyDrivers.has(p.id))
+      .filter((p) => opts?.allowBusy || !busyDrivers.has(p.id))
       .map((p) => {
         const tasks = taskRows.tasks.get(p.id) ?? { count: 0, weightKg: 0 };
         const truck = p.assignment?.truck;

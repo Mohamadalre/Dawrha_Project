@@ -1,10 +1,12 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
   ConnectedSocket,
   MessageBody,
   OnGatewayConnection,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -12,10 +14,17 @@ import {
 import { Server, Socket } from 'socket.io';
 import { RedisService } from '@src/core/redis/redis.service';
 import { Role } from '@src/user/enums/role.enum';
+import { CoverageService } from '../services/coverage.service';
 
 interface SocketUser {
   id: string;
   role: Role;
+}
+
+interface NearbySubscription {
+  lat: number;
+  lng: number;
+  radiusKm: number;
 }
 
 /**
@@ -34,16 +43,24 @@ interface SocketUser {
   namespace: '/collection',
   cors: { origin: '*' },
 })
-export class DispatchGatewayEvents implements OnGatewayConnection {
+export class DispatchGatewayEvents implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger('DISPATCH_SOCKET');
 
   @WebSocketServer()
   server: Server;
 
+  /** userId → socket id set (a user may have multiple tabs) */
+  private readonly userSockets = new Map<string, Set<string>>();
+
+  /** socketId → nearby subscription params (user is watching nearby drivers) */
+  private readonly nearbySubscriptions = new Map<string, NearbySubscription>();
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly redisService: RedisService,
+    private readonly coverageService: CoverageService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async handleConnection(client: Socket): Promise<void> {
@@ -53,11 +70,29 @@ export class DispatchGatewayEvents implements OnGatewayConnection {
       if (user.role === Role.COLLECTOR) {
         await client.join(this.driverRoom(user.id));
       }
+      if (user.role === Role.CITIZEN) {
+        await client.join(this.userRoom(user.id));
+        const sockets = this.userSockets.get(user.id) ?? new Set<string>();
+        sockets.add(client.id);
+        this.userSockets.set(user.id, sockets);
+      }
       this.logger.log(`Client connected: ${client.id} (${user.role})`);
     } catch (error) {
       this.logger.warn(`Rejected socket ${client.id}: ${(error as Error).message}`);
       client.emit('error', { message: 'Unauthorized' });
       client.disconnect(true);
+    }
+  }
+
+  async handleDisconnect(client: Socket): Promise<void> {
+    const user: SocketUser | undefined = client.data.user;
+    this.nearbySubscriptions.delete(client.id);
+    if (user?.role === Role.CITIZEN) {
+      const sockets = this.userSockets.get(user.id);
+      if (sockets) {
+        sockets.delete(client.id);
+        if (sockets.size === 0) this.userSockets.delete(user.id);
+      }
     }
   }
 
@@ -95,6 +130,45 @@ export class DispatchGatewayEvents implements OnGatewayConnection {
     return { status: 'ok' };
   }
 
+  @SubscribeMessage('user:subscribe_request')
+  async onUserSubscribeRequest(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { requestId?: string },
+  ) {
+    const user: SocketUser | undefined = client.data.user;
+    if (!user) return { status: 'error', message: 'Unauthenticated' };
+    if (!data?.requestId) {
+      return { status: 'error', message: 'requestId is required' };
+    }
+    await client.join(this.requestRoom(data.requestId));
+    return { status: 'ok' };
+  }
+
+  @SubscribeMessage('user:nearby_drivers')
+  async onNearbyDrivers(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { lat?: number; lng?: number; radius_km?: number },
+  ) {
+    const user: SocketUser | undefined = client.data.user;
+    if (!user) return { status: 'error', message: 'Unauthenticated' };
+    if (user.role !== Role.CITIZEN) return { status: 'error', message: 'Forbidden' };
+    if (data?.lat == null || data?.lng == null) {
+      return { status: 'error', message: 'lat and lng are required' };
+    }
+
+    const radiusKm = data.radius_km ?? 10;
+    this.nearbySubscriptions.set(client.id, { lat: data.lat, lng: data.lng, radiusKm });
+
+    const zones = await this.coverageService.findNearbyZones(data.lat, data.lng, radiusKm);
+    return { status: 'ok', zones };
+  }
+
+  @SubscribeMessage('user:unsubscribe_nearby')
+  async onUnsubscribeNearby(@ConnectedSocket() client: Socket) {
+    this.nearbySubscriptions.delete(client.id);
+    return { status: 'ok' };
+  }
+
   // ---------------------------------------------------------------------------
   // Engine -> rooms
   // ---------------------------------------------------------------------------
@@ -110,11 +184,53 @@ export class DispatchGatewayEvents implements OnGatewayConnection {
     this.server?.to('admins').emit(event, payload);
   }
 
+  announceTourStarted(driverId: string, payload: unknown): void {
+    this.server?.to(this.driverRoom(driverId)).emit('driver:tour_started', payload);
+  }
+
+  announceTourCompleted(driverId: string, payload: unknown): void {
+    this.server?.to(this.driverRoom(driverId)).emit('driver:tour_completed', payload);
+  }
+
+  announceToUser(userId: string, event: string, payload: unknown): void {
+    this.server?.to(this.userRoom(userId)).emit(event, payload);
+  }
+
+  /**
+   * Re-push nearby drivers to all users who are actively watching.
+   * Call this when a driver's availability changes (accepts/rejects request,
+   * finishes tour, becomes idle, etc.).
+   */
+  async pushNearbyDriversUpdate(): Promise<void> {
+    for (const [socketId, sub] of this.nearbySubscriptions) {
+      try {
+        const zones = await this.coverageService.findNearbyZones(sub.lat, sub.lng, sub.radiusKm);
+        this.server?.to(socketId).emit('user:nearby_update', { zones });
+      } catch {
+        // socket may have disconnected — will be cleaned up on disconnect
+      }
+    }
+  }
+
+  @OnEvent('collection.driver.freed')
+  async onDriverFreed(): Promise<void> {
+    await this.pushNearbyDriversUpdate();
+  }
+
+  @OnEvent('truck.location.updated')
+  async onTruckLocationUpdated(): Promise<void> {
+    await this.pushNearbyDriversUpdate();
+  }
+
   // ---------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------
   private driverRoom(accountId: string): string {
     return `driver:${accountId}`;
+  }
+
+  private userRoom(userId: string): string {
+    return `user:${userId}`;
   }
 
   private requestRoom(requestId: string): string {

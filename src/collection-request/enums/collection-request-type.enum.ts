@@ -12,4 +12,6 @@ export enum CollectionRequestType {
   SCHEDULED = 'SCHEDULED',
   /** Generated automatically from an institution's collection plan. */
   ORG_PLAN = 'ORG_PLAN',
+  /** Walk-in drop-off at a coverage point — bypasses dispatch entirely. */
+  WALK_IN = 'WALK_IN',
 }

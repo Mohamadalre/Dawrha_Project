@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الشحنات — الأدمن</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="admin">
+<div class="admin-shell">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="dot" style="width:28px;height:28px;border-radius:8px;background:var(--admin-accent);color:#1e293b;display:grid;place-items:center;font-size:14px">د</span> دورها — أدمن</div>
+    <nav>
+      <a href="dashboard.html">📊 لوحة التحكم</a>
+      <a href="accounts.html">👥 الحسابات</a>
+      <a href="requests.html">🚚 طلبات الجمع</a>
+      <a href="fleet.html">🛻 الأسطول والورديات</a>
+      <a href="shipments.html" class="active">📦 الشحنات</a>
+      <a href="catalog.html">🗂️ الكتالوج والتسعير</a>
+      <a href="reports.html">📈 التقارير</a>
+      <a href="login.html" data-logout-link>↩ خروج</a>
+    </nav>
+  </aside>
+
+  <main class="admin-content">
+    <div class="admin-header">
+      <div class="row">
+        <button class="btn sidebar-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <h1>📦 الشحنات</h1>
+      </div>
+      <span class="badge gray">GET /api/v1/shipments/admin/all</span>
+    </div>
+
+    <div class="card">
+      <h3>تصفية الشحنات <span class="endpoint">GET /api/v1/shipments/admin/all?status=&amp;page=&amp;limit=</span></h3>
+      <div class="row mt-8" style="max-width:640px">
+        <select id="filterStatus" style="flex:1; padding:10px; border:1px solid var(--line); border-radius:10px">
+          <option value="">كل الحالات</option>
+          <option value="CREATED">جاهزة (CREATED)</option>
+          <option value="IN_TRANSIT">في الطريق (IN_TRANSIT)</option>
+          <option value="DELIVERED">تم التسليم (DELIVERED)</option>
+          <option value="CANCELLED">ملغاة (CANCELLED)</option>
+        </select>
+        <button class="btn admin" data-filter>🔍 بحث</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>جميع الشحنات <span class="endpoint">GET /api/v1/shipments/admin/all</span></h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>#</th><th>رقم الشحنة</th><th>السائق</th><th>الشاحنة</th><th>المستودع</th><th>الطلبات</th><th>الوزن</th><th>الحالة</th><th>التاريخ</th></tr>
+          <tbody data-shipments-list>
+            <tr><td colspan="9" class="muted small">جارٍ التحميل…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="row between mt-8" data-pagination></div>
+      <div class="statusbar mt-8" data-ship-log>جاهز</div>
+      <p class="hint mt-8">تُنشأ الشحنات من تطبيق السائقين — تُسلَّم في المستودع ثم تُزامَن مع Odoo.</p>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script src="../assets/socket.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+  var lo = document.querySelector('[data-logout-link]');
+  if (lo) lo.addEventListener('click', function (ev) { ev.preventDefault(); API.logout('login.html'); });
+
+  var fmt = function (n) { return (+n || 0).toLocaleString('en-US'); };
+
+  var ST_LABEL = { CREATED: 'جاهزة', IN_TRANSIT: 'في الطريق', DELIVERED: 'تم التسليم', CANCELLED: 'ملغاة' };
+
+  var currentPage = 1;
+  var LIMIT = 20;
+  var totalPages = 1;
+  var logEl = document.querySelector('[data-ship-log]');
+
+  function setLog(msg) { if (logEl) logEl.textContent = msg; }
+
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('ar'); } catch (e) { return '—'; }
+  }
+
+  function renderPagination() {
+    var box = document.querySelector('[data-pagination]');
+    if (!box) return;
+    box.innerHTML = '';
+    var info = document.createElement('span');
+    info.className = 'muted small';
+    info.textContent = 'صفحة ' + currentPage + ' من ' + totalPages;
+    box.appendChild(info);
+
+    var row = document.createElement('div');
+    row.className = 'row';
+
+    var prev = document.createElement('button');
+    prev.className = 'btn';
+    prev.textContent = '→ السابق';
+    prev.disabled = currentPage <= 1;
+    prev.addEventListener('click', function () {
+      if (currentPage > 1) { currentPage--; load(); }
+    });
+    row.appendChild(prev);
+
+    var next = document.createElement('button');
+    next.className = 'btn';
+    next.textContent = 'التالي ←';
+    next.disabled = currentPage >= totalPages;
+    next.addEventListener('click', function () {
+      if (currentPage < totalPages) { currentPage++; load(); }
+    });
+    row.appendChild(next);
+
+    box.appendChild(row);
+  }
+
+  function load() {
+    var box = document.querySelector('[data-shipments-list]');
+    if (!box) return;
+    var st = document.getElementById('filterStatus').value;
+    var qs = '?page=' + currentPage + '&limit=' + LIMIT + (st ? '&status=' + st : '');
+    box.innerHTML = '<tr><td colspan="9" class="muted small">جارٍ التحميل…</td></tr>';
+    setLog('GET /api/v1/shipments/admin/all' + qs);
+    API.get('shipments/admin/all' + qs).then(function (json) {
+      var list = API.list(json);
+      var meta = API.one(json);
+      var total = +meta.total || list.length || 0;
+      totalPages = Math.max(1, Math.ceil(total / (+meta.limit || LIMIT)));
+      if (+meta.page) currentPage = +meta.page;
+      box.innerHTML = '';
+      if (!list.length) {
+        box.innerHTML = '<tr><td colspan="9" class="muted small">لا توجد شحنات.</td></tr>';
+        setLog('لا توجد شحنات — الصفحة ' + currentPage);
+        renderPagination();
+        return;
+      }
+      list.forEach(function (s, i) {
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td class="muted small">' + ((currentPage - 1) * LIMIT + i + 1) + '</td>' +
+          '<td><b>📦 ' + API.esc(s.shipment_number || s.id.slice(0, 8)) + '</b></td>' +
+          '<td class="muted">' + API.esc(s.driver_name || '—') + '</td>' +
+          '<td class="muted">' + API.esc(s.truck_plate || '—') + '</td>' +
+          '<td class="muted">' + API.esc(s.warehouse_name || '—') + '</td>' +
+          '<td>' + fmt(s.total_requests) + '</td>' +
+          '<td>' + fmt(s.total_weight_kg) + ' كغ</td>' +
+          '<td>' + API.badge(s.status || '—') + ' <span class="muted small">' + API.esc(ST_LABEL[s.status] || '') + '</span></td>' +
+          '<td class="muted small">' + fmtDate(s.created_at) + '</td>';
+        box.appendChild(tr);
+      });
+      setLog('تم تحميل ' + list.length + ' شحنة — الإجمالي: ' + fmt(total) + ' — صفحة ' + currentPage + '/' + totalPages +
+        (st ? ' — الحالة: ' + (ST_LABEL[st] || st) : ''));
+      renderPagination();
+    }).catch(function (e) {
+      box.innerHTML = '<tr><td colspan="9" class="muted small">' + API.esc(e.message || 'تعذر التحميل') + '</td></tr>';
+      setLog('⚠ فشل التحميل: ' + (e.message || ''));
+    });
+  }
+
+  document.querySelector('[data-filter]').addEventListener('click', function () {
+    currentPage = 1;
+    var st = document.getElementById('filterStatus').value;
+    setLog('تصفية: ' + (st ? (ST_LABEL[st] || st) : 'كل الحالات'));
+    load();
+  });
+
+  load();
+</script>
+</body>
+</html>

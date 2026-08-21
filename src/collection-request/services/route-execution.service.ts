@@ -5,6 +5,8 @@ import { In, Repository } from 'typeorm';
 import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
 import { TruckHandover } from '@src/truck/entities/truck-handover.entity';
 import { HandoverStatus } from '@src/truck/enums/handover-status.enum';
+import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
+import { TruckEntity } from '@src/truck/entities/truck.entity';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 import { Product } from '@src/waste-management/entities/product.entity';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
@@ -21,6 +23,7 @@ import { DispatchGatewayEvents } from '../gateways/dispatch.gateway';
 import { planRoute, RouteStop, DEFAULT_ROUTE_CONSTRAINTS } from '../providers/route-planner';
 import { CollectionRequestStatus } from '../enums/collection-request-status.enum';
 import { CollectionRouteStatus } from '../enums/collection-route-status.enum';
+import { ShipmentService } from './shipment.service';
 import {
   CollectionActualWeightRequiredException,
   CollectionDriverProfileNotFoundException,
@@ -85,6 +88,10 @@ export class RouteExecutionService {
     private readonly warehouseRepo: Repository<Warehouse>,
     @InjectRepository(Product)
     private readonly productRepo: Repository<Product>,
+    @InjectRepository(TruckAssignmentEntity)
+    private readonly truckAssignmentRepo: Repository<TruckAssignmentEntity>,
+    @InjectRepository(TruckEntity)
+    private readonly truckRepo: Repository<TruckEntity>,
     private readonly state: CollectionStateService,
     private readonly configProvider: DispatchConfigProvider,
     private readonly engine: DispatchEngineService,
@@ -93,6 +100,7 @@ export class RouteExecutionService {
     private readonly notifications: NotificationService,
     private readonly events: DispatchGatewayEvents,
     private readonly eventEmitter: EventEmitter2,
+    private readonly shipmentService: ShipmentService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -150,6 +158,18 @@ export class RouteExecutionService {
         this.state.applyRouteStatus(route, CollectionRouteStatus.IN_PROGRESS);
         await this.routeRepo.save(route);
         await this.reorderTour(route, profile.id);
+
+        // Auto-depart shipment when driver starts his tour
+        await this.shipmentService.autoDepartOnArrival(profile.id);
+
+        // Notify driver app: tour has started
+        const routeStopCount = (route.requests ?? []).length;
+        this.events.announceTourStarted(profile.id, {
+          route_id: route.id,
+          route_number: route.routeNumber,
+          total_stops: routeStopCount,
+          started_at: new Date(),
+        });
       }
     }
     this.state.applyRequestStatus(stop, CollectionRequestStatus.ARRIVED);
@@ -166,10 +186,10 @@ export class RouteExecutionService {
   async collected(
     caller: { id: string; role: string },
     requestId: string,
-    dto: { actualWeightKg: number },
-  ): Promise<void> {
-    const { route, stop } = await this.loadStop(caller.id, requestId);
-    if (stop.status === CollectionRequestStatus.PICKING) return;
+    dto: { actualWeightKg: number; received_lines?: { product_id: string; quantity: number }[]; truck_full?: boolean; driver_note?: string },
+  ): Promise<{ truck_capacity: { max_kg: number; used_kg: number; remaining_kg: number; is_full: boolean } | null; shipment_id: string | null }> {
+    const { profile, route, stop } = await this.loadStop(caller.id, requestId);
+    if (stop.status === CollectionRequestStatus.PICKING) return { truck_capacity: null, shipment_id: stop.shipmentId ?? null };
 
     const actual = Number(dto.actualWeightKg);
     if (!(actual > 0)) throw new CollectionActualWeightRequiredException();
@@ -179,26 +199,42 @@ export class RouteExecutionService {
     stop.actualGrandTotal =
       estimated > 0
         ? String(+(Number(stop.estimatedGrandTotal) * (actual / estimated)).toFixed(2))
-        : stop.estimatedGrandTotal;
+        : stop.actualGrandTotal;
 
     this.state.applyRequestStatus(stop, CollectionRequestStatus.PICKING);
     stop.pickedAt = new Date();
     await this.requestRepo.save(stop);
+
+    // Save actual quantities per line
+    if (dto.received_lines?.length) {
+      const lines = await this.lineRepo.find({ where: { requestId: stop.id } });
+      for (const rl of dto.received_lines) {
+        const line = lines.find((l) => l.productId === rl.product_id);
+        if (line) {
+          line.actualQuantity = String(rl.quantity);
+          await this.lineRepo.save(line);
+        }
+      }
+    }
 
     this.events.announceToRequest(stop.id, 'request:status', this.statusPayload(stop));
     winstonLogger.info(
       `Collection request ${stop.requestNumber}: weighed ${actual} kg (route ${route.routeNumber})`,
       LOG_META,
     );
+
+    // Calculate truck capacity
+    const truckCapacity = await this.getTruckCapacity(profile.id, route.id);
+    return { truck_capacity: truckCapacity, shipment_id: stop.shipmentId ?? null };
   }
 
   async delivered(
     caller: { id: string; role: string },
     requestId: string,
     dto: { warehouseId?: string },
-  ): Promise<void> {
+  ): Promise<{ shipment_id: string | null }> {
     const { profile, route, stop } = await this.loadStop(caller.id, requestId);
-    if (stop.status === CollectionRequestStatus.DELIVERED) return;
+    if (stop.status === CollectionRequestStatus.DELIVERED) return { shipment_id: stop.shipmentId ?? null };
 
     let warehouseOdooId: number | null = null;
     if (dto.warehouseId) {
@@ -221,6 +257,7 @@ export class RouteExecutionService {
     );
 
     await this.advanceRoute(route, profile.id);
+    return { shipment_id: stop.shipmentId ?? null };
   }
 
   // ---------------------------------------------------------------------------
@@ -243,6 +280,38 @@ export class RouteExecutionService {
       order: { createdAt: 'ASC' },
       relations: ['requests'],
     });
+  }
+
+  private async getTruckCapacity(
+    driverId: string,
+    routeId: string,
+  ): Promise<{ max_kg: number; used_kg: number; remaining_kg: number; is_full: boolean } | null> {
+    const assignment = await this.truckAssignmentRepo.findOne({
+      where: { driverId },
+      relations: ['truck'],
+    });
+    if (!assignment?.truck?.maxPayloadKg) return null;
+
+    const maxKg = Number(assignment.truck.maxPayloadKg);
+
+    const route = await this.routeRepo.findOne({
+      where: { id: routeId },
+      relations: ['requests'],
+    });
+    if (!route) return null;
+
+    const usedKg = (route.requests ?? []).reduce((sum, r) => {
+      const w = r.actualWeightKg ? Number(r.actualWeightKg) : Number(r.estimatedWeightKg || 0);
+      return sum + w;
+    }, 0);
+
+    const remaining = Math.max(0, maxKg - usedKg);
+    return {
+      max_kg: maxKg,
+      used_kg: +usedKg.toFixed(2),
+      remaining_kg: +remaining.toFixed(2),
+      is_full: remaining <= 0,
+    };
   }
 
   private async loadStop(
@@ -349,6 +418,16 @@ export class RouteExecutionService {
     if (remaining.length === 0) {
       this.state.applyRouteStatus(route, CollectionRouteStatus.COMPLETED);
       await this.routeRepo.save(route);
+
+      // Auto-deliver the shipment when route completes
+      await this.shipmentService.autoDeliverOnRouteComplete(driverId);
+
+      // Notify driver app: tour has completed
+      this.events.announceTourCompleted(driverId, {
+        route_id: route.id,
+        route_number: route.routeNumber,
+        completed_at: new Date(),
+      });
 
       const toClose = stops.filter((s) => s.status === CollectionRequestStatus.DELIVERED);
       for (const stop of toClose) {

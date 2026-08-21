@@ -32,30 +32,31 @@ pre.body-code{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8
 </header>
 <main class="container wide">
   <h1 style="font-size:24px;margin:22px 0 6px">🚛 API طلبات التجميع — كلا Documentation</h1>
-  <p class="muted" style="max-width:860px">مرجع شامل لـ 26 endpoint تخص طلبات التجميع والتوزيع + 2 namespace Socket.IO للبث المباشر، مقسم حسب الدور: <b>المستخدم</b> (إنشاء وإدارة الطلبات)، <b>السائق</b> (الجولة والتنفيذ)، <b>الأدمن</b> (الإسناد والإعدادات والتقارير)، <b>Socket.IO</b> (تتبع مباشر + تحديثات فورية).</p>
+  <p class="muted" style="max-width:860px">مرجع شامل لـ 41 endpoint تخص طلبات التجميع والتوزيع والشحنات + 2 namespace Socket.IO للبث المباشر، مقسم حسب الدور: <b>المستخدم</b> (إنشاء وإدارة الطلبات + التسليم الفوري)، <b>السائق</b> (الجولة والتنفيذ والشحنات)، <b>الأدمن</b> (الإسناد والإعدادات والتقارير)، <b>Socket.IO</b> (تتبع مباشر + تحديثات فورية).</p>
 
   <div class="card">
     <h3>ملخص</h3>
     <div class="flow-legend" style="flex-wrap:wrap;gap:10px">
-      <span class="chip">👤 المستخدم <small>4</small></span>
-      <span class="chip">🚚 السائق <small>6</small></span>
+      <span class="chip">👤 المستخدم <small>7</small></span>
+      <span class="chip">🚚 السائق <small>14</small></span>
       <span class="chip">🔧 الأدمن <small>16</small></span>
+      <span class="chip">📦 الشحنات <small>5</small></span>
       <span class="chip">📡 Socket.IO <small>2 ns</small></span>
-      <span class="chip"><span class="m m-post">POST</span> 7</span>
-      <span class="chip"><span class="m m-get">GET</span> 10</span>
-      <span class="chip"><span class="m m-patch">PATCH</span> 8</span>
+      <span class="chip"><span class="m m-post">POST</span> 10</span>
+      <span class="chip"><span class="m m-get">GET</span> 15</span>
+      <span class="chip"><span class="m m-patch">PATCH</span> 13</span>
       <span class="chip"><span class="m m-delete">DELETE</span> 1</span>
     </div>
     <div class="sub" style="margin-top:8px">الرموز: <code>:id</code> معرّف UUID للطلب · كل المسارات تبدأ بـ <code>/api/v1</code> · قنوات Socket.IO: <code>/tracking</code> و <code>/collection</code></div>
   </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
-<!-- 🟢 المستخدم (User / Producer) — 4 endpoints                              -->
+<!-- 🟢 المستخدم (User / Producer) — 7 endpoints                              -->
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 
   <div class="role-section" id="role-user">
-    <h2>👤 المستخدم (المنتج / المؤسسة) <span class="badge gray">4 endpoint</span></h2>
-    <div class="sub">إنشاء طلبات التجميع، استعراضها، عرض التفاصيل، والإلغاء قبل الاستلام. الحماية: <code>JwtAuthGuard</code> + صلاحيات <code>collection.requests.*</code></div>
+    <h2>👤 المستخدم (المنتج / المؤسسة) <span class="badge gray">7 endpoint</span></h2>
+    <div class="sub">إنشاء طلبات التجميع، استعراضها، عرض التفاصيل، والإلغاء قبل الاستلام + التسليم الفوري (Drop-Off). الحماية: <code>JwtAuthGuard</code> + صلاحيات <code>collection.requests.*</code></div>
   </div>
 
   <div class="flow-box">
@@ -164,17 +165,88 @@ pre.body-code{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8
 <div class="sub">⚠️ يُسمح بالإلغاء فقط قبل أن يبدأ السائق الاستلام (قبل ARRIVED). 이후 → 409 Conflict.</div></div>
 </div></td></tr>
 
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/user/coverage-zones</td><td>مناطق التغطية القريبة + السائقين المتاحين</td><td><span class="hint">coverageZones()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 Query Params</div>
+<pre class="body-code"><span class="k">lat</span>    = <span class="n">33.5138</span>   <span class="c">// number، مطلوب — خط العرض</span>
+<span class="k">lng</span>    = <span class="n">36.2765</span>   <span class="c">// number، مطلوب — خط الطول</span>
+<span class="k">radius</span> = <span class="n">10</span>         <span class="c">// number، اختياري — نصف القطر بالكم (افتراضي 10)</span></pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">{
+  <span class="k">"data"</span>: [{
+    <span class="k">"point_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"name"</span>: <span class="s">" Downtown Cairo Point"</span>,
+    <span class="k">"lat"</span>: <span class="n">30.0444</span>,
+    <span class="k">"lng"</span>: <span class="n">31.2357</span>,
+    <span class="k">"distance_km"</span>: <span class="n">2.3</span>,
+    <span class="k">"drivers"</span>: [{
+      <span class="k">"driver_id"</span>: <span class="s">"uuid..."</span>,
+      <span class="k">"driver_name"</span>: <span class="s">"سليم أحمد"</span>,
+      <span class="k">"truck_plate"</span>: <span class="s">"ABC-123"</span>,
+      <span class="k">"remaining_capacity"</span>: <span class="n">450.5</span>,
+      <span class="k">"shift_minutes_left"</span>: <span class="n">180</span>,
+      <span class="k">"parked_since"</span>: <span class="s">"2026-08-21T08:00:00.000Z"</span>
+    }]
+  }]
+}</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/user/drivers/:driverId/qr</td><td>بيانات QR للسائق (لمسح الـ QR عند التسليم الفوري)</td><td><span class="hint">driverQR()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 Path Params</div>
+<pre class="body-code"><span class="k">:driverId</span> = <span class="s">UUID</span>  <span class="c">// معرّف السائق — من قائمة coverage-zones</span></pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">{
+  <span class="k">"data"</span>: {
+    <span class="k">"driver_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"driver_name"</span>: <span class="s">"سليم أحمد"</span>,
+    <span class="k">"account_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"truck_plate"</span>: <span class="s">"ABC-123"</span>,
+    <span class="k">"truck_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"coverage_point"</span>: <span class="s">"Downtown Cairo Point"</span>,
+    <span class="k">"coverage_point_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"qr_data"</span>: <span class="s">"DAWRHA-DRIVER:uuid..."</span>
+  }
+}</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/user/drop-off</td><td>إنشاء طلب تسليم فوري (Walk-In Drop-Off) بعد مسح QR السائق</td><td><span class="hint">createDropOff()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body (JSON)</div>
+<pre class="body-code">{
+  <span class="k">"driver_id"</span>: <span class="s">"uuid..."</span>,           <span class="c">// UUID، مطلوب — من بيانات QR المسحورة</span>
+  <span class="k">"coverage_point_id"</span>: <span class="s">"uuid..."</span>, <span class="c">// UUID، مطلوب — نقطة التغطية التي يقف فيها السائق</span>
+  <span class="k">"lines"</span>: [{                       <span class="c">// مصفوفة، مطلوب — materials to hand over</span>
+    <span class="k">"product_id"</span>: <span class="s">"uuid..."</span>,       <span class="c">// UUID، مطلوب</span>
+    <span class="k">"quantity"</span>: <span class="n">50.5</span>               <span class="c">// number ≥ 0.01، مطلوب</span>
+  }]
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (201)</div>
+<pre class="body-code">{
+  <span class="k">"success"</span>: <span class="s">true</span>,
+  <span class="k">"message"</span>: <span class="s">"Drop-off created successfully"</span>,
+  <span class="k">"data"</span>: {
+    <span class="k">"request_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"status"</span>: <span class="s">"PICKING"</span>,
+    <span class="k">"type"</span>: <span class="s">"WALK_IN"</span>,
+    <span class="k">"shipment_id"</span>: <span class="s">"uuid..."</span> | <span class="s">null</span>,
+    <span class="k">"lines"</span>: [{ <span class="k">"product_id"</span>: <span class="s">"..."</span>, <span class="k">"quantity"</span>: <span class="n">50.5</span> }]
+  }
+}</pre>
+<div class="sub">📦 الطلب يتجاوز خوارزمية الفرز — يُنشأ مباشرة كـ PICKING مربوط بالشحنة النشطة للسائق. لا يحتاج موافقة الأدمن.</div></div>
+</div></td></tr>
+
       </table>
     </div>
   </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
-<!-- 🔵 السائق (Driver) — 6 endpoints                                         -->
+<!-- 🔵 السائق (Driver) — 14 endpoints                                         -->
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 
   <div class="role-section" id="role-driver" style="border-color:#0ea5e9">
-    <h2>🚚 السائق (المجمّع) <span class="badge gray">6 endpoint</span></h2>
-    <div class="sub">عرض الجولة، قبول/رفض العروض، تسجيل الوصول والوزن والتوصيل. الحماية: <code>JwtAuthGuard</code> + صلاحيات <code>collection.driver.*</code>. آلة الحالة: ASSIGNED → OFFERED → EN_ROUTE → ARRIVED → PICKING → DELIVERED → COMPLETED.</div>
+    <h2>🚚 السائق (المجمّع) <span class="badge gray">14 endpoint</span></h2>
+    <div class="sub">عرض الجولة، قبول/رفض العروض، تسجيل الوصول والوزن، وإدارة الشحنات. الحماية: <code>JwtAuthGuard</code> + صلاحيات <code>collection.driver.*</code>. آلة الحالة: ASSIGNED → OFFERED → EN_ROUTE → ARRIVED → PICKING. التسليم عبر الشحنة: <code>PATCH /shipments/:id/deliver</code>.</div>
   </div>
 
   <div class="flow-box">
@@ -214,9 +286,28 @@ pre.body-code{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8
 <pre class="body-code">{
   <span class="k">"success"</span>: <span class="s">true</span>,
   <span class="k">"message"</span>: <span class="s">"Offer accepted"</span>,
-  <span class="k">"data"</span>: { <span class="k">"request_id"</span>: <span class="s">"f7e8d9c0-..."</span>, <span class="k">"status"</span>: <span class="s">"EN_ROUTE"</span> }
+  <span class="k">"data"</span>: {
+    <span class="k">"request_id"</span>: <span class="s">"f7e8d9c0-..."</span>,
+    <span class="k">"request_number"</span>: <span class="s">"CR-2026-00042"</span>,
+    <span class="k">"status"</span>: <span class="s">"ASSIGNED"</span>,
+    <span class="k">"route_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"route_sequence"</span>: <span class="n">3</span>,
+    <span class="k">"lines"</span>: [{                        <span class="c">// materials on this request</span>
+      <span class="k">"product_id"</span>: <span class="s">"uuid..."</span>,
+      <span class="k">"product_name"</span>: <span class="s">"بلاستيك PET"</span>,
+      <span class="k">"unit_type"</span>: <span class="s">"KG"</span>,
+      <span class="k">"quantity"</span>: <span class="n">150.5</span>,
+      <span class="k">"note"</span>: <span class="s">"بلاستيك أزرق نظيف"</span> | <span class="s">null</span>
+    }],
+    <span class="k">"truck_capacity"</span>: {                <span class="c">// remaining capacity after accepting</span>
+      <span class="k">"max_kg"</span>: <span class="n">1000</span>,
+      <span class="k">"used_kg"</span>: <span class="n">350.2</span>,
+      <span class="k">"remaining_kg"</span>: <span class="n">649.8</span>,
+      <span class="k">"is_full"</span>: <span class="s">false</span>
+    } | <span class="s">null</span>
+  }
 }</pre>
-<div class="sub">✅ يحوّل الحالة من OFFERED → EN_ROUTE. إذا رفض السائق، ينتقل العرض لسائق آخر.</div></div>
+<div class="sub">✅ يحوّل الحالة من OFFERED → ASSIGNED. يُرفق المواد + السعة المتبقية في الشاحنة. إذا رفض السائق، ينتقل العرض لسائق آخر.</div></div>
 </div></td></tr>
 
 <tr><td><span class="m m-patch">PATCH</span></td><td class="mono">/api/v1/driver/collection-requests/:id/reject</td><td>رفض عرض التجميع</td><td><span class="hint">reject()</span></td><td><span class="body-toggle">▼</span></td></tr>
@@ -249,31 +340,110 @@ pre.body-code{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8
 <tr><td colspan="5"><div class="body-block">
 <div class="body-section"><div class="body-label">📤 Request Body</div>
 <pre class="body-code">{
-  <span class="k">"actualWeightKg"</span>: <span class="n">125.3</span>   <span class="c">// number > 0، مطلوب — الوزن الفعلي بالكيلوغرام</span>
+  <span class="k">"actualWeightKg"</span>: <span class="n">125.3</span>,          <span class="c">// number > 0، مطلوب — الوزن الفعلي بالكيلوغرام</span>
+  <span class="k">"received_lines"</span>: [{               <span class="c">// اختياري — الكمية الفعلية المستلمة لكل مادة</span>
+    <span class="k">"product_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"quantity"</span>: <span class="n">50.5</span>
+  }],
+  <span class="k">"truck_full"</span>: <span class="s">false</span>,               <span class="c">// اختياري — هل الشاحنة ممتلئة</span>
+  <span class="k">"driver_note"</span>: <span class="s">"..."</span>              <span class="c">// اختياري — ملاحظات السائق</span>
 }</pre></div>
 <div class="body-section"><div class="body-label">📥 Response (200)</div>
 <pre class="body-code">{
   <span class="k">"success"</span>: <span class="s">true</span>,
   <span class="k">"message"</span>: <span class="s">"Weight recorded"</span>,
-  <span class="k">"data"</span>: { <span class="k">"request_id"</span>: <span class="s">"f7e8d9c0-..."</span>, <span class="k">"status"</span>: <span class="s">"PICKING"</span> }
+  <span class="k">"data"</span>: {
+    <span class="k">"request_id"</span>: <span class="s">"f7e8d9c0-..."</span>,
+    <span class="k">"status"</span>: <span class="s">"PICKING"</span>,
+    <span class="k">"truck_capacity"</span>: {
+      <span class="k">"max_kg"</span>: <span class="n">1000</span>,
+      <span class="k">"used_kg"</span>: <span class="n">475.5</span>,
+      <span class="k">"remaining_kg"</span>: <span class="n">524.5</span>,
+      <span class="k">"is_full"</span>: <span class="s">false</span>
+    } | <span class="s">null</span>,
+    <span class="k">"shipment_id"</span>: <span class="s">"uuid..."</span> | <span class="s">null</span>
+  }
 }</pre>
-<div class="sub">⚖️ الحالة: ARRIVED → PICKING. يُستخدم لاحقًا لحساب التكلفة.</div></div>
+<div class="sub">⚖️ الحالة: ARRIVED → PICKING. يُستخدم لاحقًا لحساب التكلفة. shipment_id: الشحنة المربوطة بهذا الطلب.</div></div>
 </div></td></tr>
 
-<tr><td><span class="m m-patch">PATCH</span></td><td class="mono">/api/v1/driver/collection-requests/:id/delivered</td><td>تسجيل التوصيل (للمستودع)</td><td><span class="hint">delivered()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/shipments</td><td>قائمة شحناتي</td><td><span class="hint">myShipments()</span></td><td><span class="body-toggle">▼</span></td></tr>
 <tr><td colspan="5"><div class="body-block">
-<div class="body-section"><div class="body-label">📤 Request Body</div>
-<pre class="body-code">{
-  <span class="k">"warehouseId"</span>: <span class="s">"a1b2c3d4-..."</span>  <span class="c">// UUID، اختياري — المستودع المرسل إليه</span>
-                                    <span class="c">// بدونه: المستودع الافتراضي</span>
-}</pre></div>
+<div class="body-section"><div class="body-label">🔍 لا يوجد params — السائق يُعرَّف من JWT</div>
+<pre class="body-code"><span class="c">// لا يوجد request body أو query params — السائق يُعرَّف من JWT</span></pre></div>
 <div class="body-section"><div class="body-label">📥 Response (200)</div>
 <pre class="body-code">{
-  <span class="k">"success"</span>: <span class="s">true</span>,
-  <span class="k">"message"</span>: <span class="s">"Delivery recorded"</span>,
-  <span class="k">"data"</span>: { <span class="k">"request_id"</span>: <span class="s">"f7e8d9c0-..."</span>, <span class="k">"status"</span>: <span class="s">"DELIVERED"</span> }
+  <span class="k">"message"</span>: <span class="s">"Shipments fetched"</span>,
+  <span class="k">"result"</span>: [{
+    <span class="k">"id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"shipment_number"</span>: <span class="s">"SHP-20260820-001"</span>,
+    <span class="k">"status"</span>: <span class="s">"CREATED"</span>,        <span class="c">// CREATED | IN_TRANSIT | DELIVERED | CANCELLED</span>
+    <span class="k">"total_weight_kg"</span>: <span class="n">145.5</span>,
+    <span class="k">"total_requests"</span>: <span class="n">3</span>,
+    <span class="k">"warehouse_id"</span>: <span class="s">"uuid..."</span> | <span class="s">null</span>,
+    <span class="k">"notes"</span>: <span class="s">"..."</span> | <span class="s">null</span>,
+    <span class="k">"collected_at"</span>: <span class="s">"..."</span> | <span class="s">null</span>,
+    <span class="k">"departed_at"</span>: <span class="s">"..."</span> | <span class="s">null</span>,
+    <span class="k">"delivered_at"</span>: <span class="s">"..."</span> | <span class="s">null</span>,
+    <span class="k">"created_at"</span>: <span class="s">"2026-08-20T23:32:46Z"</span>
+  }]
+}</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/shipments/:id</td><td>تفاصيل شحنة مع الطلبات المرتبطة</td><td><span class="hint">detail()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 Path Params</div>
+<pre class="body-code"><span class="k">:id</span> = <span class="s">UUID</span>  <span class="c">// معرّف الشحنة — يجب أن يملكيها السائق (_owner check)</span></pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">{
+  <span class="k">"message"</span>: <span class="s">"Shipment fetched"</span>,
+  <span class="k">"result"</span>: {
+    <span class="k">"id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"shipment_number"</span>: <span class="s">"SHP-20260820-001"</span>,
+    <span class="k">"status"</span>: <span class="s">"IN_TRANSIT"</span>,
+    <span class="k">"total_weight_kg"</span>: <span class="n">145.5</span>,
+    <span class="k">"total_requests"</span>: <span class="n">3</span>,
+    <span class="k">"warehouse_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"notes"</span>: <span class="s">"..."</span> | <span class="s">null</span>,
+    <span class="k">"collected_at"</span>: <span class="s">"..."</span>,
+    <span class="k">"departed_at"</span>: <span class="s">"..."</span>,
+    <span class="k">"delivered_at"</span>: <span class="s">null</span>,
+    <span class="k">"created_at"</span>: <span class="s">"..."</span>,
+    <span class="k">"requests"</span>: [{
+      <span class="k">"id"</span>: <span class="s">"uuid..."</span>,
+      <span class="k">"request_number"</span>: <span class="s">"CR-2026-08-00008"</span>,
+      <span class="k">"status"</span>: <span class="s">"PICKING"</span>,
+      <span class="k">"route_sequence"</span>: <span class="n">1</span>,
+      <span class="k">"actual_weight_kg"</span>: <span class="s">"45.500"</span> | <span class="s">null</span>,
+      <span class="k">"estimated_weight_kg"</span>: <span class="s">"50.000"</span>,
+      <span class="k">"lines"</span>: [{
+        <span class="k">"product_name"</span>: <span class="s">"علب ألمنيوم"</span>,
+        <span class="k">"quantity"</span>: <span class="n">50</span>,
+        <span class="k">"unit_type"</span>: <span class="s">"KG"</span>
+      }]
+    }]
+  }
+}</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-patch">PATCH</span></td><td class="mono">/api/v1/shipments/:id/cancel</td><td>إلغاء شحنة</td><td><span class="hint">cancel()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 لا يوجد body — فقط :id في المسار</div>
+<pre class="body-code"><span class="c">// لا يوجد request body</span></pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">{
+  <span class="k">"message"</span>: <span class="s">"Shipment cancelled"</span>,
+  <span class="k">"result"</span>: {
+    <span class="k">"id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"shipment_number"</span>: <span class="s">"SHP-20260820-001"</span>,
+    <span class="k">"status"</span>: <span class="s">"CANCELLED"</span>,
+    <span class="k">"total_weight_kg"</span>: <span class="n">145.5</span>,
+    <span class="k">"total_requests"</span>: <span class="n">0</span>,
+    <span class="k">"warehouse_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"created_at"</span>: <span class="s">"..."</span>
+  }
 }</pre>
-<div class="sub">🏭 الحالة: PICKING → DELIVERED. بعد التوصيل ينتقل للحالة COMPLETED تلقائيًا.</div></div>
+<div class="sub">🔄 يُعيد جميع الطلبات المرتبطة بحالة PICKING ويُلغي الشحنة. الطلب يعود لقائمة الانتظار.</div></div>
 </div></td></tr>
 
       </table>
@@ -513,6 +683,7 @@ pre.body-code{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8
 
 <tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/collection-plans</td><td>إنشاء خطة تجميع دورية</td><td><span class="hint">create()</span></td><td><span class="body-toggle">▼</span></td></tr>
 <tr><td colspan="5"><div class="body-block">
+<div class="sub">🔒 <b>INSTITUTIONS فقط</b> — هذا الـ endpoint متاح فقط لحسابات المؤسسات (Role: INSTITUTIONS).</div>
 <div class="body-section"><div class="body-label">📤 Request Body</div>
 <pre class="body-code">{
   <span class="k">"name"</span>: <span class="s">"خطة أسبوعية — مصنع الأمل"</span>,  <span class="c">// string، max 255، مطلوب</span>
@@ -524,6 +695,11 @@ pre.body-code{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8
   <span class="k">"end_date"</span>: <span class="s">"2026-12-31"</span>,              <span class="c">// ISO date، اختياري</span>
   <span class="k">"is_active"</span>: <span class="s">true</span>,                    <span class="c">// boolean، اختياري — افتراضي true</span>
   <span class="k">"item_note"</span>: <span class="s">"ملاحظات"</span>,                <span class="c">// string، max 500، اختياري</span>
+  <span class="k">"lat"</span>: <span class="n">33.5138</span>,                          <span class="c">// number، اختياري — خط العرض (موقع المؤسسة)</span>
+  <span class="k">"lng"</span>: <span class="n">36.2765</span>,                          <span class="c">// number، اختياري — خط الطول</span>
+  <span class="k">"address_text"</span>: <span class="s">"شارع الثورة، دمشق"</span>,   <span class="c">// string، اختياري، max 500 — عنوان الاستلام</span>
+  <span class="k">"contact_name"</span>: <span class="s">"أحمد محمد"</span>,            <span class="c">// string، اختياري، max 255 — اسم جهة الاتصال</span>
+  <span class="k">"contact_phone"</span>: <span class="s">"963931234567"</span>,         <span class="c">// string، اختياري، max 64 — هاتف جهة الاتصال</span>
   <span class="k">"lines"</span>: [{                            <span class="c">// مصفوفة، مطلوب — المنتجات المطلوبة</span>
     <span class="k">"product_id"</span>: <span class="s">"uuid..."</span>,            <span class="c">// UUID، مطلوب</span>
     <span class="k">"quantity"</span>: <span class="n">100</span>                      <span class="c">// number ≥ 0.001، مطلوب</span>
@@ -690,7 +866,7 @@ pre.body-code{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8
 
   <div class="role-section" id="role-socket" style="border-color:#06b6d4">
     <h2>📡 Socket.IO — البث المباشر <span class="badge gray">2 namespace</span></h2>
-    <div class="sub">قناتان حيّتان عبر Socket.IO: <code>/tracking</code> لتتبع الشاحنات، و <code>/collection</code] للعروض والتحديثات الفورية. كلاهما يتطلب JWT في handshake.</div>
+    <div class="sub">قناتان حيّتان عبر Socket.IO: <code>/tracking</code> لتتبع الشاحنات (للسائقين فقط)، و <code>/collection</code> للعروض والتحديثات الفورية. كلاهما يتطلب JWT في handshake.</div>
   </div>
 
   <div class="flow-box">
@@ -714,7 +890,7 @@ pre.body-code{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8
       <table class="api-table">
         <tr><th style="width:110px">الحدث</th><th style="width:60px">الاتجاه</th><th>الوصف</th><th style="width:50px">Payload</th></tr>
 
-<tr><td><code>truck:location</code></td><td><span class="m m-post">←司机</span></td><td>بث الموقع الحي من السائق — يُخزّن في Redis + يُرسل لغرفةadmins</td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td><code>truck:location</code></td><td><span class="m m-post">← سائق</span></td><td>بث الموقع الحي من السائق — يُخزّن في Redis + يُرسل لغرفة truck room</td><td><span class="body-toggle">▼</span></td></tr>
 <tr><td colspan="4"><div class="body-block">
 <div class="body-section"><div class="body-label">📤 Payload (Driver → Server)</div>
 <pre class="body-code">{
@@ -730,9 +906,8 @@ pre.body-code{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8
 <span class="c">// أو عند الخطأ:</span>
 { <span class="k">"status"</span>: <span class="s">"error"</span>, <span class="k">"message"</span>: <span class="s">"Pick up the truck before tracking starts"</span> }</pre></div>
 <div class="body-section"><div class="body-label">📡 Server → clients (broadcast)</div>
-<pre class="body-code"><span class="c">// الغرفة: truck:{truckId} + admins</span>
+<pre class="body-code"><span class="c">// الغرفة: truck:{truckId} فقط (لا يوجد وصول للأدمن)</span>
 this.server.to('truck:' + truckId).emit('truck:location', stored);
-this.server.to('admins').emit('truck:location', stored);
 
 <span class="c">// stored object:</span>
 {
@@ -746,7 +921,7 @@ this.server.to('admins').emit('truck:location', stored);
 }</pre></div>
 </div></td></tr>
 
-<tr><td><code>truck:stop</code></td><td><span class="m m-post">←司机</span></td><td>إنهاء رحلة الشاحنة — يُخزّن آخر موقع في DB + يُشعر المشتركين</td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td><code>truck:stop</code></td><td><span class="m m-post">← سائق</span></td><td>إنهاء رحلة الشاحنة — يُخزّن آخر موقع في DB + يُشعر المشتركين</td><td><span class="body-toggle">▼</span></td></tr>
 <tr><td colspan="4"><div class="body-block">
 <div class="body-section"><div class="body-label">📤 Payload</div>
 <pre class="body-code">{
@@ -756,7 +931,7 @@ this.server.to('admins').emit('truck:location', stored);
 <pre class="body-code">{ <span class="k">"status"</span>: <span class="s">"ok"</span>, <span class="k">"savedLocation"</span>: <span class="s">"TruckLocationLog | null"</span> }</pre></div>
 </div></td></tr>
 
-<tr><td><code>truck:stopped</code></td><td><span class="m m-get">→ клиент</span></td><td>إشعار بتوقف الشاحنة (يُرسل للمشتركين في غرفة admins + truck room)</td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td><code>truck:stopped</code></td><td><span class="m m-get">→ عميل</span></td><td>إشعار بتوقف الشاحنة (يُرسل لغرفة truck room فقط)</td><td><span class="body-toggle">▼</span></td></tr>
 <tr><td colspan="4"><div class="body-block">
 <div class="body-section"><div class="body-label">📥 Payload (Server → clients)</div>
 <pre class="body-code">{
@@ -766,46 +941,12 @@ this.server.to('admins').emit('truck:location', stored);
 }</pre></div>
 </div></td></tr>
 
-<tr><td><code>truck:subscribe</code></td><td><span class="m m-post">←_admin</span></td><td>الاشتراك في تحديثات شاحنة محددة (أدمن فقط)</td><td><span class="body-toggle">▼</span></td></tr>
-<tr><td colspan="4"><div class="body-block">
-<div class="body-section"><div class="body-label">📤 Payload</div>
-<pre class="body-code">{ <span class="k">"truckId"</span>: <span class="s">"uuid..."</span> }  <span class="c">// مطلوب</span></pre></div>
-<div class="body-section"><div class="body-label">📥 Response</div>
-<pre class="body-code">{ <span class="k">"status"</span>: <span class="s">"ok"</span>, <span class="k">"location"</span>: <span class="s">"StoredTruckLocation | null"</span> }</pre></div>
-</div></td></tr>
-
-<tr><td><code>admin:subscribeAll</code></td><td><span class="m m-post">←_admin</span></td><td>الاشتراك في جميع تحديثات الشاحنات النشطة (أدمن فقط)</td><td><span class="body-toggle">▼</span></td></tr>
-<tr><td colspan="4"><div class="body-block">
-<div class="body-section"><div class="body-label">📥 Response</div>
-<pre class="body-code">{
-  <span class="k">"status"</span>: <span class="s">"ok"</span>,
-  <span class="k">"active"</span>: [{
-    <span class="k">"truckId"</span>: <span class="s">"uuid..."</span>,
-    <span class="k">"lat"</span>: <span class="n">33.5138</span>,
-    <span class="k">"lng"</span>: <span class="n">36.2765</span>,
-    <span class="k">"driverId"</span>: <span class="s">"uuid..."</span>,
-    <span class="k">"updatedAt"</span>: <span class="s">"2026-08-19T10:30:00.000Z"</span>
-  }]
-}</pre></div>
-</div></td></tr>
-
-<tr><td><code>truck:session</code></td><td><span class="m m-get">→ admins</span></td><td>بدء جلسة تتبع جديدة — يُرسل عند استلام الشاحنة (pickup)</td><td><span class="body-toggle">▼</span></td></tr>
-<tr><td colspan="4"><div class="body-block">
-<div class="body-section"><div class="body-label">📥 Payload (Server → admins)</div>
-<pre class="body-code">{
-  <span class="k">"truckId"</span>: <span class="s">"uuid..."</span>,
-  <span class="k">"driverId"</span>: <span class="s">"uuid..."</span> | <span class="s">null</span>,
-  <span class="k">"plateNumber"</span>: <span class="s">"..."</span> | <span class="s">null</span>,
-  <span class="k">"status"</span>: <span class="s">"started"</span>
-}</pre></div>
-</div></td></tr>
-
       </table>
     </div>
   </div>
 
   <div class="flow-box">
-    <h3>📦 namespace /collection — تحديثات الطلبات الحية</h3>
+    <h3>📦 namespace /collection — تحديثات الطلبات وال sürücüler القريبين</h3>
     <div class="table-wrap">
       <table class="api-table">
         <tr><th style="width:110px">الحدث</th><th style="width:60px">الاتجاه</th><th>الوصف</th><th style="width:50px">Payload</th></tr>
@@ -847,13 +988,85 @@ this.server.to('admins').emit('truck:location', stored);
 }</pre></div>
 </div></td></tr>
 
-<tr><td><code>collection:subscribe</code></td><td><span class="m m-post">← Manuel</span></td><td>الاشتراك في تحديثات طلب محدد</td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td><code>collection:subscribe</code></td><td><span class="m m-post">← يدوي</span></td><td>الاشتراك في تحديثات طلب محدد</td><td><span class="body-toggle">▼</span></td></tr>
 <tr><td colspan="4"><div class="body-block">
 <div class="body-section"><div class="body-label">📤 Payload</div>
 <pre class="body-code">{ <span class="k">"requestId"</span>: <span class="s">"uuid..."</span> }  <span class="c">// مطلوب — ينضم لغرفة request:{requestId}</pre></div>
 </div></td></tr>
 
-<tr><td><code>collection:subscribeAll</code></td><td><span class="m m-post">←_admin</span></td><td>الاشتراك في جميع تحديثات الطلبات (أدمن فقط)</td><td>—</td></tr>
+<tr><td><code>collection:subscribeAll</code></td><td><span class="m m-post">← أدمن</span></td><td>الاشتراك في جميع تحديثات الطلبات (أدمن فقط)</td><td>—</td></tr>
+
+<tr><td><code>driver:tour_started</code></td><td><span class="m m-get">→ سائق</span></td><td>إشعار ببداية الجولة — يُرسل تلقائيًا للسائق عند التحول PLANNED → IN_PROGRESS</td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="4"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Payload (Server → driver)</div>
+<pre class="body-code">{
+  <span class="k">"route_id"</span>: <span class="s">"uuid..."</span>,
+  <span class="k">"route_number"</span>: <span class="s">"RTE-20260821-001"</span>,
+  <span class="k">"total_stops"</span>: <span class="n">4</span>,
+  <span class="k">"started_at"</span>: <span class="s">"2026-08-21T08:00:00Z"</span>
+}</pre></div>
+</div></td></tr>
+
+<tr><td><code>driver:tour_completed</code></td><td><span class="m m-get">→ سائق</span></td><td>إشعار بنهاية الجولة — يُرسل تلقائيًا للسائق عند اكتمال جميع التوقفات</td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="4"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Payload (Server → driver)</div>
+<pre class="body-code">{
+  <span class="k">"route_id"</span>: <span class="s">"uuid..."</span>,
+  <span class="k">"route_number"</span>: <span class="s">"RTE-20260821-001"</span>,
+  <span class="k">"completed_at"</span>: <span class="s">"2026-08-21T14:30:00Z"</span>
+}</pre></div>
+</div></td></tr>
+
+<tr><td><code>user:subscribe_request</code></td><td><span class="m m-post">← مستخدم</span></td><td>اشتراك المستخدم في تحديثات طلبه — ينضم لغرفة request:{requestId} ويستقبل request:status</td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="4"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Payload</div>
+<pre class="body-code">{ <span class="k">"requestId"</span>: <span class="s">"uuid..."</span> }  <span class="c">// مطلوب</span></pre></div>
+<div class="body-section"><div class="body-label">📥 Response</div>
+<pre class="body-code">{ <span class="k">"status"</span>: <span class="s">"ok"</span> }</pre></div>
+</div></td></tr>
+
+<tr><td><code>user:nearby_drivers</code></td><td><span class="m m-post">← مستخدم</span></td><td>طلب السائقين القريبين — يرسل الموقع ويحصل على مناطق التغطية وال sürücüler المتاحين + تحديثات تلقائية عند تغير الحالة</td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="4"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Payload</div>
+<pre class="body-code">{
+  <span class="k">"lat"</span>: <span class="n">33.5138</span>,             <span class="c">// number، مطلوب — خط العرض</span>
+  <span class="k">"lng"</span>: <span class="n">36.2765</span>,             <span class="c">// number، مطلوب — خط الطول</span>
+  <span class="k">"radius_km"</span>: <span class="n">10</span>            <span class="c">// number، اختياري — افتراضي 10 كم</span>
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (ack)</div>
+<pre class="body-code">{
+  <span class="k">"status"</span>: <span class="s">"ok"</span>,
+  <span class="k">"zones"</span>: [{
+    <span class="k">"point_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"name"</span>: <span class="s">"مدرسة الأمل"</span>,
+    <span class="k">"point_type"</span>: <span class="s">"SCHOOL"</span>,
+    <span class="k">"lat"</span>: <span class="n">33.5200</span>,
+    <span class="k">"lng"</span>: <span class="n">36.2800</span>,
+    <span class="k">"distance_km"</span>: <span class="n">1.23</span>,
+    <span class="k">"available_drivers"</span>: <span class="n">2</span>,
+    <span class="k">"drivers_with_capacity"</span>: <span class="n">2</span>,
+    <span class="k">"remaining_capacity_kg"</span>: <span class="n">850.0</span>,
+    <span class="k">"drivers"</span>: [{
+      <span class="k">"driver_id"</span>: <span class="s">"uuid..."</span>,
+      <span class="k">"driver_name"</span>: <span class="s">"سليم"</span>,
+      <span class="k">"truck_plate"</span>: <span class="s">"12345"</span>,
+      <span class="k">"truck_id"</span>: <span class="s">"uuid..."</span>,
+      <span class="k">"max_payload_kg"</span>: <span class="n">1000</span>,
+      <span class="k">"remaining_kg"</span>: <span class="n">425.0</span>,
+      <span class="k">"remaining_shift_minutes"</span>: <span class="n">180</span>,
+      <span class="k">"parked_since"</span>: <span class="s">"2026-08-21T08:00:00Z"</span>
+    }]
+  }]
+}</pre></div>
+<div class="body-section"><div class="body-label">📡 Server → client (-push)</div>
+<pre class="body-code"><span class="c">// تحديث تلقائي عند تغير حالة السائقين (قبول/رفض/إنهاء جولة)</span>
+<span class="c">// نفس الهيكل أعلاه:</span>
+{
+  <span class="k">"zones"</span>: [{ ... }]
+}</pre></div>
+</div></td></tr>
+
+<tr><td><code>user:unsubscribe_nearby</code></td><td><span class="m m-post">← مستخدم</span></td><td>إيقاف متابعة السائقين القريبين</td><td>—</td></tr>
 
       </table>
     </div>
@@ -865,7 +1078,7 @@ this.server.to('admins').emit('truck:location', stored);
       <pre class="body-code"><span class="c">// 1. تحميل المكتبة</span>
 &lt;script src="https://cdn.socket.io/4.7.5/socket.io.min.js"&gt;&lt;/script&gt;
 
-<span class="c">// 2. الاتصال بنطاق التتبع</span>
+<span class="c">// 2. الاتصال بنطاق التتبع (السائق فقط)</span>
 var socket = io('http://localhost:3000/tracking', {
   auth: { token: localStorage.getItem('daw_token') }
 });
@@ -885,10 +1098,195 @@ setInterval(function () {
 var coll = io('http://localhost:3000/collection', {
   auth: { token: localStorage.getItem('daw_token') }
 });
+
+<span class="c">// 5. السائق يسمع العروض وبداية/نهاية الجولة</span>
 coll.on('request:assigned', function (data) {
   console.log('عرض جديد!', data);
   renderTour();
+});
+coll.on('driver:tour_started', function (data) {
+  console.log('جولة بدأت:', data.route_number);
+});
+coll.on('driver:tour_completed', function (data) {
+  console.log('جولة انتهت:', data.route_number);
+});
+
+<span class="c">// 6. المستخدم يتابع طلبه</span>
+coll.emit('user:subscribe_request', { requestId: REQUEST_ID });
+coll.on('request:status', function (data) {
+  console.log('تحديث:', data.status);
+});
+
+<span class="c">// 7. المستخدم يبحث عن السائقين القريبين (لتسليم فوري)</span>
+coll.emit('user:nearby_drivers', { lat: 33.51, lng: 36.27 }, function (res) {
+  console.log('السائقين القريبين:', res.zones);
+});
+coll.on('user:nearby_update', function (data) {
+  console.log('تحديث السائقين:', data.zones);  <span class="c">// pushes تلقائي عند تغير حالة السائقين</span>
 });</pre>
+    </div>
+  </div>
+
+  <!-- 📦 الشحنات — Shipments                                                      -->
+
+  <div class="role-section" id="role-shipments" style="border-color:#f59e0b">
+    <h2>📦 الشحنات <span class="badge gray">5 endpoint</span></h2>
+    <div class="sub">تجميع عدة طلبات جمع في شحنة واحدة للمستودع. الإنشاء والانطلاق والتسليم تلقائيان تمامًا. الدورة: <code>CREATED → IN_TRANSIT → DELIVERED</code> أو <code>CANCELLED</code>. عند التسليم تتحول الطلبات إلى <code>COMPLETED</code> تلقائيًا.</div>
+  </div>
+
+  <div class="flow-box">
+    <h3>🔧 السائق</h3>
+    <div class="table-wrap">
+      <table class="api-table">
+        <tr><th style="width:74px">الطريقة</th><th style="width:38%">المسار</th><th>الشرح</th><th style="width:80px">الدالة</th><th style="width:50px">Body</th></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/shipments</td><td>قائمة شحناتي</td><td><span class="hint">myShipments()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 لا يوجد params — السائق يُعرَّف من JWT</div>
+<pre class="body-code"><span class="c">// لا يوجد request body أو query params — السائق يُعرَّف من JWT</span></pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">{
+  <span class="k">"message"</span>: <span class="s">"Shipments fetched"</span>,
+  <span class="k">"result"</span>: [{
+    <span class="k">"id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"shipment_number"</span>: <span class="s">"SHP-20260820-001"</span>,
+    <span class="k">"status"</span>: <span class="s">"CREATED"</span>,        <span class="c">// CREATED | IN_TRANSIT | DELIVERED | CANCELLED</span>
+    <span class="k">"total_weight_kg"</span>: <span class="n">145.5</span>,
+    <span class="k">"total_requests"</span>: <span class="n">3</span>,
+    <span class="k">"warehouse_id"</span>: <span class="s">"uuid..."</span> | <span class="s">null</span>,
+    <span class="k">"notes"</span>: <span class="s">"..."</span> | <span class="s">null</span>,
+    <span class="k">"collected_at"</span>: <span class="s">"..."</span> | <span class="s">null</span>,
+    <span class="k">"departed_at"</span>: <span class="s">"..."</span> | <span class="s">null</span>,
+    <span class="k">"delivered_at"</span>: <span class="s">"..."</span> | <span class="s">null</span>,
+    <span class="k">"created_at"</span>: <span class="s">"2026-08-20T23:32:46Z"</span>
+  }]
+}</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/shipments/:id</td><td>تفاصيل شحنة مع الطلبات المرتبطة</td><td><span class="hint">detail()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 Path Params</div>
+<pre class="body-code"><span class="k">:id</span> = <span class="s">UUID</span>  <span class="c">// معرّف الشحنة — يجب أن يملكيها السائق (_owner check)</span></pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">{
+  <span class="k">"message"</span>: <span class="s">"Shipment fetched"</span>,
+  <span class="k">"result"</span>: {
+    <span class="k">"id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"shipment_number"</span>: <span class="s">"SHP-20260820-001"</span>,
+    <span class="k">"status"</span>: <span class="s">"IN_TRANSIT"</span>,
+    <span class="k">"total_weight_kg"</span>: <span class="n">145.5</span>,
+    <span class="k">"total_requests"</span>: <span class="n">3</span>,
+    <span class="k">"warehouse_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"notes"</span>: <span class="s">"..."</span> | <span class="s">null</span>,
+    <span class="k">"collected_at"</span>: <span class="s">"..."</span>,
+    <span class="k">"departed_at"</span>: <span class="s">"..."</span>,
+    <span class="k">"delivered_at"</span>: <span class="s">null</span>,
+    <span class="k">"created_at"</span>: <span class="s">"..."</span>,
+    <span class="k">"requests"</span>: [{
+      <span class="k">"id"</span>: <span class="s">"uuid..."</span>,
+      <span class="k">"request_number"</span>: <span class="s">"CR-2026-08-00008"</span>,
+      <span class="k">"status"</span>: <span class="s">"PICKING"</span>,
+      <span class="k">"route_sequence"</span>: <span class="n">1</span>,
+      <span class="k">"actual_weight_kg"</span>: <span class="s">"45.500"</span> | <span class="s">null</span>,
+      <span class="k">"estimated_weight_kg"</span>: <span class="s">"50.000"</span>,
+      <span class="k">"lines"</span>: [{
+        <span class="k">"product_name"</span>: <span class="s">"علب ألمنيوم"</span>,
+        <span class="k">"quantity"</span>: <span class="n">50</span>,
+        <span class="k">"unit_type"</span>: <span class="s">"KG"</span>
+      }]
+    }]
+  }
+}</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-patch">PATCH</span></td><td class="mono">/api/v1/shipments/:id/cancel</td><td>إلغاء شحنة</td><td><span class="hint">cancel()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 لا يوجد body — فقط :id في المسار</div>
+<pre class="body-code"><span class="c">// لا يوجد request body</span></pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">{
+  <span class="k">"message"</span>: <span class="s">"Shipment cancelled"</span>,
+  <span class="k">"result"</span>: {
+    <span class="k">"id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"shipment_number"</span>: <span class="s">"SHP-20260820-001"</span>,
+    <span class="k">"status"</span>: <span class="s">"CANCELLED"</span>,
+    <span class="k">"total_weight_kg"</span>: <span class="n">145.5</span>,
+    <span class="k">"total_requests"</span>: <span class="n">0</span>,
+    <span class="k">"warehouse_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"created_at"</span>: <span class="s">"..."</span>
+  }
+}</pre></div>
+<div class="sub">🔄 يُعيد جميع الطلبات المرتبطة بحالة PICKING ويُلغي الشحنة. الطلب يعود لقائمة الانتظار.</div>
+</div></td></tr>
+
+<tr><td><span class="m m-patch">PATCH</span></td><td class="mono">/api/v1/shipments/:id/deliver</td><td>تسليم الشحنة للمستودع</td><td><span class="hint">deliver()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{
+  <span class="k">"warehouseId"</span>: <span class="s">"a1b2c3d4-..."</span>  <span class="c">// UUID، اختياري — المستودع المرسل إليه</span>
+                                    <span class="c">// بدونه: المستودع من الـ handover أو الافتراضي</span>
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">{
+  <span class="k">"message"</span>: <span class="s">"Shipment delivered — all requests completed"</span>,
+  <span class="k">"result"</span>: {
+    <span class="k">"id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"shipment_number"</span>: <span class="s">"SHP-20260820-001"</span>,
+    <span class="k">"status"</span>: <span class="s">"DELIVERED"</span>,
+    <span class="k">"total_weight_kg"</span>: <span class="n">145.5</span>,
+    <span class="k">"total_requests"</span>: <span class="n">3</span>,
+    <span class="k">"warehouse_id"</span>: <span class="s">"uuid..."</span>,
+    <span class="k">"delivered_at"</span>: <span class="s">"2026-08-20T14:30:00Z"</span>,
+    <span class="k">"created_at"</span>: <span class="s">"..."</span>
+  }
+}</pre>
+<div class="sub">🏭 IN_TRANSIT → DELIVERED. جميع الطلبات المرتبطة تتحول إلى <code>COMPLETED</code> تلقائيًا. هذا هو التسليم الرئيسي للمستودع (بديل تسليم كل طلب على حدة).</div></div>
+</div></td></tr>
+
+      </table>
+    </div>
+  </div>
+
+  <div class="flow-box">
+    <h3>🔧 الأدمن</h3>
+    <div class="table-wrap">
+      <table class="api-table">
+        <tr><th style="width:74px">الطريقة</th><th style="width:38%">المسار</th><th>الشرح</th><th style="width:80px">الدالة</th><th style="width:50px">Body</th></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/shipments/admin/all</td><td>قائمة كل الشحنات مع تفاصيل السائق والشاحنة والمستودع</td><td><span class="hint">adminList()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 Query Params</div>
+<pre class="body-code">{
+  <span class="k">"status"</span>: <span class="s">"IN_TRANSIT"</span>,    <span class="c">// اختياري: CREATED|IN_TRANSIT|DELIVERED|CANCELLED</span>
+  <span class="k">"driver_id"</span>: <span class="s">"uuid..."</span>,   <span class="c">// UUID، اختياري — تصفية حسب السائق</span>
+  <span class="k">"warehouse_id"</span>: <span class="s">"uuid..."</span>, <span class="c">// UUID، اختياري — تصفية حسب المستودع</span>
+  <span class="k">"page"</span>: <span class="n">1</span>,                <span class="c">// integer، افتراضي 1</span>
+  <span class="k">"limit"</span>: <span class="n">20</span>               <span class="c">// integer 1-100، افتراضي 20</span>
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">{
+  <span class="k">"message"</span>: <span class="s">"Shipments fetched"</span>,
+  <span class="k">"result"</span>: {
+    <span class="k">"items"</span>: [{
+      <span class="k">"id"</span>: <span class="s">"uuid..."</span>,
+      <span class="k">"shipment_number"</span>: <span class="s">"SHP-20260820-001"</span>,
+      <span class="k">"status"</span>: <span class="s">"IN_TRANSIT"</span>,
+      <span class="k">"total_weight_kg"</span>: <span class="n">145.5</span>,
+      <span class="k">"total_requests"</span>: <span class="n">3</span>,
+      <span class="k">"driver_name"</span>: <span class="s">"سليم أحمد"</span>,
+      <span class="k">"truck_plate"</span>: <span class="s">"12345"</span>,
+      <span class="k">"warehouse_name"</span>: <span class="s">"المستودع المركزي"</span>,
+      <span class="k">"collected_at"</span>: <span class="s">"..."</span>,
+      <span class="k">"departed_at"</span>: <span class="s">"..."</span>,
+      <span class="k">"delivered_at"</span>: <span class="s">null</span>,
+      <span class="k">"created_at"</span>: <span class="s">"..."</span>
+    }],
+    <span class="k">"total"</span>: <span class="n">28</span>, <span class="k">"page"</span>: <span class="n">1</span>, <span class="k">"limit"</span>: <span class="n">20</span>
+  }
+}</pre></div>
+</div></td></tr>
+
+      </table>
     </div>
   </div>
 

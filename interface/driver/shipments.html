@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الشحنات — تطبيق السائقين</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="driver">
+<header class="topbar">
+  <div class="inner">
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="grow"></div>
+    <span class="badge gray" data-ship-socket>غير متصل</span>
+    <a href="home.html" class="avatar">أ</a>
+  </div>
+</header>
+
+<main class="container">
+  <h2 style="font-size:19px; margin:16px 0 4px">الشحنات <span class="endpoint">GET /api/v1/shipments</span></h2>
+  <p class="muted" data-ship-head>جارٍ تحميل شحناتك…</p>
+
+  <div class="card" style="border:2px solid var(--driver)">
+    <div class="row between" style="align-items:center">
+      <h3 style="margin:0">📦 الشحنات النشطة</h3>
+    </div>
+    <p class="muted small mt-8">تُنشأ الشحنات تلقائيًا عند قبول الطلبات. لا حاجة لإنشاء يدوي.</p>
+  </div>
+
+  <div data-ship-list>
+    <p class="muted small">جارٍ التحميل…</p>
+  </div>
+</main>
+
+<nav class="bottomnav">
+  <a href="home.html"><span class="ic">🏠</span>الرئيسية</a>
+  <a href="tour.html"><span class="ic">🗺️</span>الجولة</a>
+  <a href="shipments.html" class="active"><span class="ic">📦</span>الشحنات</a>
+  <a href="profile.html"><span class="ic">👤</span>ملفي</a>
+</nav>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script src="../assets/socket.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+
+  var fmt = function (n) { return (+n || 0).toLocaleString('en-US'); };
+
+  /* ── Render shipment list ── */
+  var detailShipId = null;
+
+  function shipmentCard(s, idx) {
+    var st = s.status || '—';
+    var stLabel = { CREATED: 'جاهزة', IN_TRANSIT: 'في الطريق', DELIVERED: 'تم التسليم', CANCELLED: 'ملغاة' };
+    var html = '<div class="card" data-ship-card="' + API.esc(s.id) + '">' +
+      '<div class="row between" style="align-items:center">' +
+      '<div><b>📦 #' + API.esc(s.shipment_number || '#' + idx) + '</b>' +
+      '<p class="muted small">' + API.esc(stLabel[st] || st) + ' · ' + (+s.total_requests || 0) + ' طلب · ' + fmt(s.total_weight_kg) + ' كغ</p></div>' +
+      API.badge(st) + '</div>';
+
+    if (s.notes) html += '<p class="muted small">' + API.esc(s.notes) + '</p>';
+    if (s.departed_at) html += '<p class="muted small">🚀 انطلق: ' + new Date(s.departed_at).toLocaleString('ar') + '</p>';
+    if (s.delivered_at) html += '<p class="muted small">✅ وصل: ' + new Date(s.delivered_at).toLocaleString('ar') + '</p>';
+
+    html += '<div class="row mt-8" style="gap:6px">';
+    if (st === 'IN_TRANSIT') html += '<button class="btn driver grow" data-deliver="' + API.esc(s.id) + '">✅ تم التسليم</button>';
+    if (st === 'CREATED' || st === 'IN_TRANSIT') html += '<button class="btn danger" data-cancel-ship="' + API.esc(s.id) + '">إلغاء</button>';
+    if (st !== 'CREATED' && st !== 'IN_TRANSIT') html += '<button class="btn grow" style="background:var(--line)" data-detail="' + API.esc(s.id) + '">عرض التفاصيل</button>';
+    html += '</div></div>';
+    return html;
+  }
+
+  function render() {
+    var box = document.querySelector('[data-ship-list]');
+    if (!box) return;
+    box.innerHTML = '<p class="muted small">جارٍ تحميل الشحنات…</p>';
+    API.get('shipments').then(function (json) {
+      var ships = API.list(json);
+      if (!ships.length) {
+        box.innerHTML = '<div class="card"><p class="muted small">لا توجد شحنات بعد. اقبل الطلبات وستُنشأ الشحنات تلقائيًا.</p></div>';
+        return;
+      }
+      box.innerHTML = '';
+      ships.forEach(function (s, i) { box.insertAdjacentHTML('beforeend', shipmentCard(s, i + 1)); });
+      bindActions();
+    }).catch(function (e) {
+      box.innerHTML = '<div class="card"><p class="muted small">' + API.esc(e.message || 'تعذر تحميل الشحنات') + '</p></div>';
+    });
+  }
+
+  function bindActions() {
+    /* Deliver */
+    document.querySelectorAll('[data-deliver]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = this.getAttribute('data-deliver');
+        this.disabled = true;
+        API.patch('shipments/' + id + '/deliver', { notes: 'تم التسليم في المستودع' }).then(function () {
+          ui.ok('تم تسليم الشحنة — الطلبات أُكملت');
+          render();
+        }).catch(function (e) { ui.err(e.message || 'فشل التسليم'); });
+      });
+    });
+    /* Cancel */
+    document.querySelectorAll('[data-cancel-ship]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = this.getAttribute('data-cancel-ship');
+        if (!confirm('هل أنت متأكد من إلغاء هذه الشحنة؟')) return;
+        this.disabled = true;
+        API.patch('shipments/' + id + '/cancel').then(function () {
+          ui.ok('تم إلغاء الشحنة');
+          render();
+        }).catch(function (e) { ui.err(e.message || 'فشل الإلغاء'); });
+      });
+    });
+    /* Detail */
+    document.querySelectorAll('[data-detail]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = this.getAttribute('data-detail');
+        showDetail(id);
+      });
+    });
+  }
+
+  /* ── Detail view ── */
+  function showDetail(id) {
+    API.get('shipments/' + id).then(function (json) {
+      var s = API.one(json);
+      var box = document.querySelector('[data-ship-list]');
+      var html = '<div class="card" style="border:2px solid var(--driver)">' +
+        '<div class="row between"><h3 style="margin:0">📦 ' + API.esc(s.shipment_number || s.id.slice(0, 8)) + '</h3>' + API.badge(s.status) + '</div>' +
+        '<p class="muted small mt-8">' + (+s.total_requests || 0) + ' طلب · ' + fmt(s.total_weight_kg) + ' كغ</p>' +
+        (s.collected_at ? '<p class="muted small">📅 تم الجمع: ' + new Date(s.collected_at).toLocaleString('ar') + '</p>' : '') +
+        (s.departed_at ? '<p class="muted small">🚀 الانطلاق: ' + new Date(s.departed_at).toLocaleString('ar') + '</p>' : '') +
+        (s.delivered_at ? '<p class="muted small">✅ التسليم: ' + new Date(s.delivered_at).toLocaleString('ar') + '</p>' : '') +
+        (s.notes ? '<p class="hint">' + API.esc(s.notes) + '</p>' : '') +
+        '</div>';
+
+      var requests = s.requests || [];
+      requests.forEach(function (r) {
+        var lines = (r.lines || []).map(function (l) {
+          return (l.product_name || 'منتج') + ' × ' + fmt(l.quantity) + ' ' + (l.unit_type === 'PIECE' ? 'قطعة' : 'كغ');
+        }).join(' · ');
+        html += '<div class="card">' +
+          '<div class="row between"><b>طلب ' + API.esc(r.request_number || r.id.slice(0, 8)) + '</b>' + API.badge(r.status) + '</div>' +
+          '<p class="muted small mt-8">' + lines + '</p>' +
+          '<p class="muted small">الوزن الفعلي: ' + fmt(r.actual_weight_kg) + ' كغ · الوزن المقدّر: ' + fmt(r.estimated_weight_kg) + ' كغ</p>' +
+          '</div>';
+      });
+
+      html += '<div class="mt-8"><button class="btn grow" style="background:var(--line)" onclick="render()">← الرجوع للقائمة</button></div>';
+      box.innerHTML = html;
+    }).catch(function (e) { ui.err(e.message || 'تعذر تحميل التفاصيل'); });
+  }
+
+  render();
+
+  /* ── Socket.IO live updates ── */
+  var shipSocket = null;
+  Socket.connect('/collection').then(function (sock) {
+    shipSocket = sock;
+    var badge = document.querySelector('[data-ship-socket]');
+    if (badge) { badge.textContent = 'متصل'; badge.className = 'badge green'; }
+    sock.on('request:updated', function () { setTimeout(render, 600); });
+    sock.on('shipment:updated', function () { setTimeout(render, 600); });
+  }).catch(function () {});
+
+  window.addEventListener('beforeunload', function () { if (shipSocket) shipSocket.disconnect(); });
+</script>
+</body>
+</html>

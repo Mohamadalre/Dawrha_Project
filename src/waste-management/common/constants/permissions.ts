@@ -73,13 +73,11 @@ const AVAILABILITY_EXTRA: WastePermissionKey[] = ['waste.products.availability']
 /** "My materials" (onboarding-selected categories): the three commercial roles. */
 const MATERIALS_EXTRA: WastePermissionKey[] = ['waste.materials.view'];
 
-/** All collection-related permissions — granted to every role. */
+/** All collection-related permissions — granted to every role EXCEPT plans. */
 const ALL_COLLECTION_PERMISSIONS: WastePermissionKey[] = [
   'collection.requests.create',
   'collection.requests.view',
   'collection.requests.cancel',
-  'collection.plans.view',
-  'collection.plans.manage',
   'collection.driver.view',
   'collection.driver.manage',
   'collection.admin.view',
@@ -103,6 +101,8 @@ export const ROLE_PERMISSIONS_MAP: Partial<Record<Role, WastePermissionKey[]>> =
     ...INSTITUTION_EXTRA,
     ...MATERIALS_EXTRA,
     ...ALL_COLLECTION_PERMISSIONS,
+    'collection.plans.view',
+    'collection.plans.manage',
   ],
   [Role.FACTORY]: [...BUYER_PERMISSIONS, ...AVAILABILITY_EXTRA, ...MATERIALS_EXTRA, ...ALL_COLLECTION_PERMISSIONS],
   [Role.EXTERNAL_PARTNER]: [...BUYER_PERMISSIONS, ...AVAILABILITY_EXTRA, ...MATERIALS_EXTRA, ...ALL_COLLECTION_PERMISSIONS],

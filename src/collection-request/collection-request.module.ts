@@ -24,6 +24,7 @@ import { CollectionPlanLine } from './entities/collection-plan-line.entity';
 import { CoveragePoint } from './entities/coverage-point.entity';
 import { DriverCoverageAssignment } from './entities/driver-coverage-assignment.entity';
 import { DispatchConfig } from './entities/dispatch-config.entity';
+import { Shipment } from './entities/shipment.entity';
 import { CollectionStateService } from './providers/collection-state.service';
 import { DispatchConfigProvider } from './providers/dispatch-config.provider';
 import { CollectionRequestService } from './services/collection-request.service';
@@ -50,6 +51,9 @@ import { CollectionReportsController } from './controllers/collection-reports.co
 import { CollectionRequestController } from './controllers/collection-request.controller';
 import { CollectionPlanController } from './controllers/collection-plan.controller';
 import { DriverOfferController } from './controllers/driver-offer.controller';
+import { ShipmentController } from './controllers/shipment.controller';
+import { ShipmentService } from './services/shipment.service';
+import { DropOffService } from './services/drop-off.service';
 import { COLLECTION_DISPATCH_QUEUE } from './constants/dispatch.constants';
 
 /**
@@ -72,6 +76,7 @@ import { COLLECTION_DISPATCH_QUEUE } from './constants/dispatch.constants';
       CoveragePoint,
       DriverCoverageAssignment,
       DispatchConfig,
+      Shipment,
       Product,
       // Dispatch engine inputs: drivers, their trucks/shifts and open handovers.
       CollectorProfile,
@@ -109,6 +114,8 @@ import { COLLECTION_DISPATCH_QUEUE } from './constants/dispatch.constants';
     CollectionReportsService,
     AdminCollectionService,
     DispatchGatewayEvents,
+    ShipmentService,
+    DropOffService,
   ],
   controllers: [
     CollectionRequestController,
@@ -119,6 +126,7 @@ import { COLLECTION_DISPATCH_QUEUE } from './constants/dispatch.constants';
     CoveragePointsController,
     DispatchConfigController,
     CollectionReportsController,
+    ShipmentController,
   ],
   exports: [
     CollectionStateService,
@@ -126,6 +134,7 @@ import { COLLECTION_DISPATCH_QUEUE } from './constants/dispatch.constants';
     DispatchEngineService,
     DispatchConfigProvider,
     CoverageService,
+    DropOffService,
   ],
 })
 export class CollectionRequestModule {}

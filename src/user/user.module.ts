@@ -15,6 +15,7 @@ import { Location } from './entities/location/location.entity';
 import { ProfileResolver } from './providers/profile-resolver.privder';
 import { UserCacheService } from './providers/user-cache.service';
 import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
+import { CollectionRequestModule } from '@src/collection-request/collection-request.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { CloudinaryModule } from '@src/core/cloudinary/cloudinary.module';
       UserDevice,
     ]),
     CloudinaryModule,
+    CollectionRequestModule,
   ],
   controllers: [UserController],
   providers: [UserService, ProfileResolver, UserCacheService],

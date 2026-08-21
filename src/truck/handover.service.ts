@@ -190,19 +190,6 @@ export class HandoverService {
     await this.handoverRepo.save(h);
     await this.odooSync.enqueuePushHandoverPickup({ handoverId: h.id });
 
-    // Tracking becomes live now: the admin map may show this truck the moment
-    // its session opens, even before the first coordinate arrives. Best-effort —
-    // the handover is already saved, so a socket hiccup must not fail the pickup.
-    try {
-      this.tracking.announceSessionStarted({
-        truckId: truck.id,
-        driverId: driver.id,
-        plateNumber: truck.plateNumber ?? null,
-      });
-    } catch {
-      /* the truck is picked up regardless; its first ping will surface it */
-    }
-
     return {
       message: 'Truck picked up successfully',
       handover_id: h.id,

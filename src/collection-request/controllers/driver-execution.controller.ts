@@ -4,11 +4,13 @@ import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { RouteExecutionService } from '../services/route-execution.service';
-import { CollectedRequestDto, DeliveredRequestDto } from '../dto/driver-execution.dto';
+import { CollectedRequestDto } from '../dto/driver-execution.dto';
 
 /**
- * The driver's execution endpoints: his ordered tour, and the three punches
- * that move a stop from ASSIGNED to COMPLETED (arrive, weigh, deliver).
+ * The driver's execution endpoints: his ordered tour, and the punches
+ * that move a stop from ASSIGNED to PICKING (arrive, weigh).
+ *
+ * Delivery is handled at the **shipment** level via PATCH /shipments/:id/deliver.
  *
  * Every route is guarded by the state machine — an out-of-order punch is a
  * 409, a stop on someone else's tour is a 404 — and the response messages go
@@ -40,18 +42,7 @@ export class DriverExecutionController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CollectedRequestDto,
   ) {
-    await this.execution.collected(user, id, dto);
-    return { message: 'Weight recorded', result: { request_id: id, status: 'PICKING' } };
-  }
-
-  @Patch(':id/delivered')
-  @Permissions('collection.driver.manage')
-  async delivered(
-    @CurrentUser() user: { id: string; role: string },
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: DeliveredRequestDto,
-  ) {
-    await this.execution.delivered(user, id, dto);
-    return { message: 'Delivery recorded', result: { request_id: id, status: 'DELIVERED' } };
+    const result = await this.execution.collected(user, id, dto);
+    return { message: 'Weight recorded', result: { request_id: id, status: 'PICKING', ...result } };
   }
 }

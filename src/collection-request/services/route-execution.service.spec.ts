@@ -8,6 +8,9 @@ import { Product } from '@src/waste-management/entities/product.entity';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { PointsWalletService } from '@src/points-wallet/points-wallet.service';
 import { NotificationService } from '@src/notification/notification.service';
+import { ShipmentService } from './shipment.service';
+import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
+import { TruckEntity } from '@src/truck/entities/truck.entity';
 import { Role } from '@src/user/enums/role.enum';
 import { CollectionStateService } from '../providers/collection-state.service';
 import { DispatchConfigProvider } from '../providers/dispatch-config.provider';
@@ -98,8 +101,22 @@ describe('RouteExecutionService', () => {
     const odooSync = { enqueueRegisterIntake: jest.fn().mockResolvedValue(undefined) };
     const wallet = { awardForCollection: jest.fn().mockResolvedValue({ points: 1, balance: 1 }) };
     const notifications = { createNotification: jest.fn().mockResolvedValue({ id: 'n-1' }) };
-    const events = { announceToRequest: jest.fn().mockResolvedValue(undefined) };
+    const events = {
+      announceToRequest: jest.fn().mockResolvedValue(undefined),
+      announceTourStarted: jest.fn().mockResolvedValue(undefined),
+      announceTourCompleted: jest.fn().mockResolvedValue(undefined),
+    };
     const eventEmitter = { emit: jest.fn() };
+    const shipmentService = {
+      autoDepartOnArrival: jest.fn().mockResolvedValue(undefined),
+      autoDeliverOnRouteComplete: jest.fn().mockResolvedValue(undefined),
+    };
+    const truckAssignmentRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+    const truckRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
     return {
       requestRepo,
       routeRepo,
@@ -115,6 +132,9 @@ describe('RouteExecutionService', () => {
       notifications,
       events,
       eventEmitter,
+      shipmentService,
+      truckAssignmentRepo,
+      truckRepo,
     };
   };
 
@@ -137,6 +157,9 @@ describe('RouteExecutionService', () => {
         { provide: NotificationService, useValue: m.notifications },
         { provide: DispatchGatewayEvents, useValue: m.events },
         { provide: EventEmitter2, useValue: m.eventEmitter },
+        { provide: ShipmentService, useValue: m.shipmentService },
+        { provide: getRepositoryToken(TruckAssignmentEntity), useValue: m.truckAssignmentRepo },
+        { provide: getRepositoryToken(TruckEntity), useValue: m.truckRepo },
       ],
     }).compile();
 
