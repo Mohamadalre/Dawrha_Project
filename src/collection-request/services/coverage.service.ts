@@ -38,6 +38,10 @@ const BUSY_STATUSES: CollectionRequestStatus[] = [
 export class CoverageService {
   private readonly logger = new Logger('COVERAGE');
 
+  /** Short-lived cache so concurrent/rapid nearby calls share one computation. */
+  private readonly zoneCache = new Map<string, { at: number; data: any[] }>();
+  private readonly ZONE_CACHE_TTL_MS = 2000;
+
   constructor(
     @InjectRepository(CoveragePoint)
     private readonly pointRepo: Repository<CoveragePoint>,
@@ -146,6 +150,10 @@ export class CoverageService {
     lng: number,
     radiusKm: number = 10,
   ): Promise<any[]> {
+    const cacheKey = `${Number(lat).toFixed(3)}:${Number(lng).toFixed(3)}:${radiusKm}`;
+    const cached = this.zoneCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < this.ZONE_CACHE_TTL_MS) return cached.data;
+
     const points = await this.pointRepo.find({ where: { isActive: true } });
 
     const withDistance = points
@@ -156,7 +164,11 @@ export class CoverageService {
       .filter((p) => p.distance_km <= radiusKm)
       .sort((a, b) => a.distance_km - b.distance_km || b.priority - a.priority);
 
-    if (!withDistance.length) return [];
+    if (!withDistance.length) {
+      const empty: any[] = [];
+      this.zoneCache.set(cacheKey, { at: Date.now(), data: empty });
+      return empty;
+    }
 
     const pointIds = withDistance.map((p) => p.id);
 
@@ -194,11 +206,9 @@ export class CoverageService {
         drivers.push({
           driver_id: profile.id,
           driver_name: profile.account?.name ?? null,
-          account_id: profile.account?.id ?? null,
           truck_plate: truck.plateNumber,
           truck_id: truck.id,
           max_payload_kg: maxKg,
-          current_weight_kg: +usedKg.toFixed(2),
           remaining_kg: +remainingKg.toFixed(2),
           remaining_shift_minutes: shiftRemainingMinutes,
           parked_since: a.assignedFrom,
@@ -214,12 +224,12 @@ export class CoverageService {
         distance_km: +point.distance_km.toFixed(2),
         available_drivers: drivers.length,
         drivers_with_capacity: drivers.filter((d) => d.remaining_kg > 0).length,
-        total_capacity_kg: drivers.reduce((s, d) => s + d.max_payload_kg, 0),
         remaining_capacity_kg: drivers.reduce((s, d) => s + d.remaining_kg, 0),
         drivers,
       });
     }
 
+    this.zoneCache.set(cacheKey, { at: Date.now(), data: result });
     return result;
   }
 
