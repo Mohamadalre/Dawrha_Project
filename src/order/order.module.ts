@@ -22,7 +22,7 @@ import { DeliveryTrip } from './entities/delivery-trip.entity';
 import { DeliveryTripStop } from './entities/delivery-trip-stop.entity';
 import { DeliveryTripService } from './providers/delivery-trip.service';
 import { DeliveryDispatchService } from './providers/delivery-dispatch.service';
-import { DeliveryTripController } from './delivery-trip.controller';
+// DeliveryTripController removed — delivery is fully automatic + Odoo-executed.
 import { DeliveryWebhookController } from './delivery-webhook.controller';
 import { AdminComplaintService } from './providers/admin-complaint.service';
 import { AdminComplaintController } from './admin-complaint.controller';
@@ -126,7 +126,11 @@ import { PointsWalletModule } from '@src/points-wallet/points-wallet.module';
     OrderController,
     AdminOrderController,
     OrderConstraintsController,
-    DeliveryTripController,
+    // DeliveryTripController REMOVED: delivery is run entirely by the SYSTEM —
+    // planning + truck-scoring + assignment fire automatically when an order is
+    // ready (see maybeTriggerDelivery → PLAN_DELIVERY), and the driver executes
+    // the trip IN ODOO (pickups + handover), reported back by the webhook below.
+    // The backend admin neither triggers, views, nor tracks delivery trips.
     DeliveryWebhookController,
     AdminComplaintController,
   ],

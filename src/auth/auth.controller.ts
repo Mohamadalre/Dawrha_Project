@@ -1,7 +1,7 @@
 import { Controller, Post, Body, UseGuards, HttpCode, HttpStatus, Put, Req, Patch } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { DeviceDto, RefreshTokenDto, RefreshTokenTemporaryDto } from './dto/auth.dto';
+import { DeviceDto, RefreshTokenTemporaryDto } from './dto/auth.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/forgot-password.dto'
 import { LoginDto } from './dto/login.dto';
@@ -362,8 +362,11 @@ export class AuthController {
 
   /**
    * Refresh user access and refresh tokens using a valid refresh token.
-   * @param req request object containing authenticated user and request id from RefreshTokenGuard
-   * @param refreshTokenDto body payload containing deviceId
+   *
+   * Takes NO body: the device id lives inside the refresh token and is read from
+   * the verified payload by RefreshTokenGuard (`req.deviceId`), so a caller can
+   * neither omit it nor send one that disagrees with the token it presents.
+   * @param req request carrying the token, account id and device id from the guard
    * @returns new access and refresh tokens
    */
   // 200, not the POST default 201: refreshing mints tokens for an existing
@@ -371,8 +374,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(RefreshTokenGuard)
   @Post('refresh-token')
-  async refreshTokens(@Req() req: any, @Body() refreshTokenDto: RefreshTokenDto) {
-    const tokens = await this.authService.refreshTokens(refreshTokenDto, req.user, req.id);
+  async refreshTokens(@Req() req: any) {
+    const tokens = await this.authService.refreshTokens(req.deviceId, req.user, req.id);
     return { message: 'Tokens refreshed successfully', result: tokens };
   }
 

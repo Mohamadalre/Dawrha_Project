@@ -2,19 +2,18 @@ import { Transform, Type } from 'class-transformer';
 import { IsBoolean, IsEnum, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { NotificationStatus } from '../enums/notification-status.enum';
 import { NotificationType } from '../enums/notification-type.enum';
-import { clampPageParam, MAX_PAGE_LIMIT } from '@src/waste-management/common/dto/pagination.dto';
+import { MAX_PAGE_LIMIT } from '@src/waste-management/common/dto/pagination.dto';
 
 export class NotificationQueryDto {
   @IsOptional()
-  // Floored, defaulted and clamped — pagination never 400s on a bad number, so
-  // a client that over-asks gets the most we serve, not an empty list.
-  @Transform(({ value }) => clampPageParam(value, 1, Number.MAX_SAFE_INTEGER, 1))
+  // Coerced to a number; a non-number ("abc") is a 400, never silently defaulted.
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   page = 1;
 
   @IsOptional()
-  @Transform(({ value }) => clampPageParam(value, 1, MAX_PAGE_LIMIT, 20))
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(MAX_PAGE_LIMIT)

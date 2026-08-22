@@ -152,6 +152,7 @@
   "Truck location fetched successfully": "تم جلب موقع الشاحنة بنجاح",
   "Truck history fetched successfully": "تم جلب سجل الشاحنة بنجاح",
   "Last stop fetched successfully": "تم جلب آخر توقف بنجاح",
+  "Truck handovers fetched successfully": "تم جلب رحلات الشاحنة بنجاح",
   "No Permission": "لا تملك الصلاحية للقيام بهذا الإجراء",
   "Unauthorized": "غير مصرّح",
   "Unauthenticated": "غير موثّق",

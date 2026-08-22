@@ -1,41 +1,30 @@
-import { Transform } from 'class-transformer';
+import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
-/** The largest page size any listing will serve. Bigger requests are CAPPED to
- *  this, never rejected — see `clampPageParam`. */
+/** The largest page size any listing will serve. A larger `limit` is REJECTED
+ *  with a 400, not silently capped, so the caller learns the real bound. */
 export const MAX_PAGE_LIMIT = 100;
 
 /**
- * Floor a query value to an integer and clamp it into [min, max], falling back
- * to `dflt` for anything non-numeric.
+ * Page/limit for every listing, validated as real NUMBERS.
  *
- * The whole point is that pagination NEVER fails on a bad number. A limit above
- * the cap used to be a 400 — and a client that asked for "100 per page" on a
- * 50-cap route got an error and rendered an EMPTY list, which reads to the user
- * as "there is nothing here". Clamping turns "give me 100" into "here are the
- * most I'll serve", which is what the caller actually wanted. `page=0` or
- * `limit=abc` are floored/defaulted the same way instead of blowing up.
+ * `@Type(() => Number)` coerces the query STRING ("15") into a number so a valid
+ * page size works — the bug where an un-coerced `limit=15` failed `@IsInt` and
+ * returned an empty list is closed by that coercion. Anything that is NOT a
+ * number ("abc") becomes NaN and is REJECTED with a clear 400, rather than
+ * silently defaulted — a bad request should be told it is bad, not answered with
+ * the wrong page. `limit` is bounded to [1, MAX_PAGE_LIMIT]: 100 is accepted,
+ * 101+ is a 400 ("limit must not be greater than 100"); `page` starts at 1.
  */
-export function clampPageParam(
-  value: unknown,
-  min: number,
-  max: number,
-  dflt: number,
-): number {
-  const n = Math.floor(Number(value));
-  if (!Number.isFinite(n)) return dflt;
-  return Math.min(Math.max(n, min), max);
-}
-
 export class PaginationQueryDto {
   @IsOptional()
-  @Transform(({ value }) => clampPageParam(value, 1, Number.MAX_SAFE_INTEGER, 1))
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   page: number = 1;
 
   @IsOptional()
-  @Transform(({ value }) => clampPageParam(value, 1, MAX_PAGE_LIMIT, 10))
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(MAX_PAGE_LIMIT)

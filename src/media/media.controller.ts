@@ -16,6 +16,8 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MediaService } from './media.service';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
+import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { AccountsStatus } from '@src/auth/decorators/account-status.decorator';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
@@ -180,15 +182,22 @@ export class MediaController {
   }
 
   /**
-   * Get all images for owner
+   * Get all images for an ARBITRARY owner — ADMIN ONLY.
    *
-   * Returns paginated list of owner's images
+   * This reads any owner's documents by id, so it is gated to the backend admin
+   * (the `admin.accounts.view` permission, which only Role.ADMIN holds). Without
+   * the gate any authenticated account could read every other account's
+   * documents just by passing an owner id. A non-admin who wants their OWN
+   * documents uses `GET /account/images`, which resolves the owner from the
+   * caller's token and cannot reach anyone else's.
    *
    * Example:
    * curl http://localhost:3000/media/owner/123e4567-e89b-12d3-a456-426614174000 \
-   *   -H "Authorization: Bearer <token>"
+   *   -H "Authorization: Bearer <admin-token>"
    */
   @Get('owner/:ownerId')
+  @UseGuards(PermissionsGuard)
+  @Permissions('admin.accounts.view')
   async getOwnerImages(
     @Param('ownerId') ownerId: string,
     @Body('ownerType') ownerType: string,

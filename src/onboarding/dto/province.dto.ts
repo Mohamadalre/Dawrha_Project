@@ -1,6 +1,6 @@
 import { IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
-import { Transform } from 'class-transformer';
-import { clampPageParam, MAX_PAGE_LIMIT } from '@src/waste-management/common/dto/pagination.dto';
+import { Transform, Type } from 'class-transformer';
+import { MAX_PAGE_LIMIT } from '@src/waste-management/common/dto/pagination.dto';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -44,13 +44,14 @@ export class UpdateProvinceDto {
 /** Paging and search for the ADMIN governorate list. */
 export class ListProvincesDto {
   @IsOptional()
-  @Transform(({ value }) => clampPageParam(value, 1, Number.MAX_SAFE_INTEGER, 1))
+  // Coerced to a number; a non-number ("abc") is a 400, never silently defaulted.
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   page?: number = 1;
 
   @IsOptional()
-  @Transform(({ value }) => clampPageParam(value, 1, MAX_PAGE_LIMIT, 20))
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(MAX_PAGE_LIMIT)

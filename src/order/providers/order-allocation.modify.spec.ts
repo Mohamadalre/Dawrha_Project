@@ -2,6 +2,16 @@ import { OrderAllocationService } from './order-allocation.service';
 import { OrderPartStatus } from '../enums/order-part-status.enum';
 import { OrderStatus } from '../enums/order-status.enum';
 
+/** Chainable stub for the stock-holding-warehouse query in buildSupplies. */
+const stockQb = (warehouseIds: string[]) => ({
+  innerJoin: jest.fn().mockReturnThis(),
+  select: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
+  andWhere: jest.fn().mockReturnThis(),
+  groupBy: jest.fn().mockReturnThis(),
+  getRawMany: jest.fn().mockResolvedValue(warehouseIds.map((id) => ({ warehouseId: id }))),
+});
+
 /**
  * The alternatives an admin is shown when they MODIFY a split.
  *
@@ -44,6 +54,7 @@ describe('OrderAllocationService.modificationOptions', () => {
         { warehouseId: 'b', odooProductId: 42, conditionCode: 'GOOD', quantity: '40', reservedQuantity: '0' },
         { warehouseId: 'c', odooProductId: 42, conditionCode: 'GOOD', quantity: '60', reservedQuantity: '0' },
       ]),
+      createQueryBuilder: jest.fn(() => stockQb(['a', 'b', 'c'])),
     };
     const warehouseRepo = {
       find: jest.fn().mockResolvedValue([
@@ -150,6 +161,7 @@ describe('OrderAllocationService.applyModification', () => {
         { warehouseId: 'b', odooProductId: 42, conditionCode: 'GOOD', quantity: '40', reservedQuantity: '0' },
         { warehouseId: 'c', odooProductId: 42, conditionCode: 'GOOD', quantity: '60', reservedQuantity: '0' },
       ]),
+      createQueryBuilder: jest.fn(() => stockQb(['a', 'b', 'c'])),
     };
     const warehouseRepo = {
       find: jest.fn().mockResolvedValue([

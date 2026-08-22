@@ -10,7 +10,7 @@ import {
   Min,
 } from 'class-validator';
 import { PricingTier } from '@src/waste-management/enums/pricing-tier.enum';
-import { clampPageParam, MAX_PAGE_LIMIT } from '@src/waste-management/common/dto/pagination.dto';
+import { MAX_PAGE_LIMIT } from '@src/waste-management/common/dto/pagination.dto';
 
 /**
  * Give the live price list an end date.
@@ -86,13 +86,14 @@ export class PriceHistoryQueryDto {
   as_of?: string;
 
   @IsOptional()
-  @Transform(({ value }) => clampPageParam(value, 1, Number.MAX_SAFE_INTEGER, 1))
+  // Coerced to a number; a non-number ("abc") is a 400, never silently defaulted.
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   page?: number = 1;
 
   @IsOptional()
-  @Transform(({ value }) => clampPageParam(value, 1, MAX_PAGE_LIMIT, 20))
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(MAX_PAGE_LIMIT)

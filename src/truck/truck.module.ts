@@ -48,11 +48,16 @@ import { TruckTrackingController } from './tracking/truck-tracking.controller';
   // decides in Odoo — submit / list mine / cancel-while-pending) and
   // truck-problem reports (read-only for the manager in Odoo).
   controllers: [
+    // TruckTrackingController is registered BEFORE TruckController on purpose:
+    // both live on `/trucks`, and TruckController's `@Get(':id')` (UUID pipe)
+    // would otherwise shadow the literal `@Get('active')` here — making
+    // `/trucks/active` fail with "uuid is expected". Registering the literal
+    // routes first lets Express match `active` before the `:id` catch-all.
+    TruckTrackingController,
     TruckController,
     DriverController,
     ShiftChangeRequestController,
     TruckProblemController,
-    TruckTrackingController,
   ],
   providers: [
     TruckService,

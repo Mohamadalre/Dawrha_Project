@@ -4,6 +4,7 @@ import { Not, Repository } from 'typeorm';
 import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
+import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
 import { TruckHandover } from './entities/truck-handover.entity';
 import { TruckAssignmentEntity } from './entities/truck-assignment.entity';
 import { HandoverStatus } from './enums/handover-status.enum';
@@ -124,6 +125,55 @@ export class HandoverService {
       assigned_truck: assignment?.truck
         ? { truck_id: assignment.truck.id, plate_number: assignment.truck.plateNumber }
         : null,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Admin: a truck's handover sessions (its trips) — start + end points
+  // ---------------------------------------------------------------------------
+  /**
+   * The completed and in-progress trips of one truck, newest first, for the
+   * admin tracking dashboard. Each session carries WHO drove it and the trip's
+   * START (pickup point + time) and END (dropoff point + time + note) — the two
+   * ends the live position and last-stop views do not, on their own, tell.
+   */
+  async listForTruck(truckId: string, page: number, limit: number) {
+    const [rows, total] = await this.handoverRepo.findAndCount({
+      where: { truckId },
+      relations: ['driver', 'driver.account', 'shift'],
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+    return {
+      handovers: rows.map((h) => this.serializeForAdmin(h)),
+      pagination: buildPagination(total, page, limit),
+    };
+  }
+
+  /** One trip as the admin reads it: driver + start point + end point. */
+  private serializeForAdmin(h: TruckHandover) {
+    const driverAccount = (h as any).driver?.account;
+    return {
+      handover_id: h.id,
+      status: h.status,
+      driver: (h as any).driver
+        ? { driver_id: h.driverId, name: driverAccount?.name ?? null }
+        : { driver_id: h.driverId, name: null },
+      shift_id: h.shiftId,
+      work_date: h.workDate,
+      // The trip's two ends, each as one object (or null when it hasn't happened).
+      start: h.pickedUpAt
+        ? { at: h.pickedUpAt, location: coordsOf(h.pickupLat, h.pickupLng) }
+        : null,
+      end: h.droppedOffAt
+        ? {
+            at: h.droppedOffAt,
+            location: coordsOf(h.dropoffLat, h.dropoffLng),
+            reason: h.dropoffReason ?? null,
+          }
+        : null,
+      late_dropoff_minutes: h.lateDropoffMinutes ?? null,
     };
   }
 

@@ -28,6 +28,11 @@ export class RefreshTokenGuard implements CanActivate {
                 }
                 request['user'] = token;
                 request['id'] = account.id
+                // The device is stamped INTO the refresh token at issue time, so
+                // the caller never needs to (and no longer may) send it in the
+                // body — it is read from the verified payload, where it cannot be
+                // spoofed to refresh another device's session.
+                request['deviceId'] = payload.deviceId
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (error) {
                 throw new UnauthorizedException("invalid token")
