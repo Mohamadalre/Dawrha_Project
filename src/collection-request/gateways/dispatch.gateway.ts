@@ -57,6 +57,11 @@ export class DispatchGatewayEvents implements OnGatewayConnection, OnGatewayDisc
   /** socketId → nearby subscription params (user is watching nearby drivers) */
   private readonly nearbySubscriptions = new Map<string, NearbySubscription>();
 
+  /** throttle for nearby re-push (ms): collapses bursts into one recompute */
+  private pushTimer: NodeJS.Timeout | null = null;
+  private lastPushAt = 0;
+  private readonly PUSH_THROTTLE_MS = 1000;
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
@@ -148,6 +153,7 @@ export class DispatchGatewayEvents implements OnGatewayConnection, OnGatewayDisc
   }
 
   @SubscribeMessage('user:nearby_drivers')
+  @SubscribeMessage('nearby_drivers')
   async onNearbyDrivers(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { lat?: number; lng?: number; radius_km?: number },
@@ -155,11 +161,25 @@ export class DispatchGatewayEvents implements OnGatewayConnection, OnGatewayDisc
     const user: SocketUser | undefined = client.data.user;
     if (!user) return { status: 'error', message: 'Unauthenticated' };
     if (user.role !== Role.CITIZEN) return { status: 'error', message: 'Forbidden' };
-    if (data?.lat == null || data?.lng == null) {
-      return { status: 'error', message: 'lat and lng are required' };
+    if (
+      data?.lat == null ||
+      data?.lng == null ||
+      typeof data.lat !== 'number' ||
+      typeof data.lng !== 'number' ||
+      Number.isNaN(data.lat) ||
+      Number.isNaN(data.lng) ||
+      data.lat < -90 ||
+      data.lat > 90 ||
+      data.lng < -180 ||
+      data.lng > 180
+    ) {
+      return {
+        status: 'error',
+        message: 'lat and lng must be numbers within valid geo ranges',
+      };
     }
 
-    const radiusKm = data.radius_km ?? 10;
+    const radiusKm = Math.min(Math.max(data.radius_km ?? 10, 1), 50);
     this.nearbySubscriptions.set(client.id, { lat: data.lat, lng: data.lng, radiusKm });
 
     const zones = await this.coverageService.findNearbyZones(data.lat, data.lng, radiusKm);
@@ -167,6 +187,7 @@ export class DispatchGatewayEvents implements OnGatewayConnection, OnGatewayDisc
   }
 
   @SubscribeMessage('user:unsubscribe_nearby')
+  @SubscribeMessage('unsubscribe_nearby')
   async onUnsubscribeNearby(@ConnectedSocket() client: Socket) {
     this.nearbySubscriptions.delete(client.id);
     return { status: 'ok' };
@@ -201,14 +222,30 @@ export class DispatchGatewayEvents implements OnGatewayConnection, OnGatewayDisc
 
   /**
    * Re-push nearby drivers to all users who are actively watching.
-   * Call this when a driver's availability changes (accepts/rejects request,
-   * finishes tour, becomes idle, etc.).
+   * Throttled so a burst of driver/truck events collapses into at most one
+   * recompute per PUSH_THROTTLE_MS.
    */
   async pushNearbyDriversUpdate(): Promise<void> {
+    if (this.pushTimer) return;
+    const elapsed = Date.now() - this.lastPushAt;
+    if (elapsed >= this.PUSH_THROTTLE_MS) {
+      this.lastPushAt = Date.now();
+      await this.runNearbyPush();
+    } else {
+      this.pushTimer = setTimeout(() => {
+        this.pushTimer = null;
+        this.lastPushAt = Date.now();
+        void this.runNearbyPush();
+      }, this.PUSH_THROTTLE_MS - elapsed);
+    }
+  }
+
+  private async runNearbyPush(): Promise<void> {
     for (const [socketId, sub] of this.nearbySubscriptions) {
       try {
         const zones = await this.coverageService.findNearbyZones(sub.lat, sub.lng, sub.radiusKm);
         this.server?.to(socketId).emit('user:nearby_update', { zones });
+        this.server?.to(socketId).emit('nearby_update', { zones });
       } catch {
         // socket may have disconnected — will be cleaned up on disconnect
       }
@@ -217,6 +254,16 @@ export class DispatchGatewayEvents implements OnGatewayConnection, OnGatewayDisc
 
   @OnEvent('collection.driver.freed')
   async onDriverFreed(): Promise<void> {
+    await this.pushNearbyDriversUpdate();
+  }
+
+  @OnEvent('collection.request.assigned')
+  async onRequestAssigned(): Promise<void> {
+    await this.pushNearbyDriversUpdate();
+  }
+
+  @OnEvent('collection.request.cancelled')
+  async onRequestCancelled(): Promise<void> {
     await this.pushNearbyDriversUpdate();
   }
 

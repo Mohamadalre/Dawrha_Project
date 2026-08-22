@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
-import { OnEvent } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Queue } from 'bullmq';
@@ -92,6 +92,7 @@ export class DispatchEngineService {
     private readonly events: DispatchGatewayEvents,
     private readonly notifications: NotificationService,
     private readonly shipmentService: ShipmentService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -697,6 +698,10 @@ export class DispatchEngineService {
     request.routeSequence = fullIndex + 1;
     this.state.applyRequestStatus(request, CollectionRequestStatus.ASSIGNED);
     await this.requestRepo.save(request);
+    this.eventEmitter.emit('collection.request.assigned', {
+      driverId: route.driverId,
+      requestId: request.id,
+    });
 
     // The driver's app learns about the merged stop directly; the producer
     // gets the usual assignment push.
@@ -769,6 +774,10 @@ export class DispatchEngineService {
     request.routeSequence = (maxSeq ?? 0) + 1;
     this.state.applyRequestStatus(request, CollectionRequestStatus.ASSIGNED);
     await this.requestRepo.save(request);
+    this.eventEmitter.emit('collection.request.assigned', {
+      driverId,
+      requestId: request.id,
+    });
   }
 
   private async loadLocations(candidates: DriverCandidate[]): Promise<Map<string, LiveLocation>> {
