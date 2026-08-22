@@ -269,6 +269,7 @@ export class UserService {
     );
 
     const previous = this.cloudinaryPublicId(account.profileImage);
+    console.log('previous', previous, account.profileImage, uploaded.imageUrl);
     account.profileImage = uploaded.imageUrl;
     await this.accountRepository.save(account);
     await this.userCache.invalidate(accountId, 'profile');

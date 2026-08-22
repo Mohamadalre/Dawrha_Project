@@ -24,6 +24,7 @@ import { CloudinaryService } from './cloudinary.service';
           cloud_name: configService.get<string>('CLOUDINARY_CLOUD_NAME'),
           api_key: configService.get<string>('CLOUDINARY_API_KEY'),
           api_secret: configService.get<string>('CLOUDINARY_API_SECRET'),
+          timeout: 60000, // Set timeout to 60 seconds
         });
 
         return cloudinary;
