@@ -15,9 +15,8 @@ import { TruckHandover } from '@src/truck/entities/truck-handover.entity';
 import { HandoverStatus } from '@src/truck/enums/handover-status.enum';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 import { ShipmentStatus } from '../enums/shipment-status.enum';
-import {
-  CollectionRequestStatus,
-} from '../enums/collection-request-status.enum';
+import { CollectionRequestStatus } from '../enums/collection-request-status.enum';
+import { DispatchGatewayEvents } from '../gateways/dispatch.gateway';
 import {
   canTransitionShipment,
 } from '../enums/shipment-status.enum';
@@ -42,6 +41,7 @@ export class ShipmentService {
     private readonly handoverRepo: Repository<TruckHandover>,
     @InjectRepository(Warehouse)
     private readonly warehouseRepo: Repository<Warehouse>,
+    private readonly events: DispatchGatewayEvents,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -246,6 +246,83 @@ export class ShipmentService {
     for (const r of requests) {
       r.status = CollectionRequestStatus.PICKING;
       r.shipmentId = null as any;
+    }
+    await this.requestRepo.save(requests);
+
+    return this.serialize(shipment);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public — no auth required
+  // ---------------------------------------------------------------------------
+
+  /** Public shipment detail: lookup by ID only (no owner check). */
+  async publicDetail(shipmentId: string) {
+    const shipment = await this.shipmentRepo.findOne({
+      where: { id: shipmentId },
+      relations: ['warehouse', 'requests'],
+    });
+    if (!shipment) throw new NotFoundException('Shipment not found');
+
+    const requests = await this.requestRepo.find({
+      where: { shipmentId: shipment.id },
+      relations: ['lines'],
+      order: { routeSequence: 'ASC' },
+    });
+
+    return {
+      ...this.serialize(shipment),
+      requests: requests.map((r) => ({
+        id: r.id,
+        request_number: r.requestNumber,
+        status: r.status,
+        route_sequence: r.routeSequence,
+        actual_weight_kg: r.actualWeightKg,
+        estimated_weight_kg: r.estimatedWeightKg,
+        lines: (r.lines || []).map((l) => ({
+          product_name: l.productName,
+          quantity: l.quantity,
+          unit_type: l.unitType,
+        })),
+      })),
+    };
+  }
+
+  /** Public deliver: IN_TRANSIT → DELIVERED (no owner check, no auth). */
+  async publicDeliver(shipmentId: string, dto: DeliverShipmentDto) {
+    const shipment = await this.shipmentRepo.findOne({
+      where: { id: shipmentId },
+    });
+    if (!shipment) throw new NotFoundException('Shipment not found');
+
+    this.guardTransition(shipment.status, ShipmentStatus.DELIVERED);
+
+    const now = new Date();
+
+    if (!shipment.warehouseId && dto.warehouseId) {
+      shipment.warehouseId = dto.warehouseId;
+    }
+
+    const requests = await this.requestRepo.find({
+      where: { shipmentId: shipment.id },
+    });
+
+    shipment.status = ShipmentStatus.DELIVERED;
+    shipment.deliveredAt = now;
+    shipment.totalRequests = requests.length;
+    shipment.totalWeightKg = String(
+      requests.reduce(
+        (sum, r) => sum + (parseFloat(r.actualWeightKg || r.estimatedWeightKg) || 0),
+        0,
+      ),
+    );
+    if (dto.notes) shipment.notes = dto.notes;
+    await this.shipmentRepo.save(shipment);
+
+    for (const r of requests) {
+      r.status = CollectionRequestStatus.COMPLETED;
+      r.completedAt = now;
+      r.deliveredAt = r.deliveredAt || now;
     }
     await this.requestRepo.save(requests);
 
