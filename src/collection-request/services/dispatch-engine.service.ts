@@ -11,6 +11,7 @@ import { winstonLogger } from '@src/core/logger-config/winston.config';
 import { CollectionRequest } from '../entities/collection-request.entity';
 import { CollectionRequestAssignment } from '../entities/collection-request-assignment.entity';
 import { ShipmentService } from './shipment.service';
+import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
 import {
   CollectionRequestNotFoundException,
   CollectionRequestInvalidTransitionException,
@@ -83,6 +84,8 @@ export class DispatchEngineService {
     private readonly assignmentRepo: Repository<CollectionRequestAssignment>,
     @InjectRepository(CollectionRoute)
     private readonly routeRepo: Repository<CollectionRoute>,
+    @InjectRepository(TruckAssignmentEntity)
+    private readonly truckAssignmentRepo: Repository<TruckAssignmentEntity>,
     private readonly state: CollectionStateService,
     private readonly configProvider: DispatchConfigProvider,
     private readonly candidates: DispatchCandidatesService,
@@ -154,6 +157,82 @@ export class DispatchEngineService {
       order: { createdAt: 'ASC' },
     });
     if (request) await this.elect(request.id);
+  }
+
+  /**
+   * Synchronous election: picks the best available driver immediately without
+   * creating an offer or going through BullMQ. Used by the synchronous dispatch
+   * flow in collection-request.service where the driver is pre-assigned at
+   * creation time. Returns null when no eligible driver is found.
+   *
+   * When a merge into an active route succeeds (tryMergeRequest returns true),
+   * the request is already bound — the caller does NOT need to call settleOffer;
+   * instead it returns `{ merged: true, driverId }` so the caller can load the
+   * profile directly.
+   */
+  async electSynchronous(
+    request: CollectionRequest,
+  ): Promise<{ candidate: DriverCandidate; score: number } | { merged: true; driverId: string } | null> {
+    const config = await this.configProvider.get();
+    if (!config.isEnabled) return null;
+
+    if (await this.tryMergeRequest(request, config)) {
+      const route = await this.routeRepo.findOne({
+        where: { id: request.routeId! },
+      });
+      return route ? { merged: true, driverId: route.driverId } : null;
+    }
+
+    const pool = await this.candidates.findEligible(request, config);
+    if (!pool.length) return null;
+
+    const locations = await this.loadLocations(pool);
+    const ranked = pool
+      .map((candidate) => ({
+        candidate,
+        score: this.score(candidate, request, config, locations.get(candidate.truckId)),
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    return { candidate: ranked[0].candidate, score: ranked[0].score };
+  }
+
+  /**
+   * Loads the full driver profile for a candidate, including name, phone,
+   * truck details, and shift window. Returns a plain object suitable for
+   * the API response.
+   */
+  async loadCandidateProfile(candidate: DriverCandidate) {
+    const profileRepo = this.requestRepo.manager.getRepository('CollectorProfile');
+    const profile = await profileRepo.findOne({
+      where: { id: candidate.driverId },
+      relations: ['account', 'assignment', 'assignment.truck', 'shift'],
+    });
+    if (!profile) return null;
+
+    return {
+      driver_id: profile.id,
+      account_id: candidate.accountId,
+      name: profile.account?.name ?? null,
+      phone: profile.account?.phone ?? null,
+      truck: profile.assignment?.truck
+        ? {
+            id: profile.assignment.truck.id,
+            plate_number: profile.assignment.truck.plateNumber,
+            model: profile.assignment.truck.model,
+            max_payload_kg: Number(profile.assignment.truck.maxPayloadKg),
+          }
+        : null,
+      shift: profile.shift
+        ? {
+            start: profile.shift.startTime,
+            end: profile.shift.endTime,
+          }
+        : null,
+      active_tasks: candidate.activeTasks,
+      completed_today: candidate.completedToday,
+      score: null as number | null,
+    };
   }
 
   /**
@@ -334,6 +413,9 @@ export class DispatchEngineService {
         request,
       );
 
+      // Track truck→request mapping for live GPS forwarding to users.
+      await this.trackRequestForDriver(request.id, assignment.driverId);
+
       this.events.announceToRequest(
         request.id,
         'request:status',
@@ -365,6 +447,7 @@ export class DispatchEngineService {
     for (const assignment of assignments) {
       await this.clearOfferKeys(assignment);
     }
+    await this.untrackRequest(request.id);
     this.events.announceToRequest(
       request.id,
       'request:status',
@@ -638,6 +721,9 @@ export class DispatchEngineService {
       request,
     );
 
+    // Track truck→request for live GPS forwarding to user.
+    await this.trackRequestForDriver(request.id, route.driverId);
+
     winstonLogger.info(
       `Collection request ${request.requestNumber}: merged into route ${route.routeNumber} of ${route.driverId} (stop ${fullIndex + 1})`,
       LOG_META,
@@ -708,6 +794,46 @@ export class DispatchEngineService {
       .del(DISPATCH_REDIS.offerKey(assignment.id))
       .del(DISPATCH_REDIS.driverOfferKey(assignment.driverId))
       .exec();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Truck → request tracking (for live GPS forwarding to users)
+  // ---------------------------------------------------------------------------
+  async trackRequestForDriver(requestId: string, driverId: string): Promise<void> {
+    try {
+      const assignment = await this.truckAssignmentRepo.findOne({
+        where: { driverId },
+        select: ['truckId'],
+      });
+      if (!assignment) return;
+
+      const truckKey = DISPATCH_REDIS.truckRequestsKey(assignment.truckId);
+      const mapKey = DISPATCH_REDIS.requestTruckKey();
+      await this.redis
+        .multi()
+        .sadd(truckKey, requestId)
+        .hset(mapKey, requestId, assignment.truckId)
+        .exec();
+    } catch (err) {
+      this.logger.warn('trackRequestForDriver failed', err as Error);
+    }
+  }
+
+  async untrackRequest(requestId: string): Promise<void> {
+    try {
+      const mapKey = DISPATCH_REDIS.requestTruckKey();
+      const truckId = await this.redis.hget(mapKey, requestId);
+      if (!truckId) return;
+
+      const truckKey = DISPATCH_REDIS.truckRequestsKey(truckId);
+      await this.redis
+        .multi()
+        .srem(truckKey, requestId)
+        .hdel(mapKey, requestId)
+        .exec();
+    } catch (err) {
+      this.logger.warn('untrackRequest failed', err as Error);
+    }
   }
 
   private async enqueueElect(requestId: string): Promise<void> {
