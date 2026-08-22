@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>دليل الفلوات — دورها</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="inner">
+    <div class="logo"><span class="dot">د</span> دورها <span class="badge blue" style="font-size:11px">دليل الفلوات التفصيلي</span></div>
+    <div class="grow"></div>
+    <a href="index.html" class="btn ghost" style="padding:6px 14px">الفهرس</a>
+  </div>
+</header>
+
+<main class="container wide">
+  <h1 style="font-size:24px; margin:22px 0 6px">📘 دورة العمليات التفصيلية — كيف يعمل دورها؟</h1>
+  <p class="muted" style="max-width:820px">هذا الدليل يشرح كل فلو (سير عمل) خطوة بخطوة: الفاعل، حالة النظام، النداء الفعلي للـ API، <b>والشاشة المقابلة من نماذج الواجهات</b> التي بُنيت في هذا المجلد — بحيث يمكنك «المشي» في الفلو بفتح كل شاشة بالترتيب.</p>
+
+  <div class="flow-legend">
+    <div class="fnode user"><span class="flabel">👤 المستخدم</span></div>
+    <div class="fnode driver"><span class="flabel">🚛 السائق</span></div>
+    <div class="fnode admin"><span class="flabel">🖥️ الأدمن</span></div>
+    <div class="fnode odoo"><span class="flabel">🗄️ Odoo</span></div>
+    <div class="fnode system"><span class="flabel">⚙️ محرك النظام</span></div>
+    <div class="fnode decide"><span class="flabel">◆ قرار / شرط</span></div>
+  </div>
+
+  <div class="card">
+    <h3>محتويات الدليل</h3>
+    <div class="toc">
+      <a href="#flow1">١ · دورة الطلب الكاملة <small>مستخدم → فرز → سائق → مستودع</small></a>
+      <a href="#flow2">٢ · خطة المؤسسة ORG_PLAN</a>
+      <a href="#flow3">٣ · انضمام سائق جديد <small>Onboarding + اعتماد Odoo</small></a>
+      <a href="#flow4">٤ · إدارة السائق والوردية <small>تغيير وردية · مشاكل · استلام الشاحنة</small></a>
+      <a href="#flow5">٥ · الإسناد اليدوي من الأدمن <small>NEEDS_ADMIN</small></a>
+      <a href="#flow6">٦ · التتبع المباشر للشاحنات <small>Socket.IO</small></a>
+      <a href="#flow7">٧ · النقاط والمحفظة</a>
+      <a href="#map">🗺️ خريطة الشاشات ← مسارات الـ API</a>
+    </div>
+  </div>
+
+  <!-- ============ FLOW 1 ============ -->
+  <div class="flow-box" id="flow1">
+    <h3>١ · دورة الطلب الكاملة: من إنشاء المستخدم حتى التسليم للمستودع</h3>
+    <div class="sub">الفلو الأهم في النظام — يجمع الأطراف الأربعة (مستخدم / محرك التوزيع / سائق / مستودع) مع مزامنة Odoo في كل مرحلة.</div>
+
+    <div class="flow">
+      <div class="fnode user">
+        <span class="flabel">1️⃣ المستخدم ينشئ طلب جمع (فوري أو مجدول)</span>
+        <div class="fmeta">يختار المنتجات والكميات والعنوان — تُحسب القيمة التقديرية من الأسعار والكميات</div>
+        <div class="fstate"><span class="endpoint">POST /api/v1/collection-requests</span><span class="badge gray">QUEUED</span></div>
+        <a class="fscreen" href="user/new-request.html">📱 شاشة إنشاء الطلب</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode system decide">
+        <span class="flabel">2️⃣ محرك التوزيع يفحص «من يستطيع خدمة هذا الطلب الآن؟»</span>
+        <div class="fmeta">5 شروط إلزامية: حساب ACTIVE · شاحنة مُسندة وغير معطلة · وردية نشطة تغطي الوقت الحالي · السائق غير منشغل · السعة المتبقية ≥ الوزن التقديري</div>
+        <div class="fstate"><span class="endpoint">dispatch-candidates.service — findEligible()</span></div>
+      </div>
+      <div class="fsplit vertical">
+        <div class="fnode driver">
+          <span class="flabel">سائقون مؤهلون ✔</span>
+          <div class="fmeta">يُفتح عرض Offer للسائق الأعلى ترتيبًا بنافذة قبول (300 ثانية افتراضيًا)</div>
+          <div class="fstate"><span class="endpoint">socket /collection → request:assigned</span><span class="badge amber">OFFERED</span></div>
+          <a class="fscreen" href="driver/tour.html">📱 شاشة الجولة — بطاقة العرض</a>
+        </div>
+        <div class="fnode admin">
+          <span class="flabel">لا يوجد مؤهل ✖</span>
+          <div class="fmeta">لا أحد يستوفي الشروط → الطلب ينتظر تدخل الأدمن (إسناد يدوي أو انتظار)</div>
+          <div class="fstate"><span class="endpoint">socket → request:needs_admin</span><span class="badge amber">NEEDS_ADMIN</span></div>
+          <a class="fscreen" href="admin/requests.html">📱 شاشة طلبات الجمع (الأدمن)</a>
+        </div>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode system">
+        <span class="flabel">3️⃣ قبول العرض = إسناد وبناء الجولة</span>
+        <div class="fmeta">يُسند الطلب للسائق، تُنشأ الرحلة (ROUTE) وتُرتب المحطات، ويُبلَّغ المستخدم بوصول سائق له</div>
+        <div class="fstate"><span class="badge blue">ASSIGNED</span><span class="badge blue">PLANNED</span></div>
+        <a class="fscreen" href="driver/tour.html">📱 الجولة بعد الإسناد — قائمة المحطات</a>
+        <a class="fscreen" href="user/requests.html">📱 طلباتي — شريط التقدم لحظيًا</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode driver">
+        <span class="flabel">4️⃣ السائق يتوجه إلى المحطة ويُعلن وصوله</span>
+        <div class="fmeta">الضغط على «وصلت» يوثّق أوقات الانطلاق والوصول ويبثّ الحالة الجديدة للمستخدم</div>
+        <div class="fstate"><span class="endpoint">PATCH /api/v1/driver/collection-requests/:id/arrived</span><span class="badge blue">EN_ROUTE → ARRIVED</span></div>
+        <a class="fscreen" href="driver/tour.html">📱 زر «وصلت»</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode driver">
+        <span class="flabel">5️⃣ وزن الكميات على الميزان وتسجيل الوزن الفعلي</span>
+        <div class="fmeta">يُثبَّت الوزن الفعلي — أساس الدفع النهائي — ويُدفع Job <b>REGISTER_INTAKE</b> إلى Odoo لتسجيل الوارد (idempotent)</div>
+        <div class="fstate"><span class="endpoint">PATCH .../collected { actualWeightKg }</span><span class="badge amber">PICKING</span></div>
+        <a class="fscreen" href="driver/tour.html">📱 حقل الوزن + زر «سجّل الوزن»</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode driver">
+        <span class="flabel">6️⃣ تسليم الكمية للمستودع</span>
+        <div class="fmeta">تسليم إما لمستودع محدد (warehouse_id) أو لمقر الانطلاق — تُسجَّل لحظة التسليم ويُحرَّر السائق</div>
+        <div class="fstate"><span class="endpoint">PATCH .../delivered { warehouse_id? }</span><span class="badge green">DELIVERED</span></div>
+        <a class="fscreen" href="driver/tour.html">📱 زر «سُلّمت»</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode system">
+        <span class="flabel">7️⃣ اكتمال الجولة وإغلاق الطلب</span>
+        <div class="fmeta">عند إغلاق آخر محطة تُكتمل الرحلة ثم الطلب، يُكافأ المستخدم بالنقاط، ويُشعر الطرفان، وتُحدَّث مخزونات Odoo</div>
+        <div class="fstate"><span class="badge green">COMPLETED</span><span class="endpoint">PointsWallet · registerIntake</span></div>
+        <a class="fscreen" href="user/requests.html">📱 الطلب المكتمل بوزنه الفعلي وقيمته</a>
+        <a class="fscreen" href="admin/requests.html">📱 جدول الطلبات لدى الأدمن</a>
+      </div>
+    </div>
+
+    <h4 style="margin-top:14px">جدول الخطوات بالتفصيل</h4>
+    <div class="table-wrap">
+      <table class="flow-step-table">
+        <tr><th>#</th><th>الخطوة</th><th>الفاعل</th><th>الحالة</th><th>الـ API</th><th>شاشة الواجهة</th></tr>
+        <tr><td>1</td><td>إنشاء الطلب مع المنتجات والكميات</td><td>المستخدم</td><td>QUEUED</td><td>POST /collection-requests</td><td><a href="user/new-request.html">new-request.html</a></td></tr>
+        <tr><td>2</td><td>فحص أهلية السائقين (5 شروط)</td><td>محرك التوزيع</td><td>—</td><td>findEligible()</td><td>—</td></tr>
+        <tr><td>3أ</td><td>عرض الطلب على السائق الأعلى ترتيبًا</td><td>محرك التوزيع</td><td>OFFERED</td><td>socket: request:assigned</td><td><a href="driver/tour.html">tour.html (بطاقة العرض)</a></td></tr>
+        <tr><td>3ب</td><td>لا مؤهل → ينتظر تدخل الأدمن</td><td>محرك التوزيع</td><td>NEEDS_ADMIN</td><td>socket: request:needs_admin</td><td><a href="admin/requests.html">requests.html (الأدمن)</a></td></tr>
+        <tr><td>4</td><td>قبول العرض → إسناد + إنشاء رحلة</td><td>السائق / النظام</td><td>ASSIGNED</td><td>PATCH .../:id/accept</td><td><a href="driver/tour.html">tour.html</a> · <a href="user/requests.html">requests.html</a></td></tr>
+        <tr><td>5</td><td>الوصول إلى موقع المنتج</td><td>السائق</td><td>EN_ROUTE → ARRIVED</td><td>PATCH .../:id/arrived</td><td><a href="driver/tour.html">tour.html (وصلت)</a></td></tr>
+        <tr><td>6</td><td>الوزن الفعلي (أساس الدفع)</td><td>السائق</td><td>PICKING</td><td>PATCH .../:id/collected {actualWeightKg}</td><td><a href="driver/tour.html">tour.html (سجّل الوزن)</a></td></tr>
+        <tr><td>7</td><td>تسليم المستودع + Job وارد إلى Odoo</td><td>السائق</td><td>DELIVERED</td><td>PATCH .../:id/delivered</td><td><a href="driver/tour.html">tour.html (سُلّمت)</a></td></tr>
+        <tr><td>8</td><td>إغلاق الرحلة والطلب + النقاط + الإشعار</td><td>النظام</td><td>COMPLETED</td><td>REGISTER_INTAKE · PointsWallet</td><td><a href="user/requests.html">requests.html</a></td></tr>
+      </table>
+    </div>
+
+    <div class="flow-note ok"><b>ملاحظات تطبيقية:</b> الإسناد اليدوي يُلغي مرحلة العرض — يُسند الطلب مباشرة للسائق المؤهل. مهلة القبول = accept_window_sec (افتراضي 300ث) من إعدادات التوزيع. الطلب يُعاد تقييمه تلقائيًا عند أي تغيير (سائق حرّ، محطة، شاحنة).</div>
+  </div>
+
+  <!-- ============ FLOW 2 ============ -->
+  <div class="flow-box" id="flow2">
+    <h3>٢ · خطة المؤسسة (ORG_PLAN) — تخطيط الجمع لمؤسسة</h3>
+    <div class="sub">المؤسسة تخطّط عدة طلبات دفعة واحدة في خطة واحدة — محرك التوزيع يلتقط كل سطر ويولّد منه طلبًا يسلك دورة الفلو ١ كاملة.</div>
+
+    <div class="flow">
+      <div class="fnode user">
+        <span class="flabel">1️⃣ المؤسسة تُنشئ الخطة</span>
+        <div class="fmeta">خطة جمع (مثلاً: جمع أسبوعي من 5 فروع) مع أسطر كل منها: منتج، كمية، عنوان، موعد</div>
+        <div class="fstate"><span class="endpoint">POST /api/v1/collection-plans</span><span class="badge gray">DRAFT</span></div>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode system">
+        <span class="flabel">2️⃣ النظام يولد طلبًا لكل سطر</span>
+        <div class="fmeta">كل سطر → طلب من نوع ORG_PLAN بموعد مجدول — تُحسب القيم التقديرية من الأسعار</div>
+        <div class="fstate"><span class="badge gray">SCHEDULED → QUEUED</span></div>
+        <a class="fscreen" href="user/new-request.html">📱 نوع الطلب «خطة مؤسسة ORG_PLAN»</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode system decide">
+        <span class="flabel">3️⃣ نفس محرك التوزيع تمامًا</span>
+        <div class="fmeta">مع موعد مجدول: يُعرض الطلب قبل الموعد على السائقين المؤهلين — لا فرق في آليات الفرز والعرض والإسناد</div>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode driver">
+        <span class="flabel">4️⃣ … ثم تسلك كل دورة الفلو ١</span>
+        <div class="fmeta">قبول → وصول → وزن → تسليم → COMPLETED</div>
+        <div class="fstate"><a href="#flow1" style="font-weight:700">← ارجع إلى الفلو ١</a></div>
+        <a class="fscreen" href="admin/requests.html">📱 الطلبات المولّدة تظهر عند الأدمن (نوع ORG_PLAN)</a>
+      </div>
+    </div>
+
+    <div class="flow-note"><b>لماذا تُفصل الخطة عن الطلبات؟</b> الخطة كيان تخطيطي (تتبع المطالبات والتعديلات والإلغاء) أما الطلبات فهي الوحدات التشغيلية التي يتعامل معها محرك التوزيع والسائق. تعديل خطة نشطة يعيد تقييم طلباتها.</div>
+  </div>
+
+  <!-- ============ FLOW 3 ============ -->
+  <div class="flow-box" id="flow3">
+    <h3>٣ · انضمام سائق جديد: Onboarding + اعتماد Odoo</h3>
+    <div class="sub">السائق يبني ملفه عبر التطبيق، ثم يُنشأ في Odoo، والأدمن لا يستطيع الموافقة عليه مباشرة — القرار يأتي من Odoo عبر Webhook.</div>
+
+    <div class="flow">
+      <div class="fnode driver">
+        <span class="flabel">1️⃣ تسجيل + تحقق OTP</span>
+        <div class="fmeta">تسجيل الدخول برقم هاتف وبريد — الحساب يولد INACTIVE ثم يُفعَّل عبر رمز التحقق</div>
+        <div class="fstate"><span class="endpoint">POST /api/v1/auth/register/collector</span><span class="badge red">INACTIVE → PENDING_PROFILE</span></div>
+        <a class="fscreen" href="driver/login.html">📱 دخول السائق</a>
+        <a class="fscreen" href="user/otp.html">📱 شاشة التحقق OTP (نفس النموذج)</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode driver">
+        <span class="flabel">2️⃣ المعلومات الشخصية + موقع العمل</span>
+        <div class="fmeta">الاسم والهاتف ثم اختيار المحافظة والعنوان النصي (المعرّف الفعلي للمحافظة يصل من قائمة المحافظات)</div>
+        <div class="fstate"><span class="endpoint">POST /api/v1/onboarding/collector/information</span><br><span class="endpoint">POST /api/v1/onboarding/collector/location { address, provinceId }</span></div>
+        <a class="fscreen" href="driver/onboarding.html">📱 خطوتا المعلومات والموقع</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode driver">
+        <span class="flabel">3️⃣ رفع الوثائق (multipart)</span>
+        <div class="fmeta">وجه الهوية الأمامي والخلفي + رخصة القيادة — تُرفع لـ Cloudinary وتُسجَّل بحالة PENDING</div>
+        <div class="fstate"><span class="endpoint">POST /api/v1/onboarding/collector/upload-doc { fileType }</span><span class="badge amber">PENDING</span></div>
+        <a class="fscreen" href="driver/onboarding.html">📱 خطوة الوثائق</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode odoo">
+        <span class="flabel">4️⃣ إنشاء السائق في Odoo (PUSH_DRIVER_REQUEST)</span>
+        <div class="fmeta">Job يُنشئ السائق في Odoo مع وثائقه — من هذه اللحظة يدير Odoo دورة حياته</div>
+        <div class="fstate"><span class="endpoint">odo-sync → recycle.driver.*</span></div>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode odoo decide">
+        <span class="flabel">5️⃣ قرار Odoo عبر Webhook</span>
+        <div class="fmeta">موافقة = ACTIVE مع شاحنة ووردية ومستودع · رفض = REJECTED · طلب تعديل = NEED_CHANGES + إعادة رفع مستندات مرفوضة فقط</div>
+        <div class="fstate"><span class="endpoint">POST /api/v1/odoo/webhooks/driver-decision { backend_driver_id, approved, truck_odoo_id, shift_odoo_id }</span></div>
+      </div>
+      <div class="fsplit vertical">
+        <div class="fnode driver">
+          <span class="flabel">موافقة ✔</span>
+          <div class="fmeta">ACTIVE + إنشاء إسناد الشاحنة (assignment) + تعيين الوردية → السائق يبدأ العمل</div>
+          <div class="fstate"><span class="badge green">ACTIVE</span></div>
+          <a class="fscreen" href="driver/home.html">📱 الرئيسية — الشاحنة والوردية</a>
+          <a class="fscreen" href="admin/accounts.html">📱 الحسابات لدى الأدمن (السائقون في Odoo)</a>
+        </div>
+        <div class="fnode driver">
+          <span class="flabel">طلب تعديل ✎</span>
+          <div class="fmeta">المستندات المرفوضة فقط تُعاد عبر إعادة الرفع — لا يبدأ من الصفر</div>
+          <div class="fstate"><span class="badge purple">NEED_CHANGES</span><span class="endpoint">PATCH /api/v1/media/:id/reupload</span></div>
+          <a class="fscreen" href="driver/profile.html">📱 ملفي — قسم الوثائق</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-note warn"><b>مهم:</b> محاولة الأدمن تغيير حالة سائق تُرفض بـ <span class="endpoint">400 DRIVER_MANAGED_IN_ODOO</span> — كل القرارات (قبول/رفض/حظر/نقل مستودع) قادمة من Odoo حصرًا، وكلها تصل عبر نفس الـ webhook مع إشارات (warehouse_change_only · documents_only · approved_media_ids…).</div>
+  </div>
+
+  <!-- ============ FLOW 4 ============ -->
+  <div class="flow-box" id="flow4">
+    <h3>٤ · إدارة السائق يوميًا: استلام الشاحنة، تغيير الوردية، المشاكل</h3>
+
+    <div class="flow">
+      <div class="fnode driver">
+        <span class="flabel">استلام الشاحنة بداية الوردية 🛻</span>
+        <div class="fmeta">سحب يدوي: يفتح تسليمًا (handover) ويبدأ جلسة التتبع — دون تسليم مفتوح لا يُسمح بالبث أو الاستلام</div>
+        <div class="fstate"><span class="endpoint">POST /api/v1/driver/pickup</span><span class="endpoint">POST /api/v1/driver/dropoff { reason }</span></div>
+        <a class="fscreen" href="driver/home.html">📱 الرئيسية — أزرار الاستلام/التسليم</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode driver">
+        <span class="flabel">طلب تغيير الوردية 🔁</span>
+        <div class="fmeta">يختار الوردية الجديدة → الطلب يذهب إلى Odoo → القرار يعود عبر webhook</div>
+        <div class="fstate"><span class="endpoint">POST /api/v1/shift-change-requests { truckId, shiftId }</span><span class="badge amber">PROCESSING</span></div>
+        <a class="fscreen" href="driver/profile.html">📱 ملفي — قسم تغيير الوردية</a>
+        <a class="fscreen" href="admin/fleet.html">📱 طلبات تغيير الوردية لدى الأدمن</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode odoo">
+        <span class="flabel">قرار Odoo</span>
+        <div class="fmeta">قبول = وردية وشاحنة جديدتان · رفض = يبقى كما هو مع سبب الرفض</div>
+        <div class="fstate"><span class="endpoint">POST /api/v1/odoo/webhooks/shift-change-decision { backend_request_id, status }</span><span class="badge green">ACCEPTED</span><span class="badge red">REJECTED</span></div>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode driver">
+        <span class="flabel">الإبلاغ عن مشكلة شاحنة 🚨</span>
+        <div class="fmeta">وصف + صورة → Job PUSH_TRUCK_PROBLEM إلى Odoo ليقوم بمعالجتها</div>
+        <div class="fstate"><span class="endpoint">POST /api/v1/truck-problems</span></div>
+        <a class="fscreen" href="driver/profile.html">📱 ملفي — نموذج المشكلة</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ FLOW 5 ============ -->
+  <div class="flow-box" id="flow5">
+    <h3>٥ · الإسناد اليدوي من الأدمن (NEEDS_ADMIN)</h3>
+    <div class="sub">الطريق الاحتياطي عندما لا يجد محرك التوزيع سائقًا مؤهلًا، أو عندما يريد الأدمن حسم طلب معلّق فورًا.</div>
+
+    <div class="flow">
+      <div class="fnode admin">
+        <span class="flabel">1️⃣ الأدمن يرى الطلبات المعلّقة</span>
+        <div class="fmeta">تنبيه فوري عبر socket (request:needs_admin) + فلتر الحالة في الجدول</div>
+        <a class="fscreen" href="admin/dashboard.html">📱 لوحة التحكم — بطاقة «بحاجة إسناد»</a>
+        <a class="fscreen" href="admin/requests.html">📱 جدول الطلبات — صف NEEDS_ADMIN</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode admin">
+        <span class="flabel">2️⃣ اختيار السائق المطلوب</span>
+        <div class="fmeta">نموذج الإسناد اليدوي — المعرّف المطلوب هو <b>collector_profiles.id</b> (وليس معرّف الحساب)</div>
+        <div class="fstate"><span class="endpoint">POST /api/v1/admin/collection-requests/:id/assign { driver_id }</span></div>
+      </div>
+      <div class="fsplit vertical">
+        <div class="fnode system">
+          <span class="flabel">مؤهل ✔</span>
+          <div class="fmeta">الحجز المباشر على الطريق دون مرحلة عرض — السائق يراه محطة في جولته</div>
+          <div class="fstate"><span class="badge blue">ASSIGNED</span></div>
+          <a class="fscreen" href="driver/tour.html">📱 يظهر فورًا في جولة السائق</a>
+        </div>
+        <div class="fnode admin">
+          <span class="flabel">غير مؤهل ✖</span>
+          <div class="fmeta">يعاد الرفض بالكود 409 — محرك الأهلية نفسه يتحقق حتى في الإسناد اليدوي</div>
+          <div class="fstate"><span class="endpoint">409 COLLECTION_DRIVER_NOT_ELIGIBLE</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ FLOW 6 ============ -->
+  <div class="flow-box" id="flow6">
+    <h3>٦ · التتبع المباشر للشاحنات (Socket.IO)</h3>
+
+    <div class="flow">
+      <div class="fnode driver">
+        <span class="flabel">السائق يبث موقعه 🛻</span>
+        <div class="fmeta">شرط مسبق: تسليم مفتوح (استلم الشاحنة) — البث يُكتب في Redis (TTL محدود) مع سجل تاريخي</div>
+        <div class="fstate"><span class="endpoint">socket /tracking → truck:location { truckId, lat, lng, speed }</span></div>
+        <a class="fscreen" href="driver/home.html">📱 الرئيسية — زر «بدء البث»</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode system">
+        <span class="flabel">النظام يخزن ويوّجه</span>
+        <div class="fmeta">تحديث آخر موقع + سجل + قائمة الشاحنات النشطة في Redis، وإعادة بث فورية لغرفة الأدمن</div>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode admin">
+        <span class="flabel">الأدمن يتابع على الخريطة</span>
+        <div class="fmeta">الاشتراك بكل الشاحنات (admin:subscribeAll) أو شاحنة محددة — وتصل أحداث التوقف والانقطاع تلقائيًا</div>
+        <div class="fstate"><span class="endpoint">socket /tracking → truck:location · truck:stopped · truck:session</span></div>
+        <a class="fscreen" href="admin/fleet.html">📱 الأسطول — خريطة التتبع المباشر</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode system">
+        <span class="flabel">انقطاع السائق ⚡</span>
+        <div class="fmeta">تثبيت آخر موقع مع DRIVER_DISCONNECT وبث truck:stopped — لا يضيع الأثر ولا يُترك بلا حالة</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ FLOW 7 ============ -->
+  <div class="flow-box" id="flow7">
+    <h3>٧ · النقاط والمحفظة — المكافأة عند الاكتمال</h3>
+
+    <div class="flow">
+      <div class="fnode system">
+        <span class="flabel">اكتمال طلب ✔</span>
+        <div class="fmeta">بعد COMPLETED تُحسب المكافأة تلقائيًا</div>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode system">
+        <span class="flabel">النقاط = القيمة الفعلية ÷ سعر النقطة للدور</span>
+        <div class="fmeta">لكل دور سعره الخاص (المواطن 1,000 ل.س/نقطة · المؤسسة 800 · المعمل 750) — يضبطه الأدمن في شاشة التسعير</div>
+        <div class="fstate"><span class="endpoint">PointsWalletService · PointsRate</span></div>
+        <a class="fscreen" href="admin/catalog.html">📱 نقاط المكافأة لكل دور</a>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode user">
+        <span class="flabel">رصيد المستخدم يزداد</span>
+        <div class="fmeta">رصيد + سجل حركة + إشعار بالمكافأة</div>
+        <div class="fstate"><span class="endpoint">GET /api/v1/points-wallet</span></div>
+        <a class="fscreen" href="user/profile.html">📱 المحفظة والرصيد</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN MAP ============ -->
+  <div class="card" id="map">
+    <h3>🗺️ خريطة الشاشات ← مسارات الـ API</h3>
+    <p class="muted" style="margin-bottom:10px">مرجع سريع: كل شاشة من النماذج وما ينفذها من نداءات خلفية — نفس الجداول في API_USER_APP.md / API_DRIVER_APP.md / API_ADMIN_APP.md.</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>الشاشة</th><th>الـ API المرتبط</th><th>الفلو</th></tr>
+        <tr><td><a href="user/new-request.html">new-request.html</a></td><td>POST /collection-requests · GET /waste/categories · /cart/items</td><td>١ · ٢</td></tr>
+        <tr><td><a href="user/requests.html">requests.html</a></td><td>GET /collection-requests · socket collection:subscribe</td><td>١ · ٢</td></tr>
+        <tr><td><a href="user/cart.html">cart.html</a></td><td>POST/PUT/DELETE /cart/items · POST /cart/offers</td><td>١</td></tr>
+        <tr><td><a href="user/home.html">home.html</a></td><td>GET /waste/categories · /waste/offers · /waste/products</td><td>١ · ٧</td></tr>
+        <tr><td><a href="user/profile.html">profile.html</a></td><td>GET/PATCH /user/profile · /user/locations · /points-wallet · /notifications</td><td>٧</td></tr>
+        <tr><td><a href="user/otp.html">otp.html</a></td><td>POST /auth/otp/verify · /auth/password/forgot</td><td>١ · ٣</td></tr>
+        <tr><td><a href="driver/tour.html">tour.html</a></td><td>GET /driver/collection-requests · PATCH :id/{accept|arrived|collected|delivered}</td><td>١ · ٢ · ٥</td></tr>
+        <tr><td><a href="driver/onboarding.html">onboarding.html</a></td><td>POST /onboarding/collector/{information|location|upload-doc}</td><td>٣</td></tr>
+        <tr><td><a href="driver/home.html">home.html</a></td><td>GET /driver/my-truck · POST /driver/{pickup|dropoff} · socket truck:location</td><td>٤ · ٦</td></tr>
+        <tr><td><a href="driver/profile.html">profile.html</a></td><td>POST /shift-change-requests · POST /truck-problems · GET /shifts · PATCH /media/:id/reupload</td><td>٣ · ٤</td></tr>
+        <tr><td><a href="admin/requests.html">requests.html</a></td><td>GET /admin/collection-requests · POST :id/assign · /coverage-points</td><td>١ · ٥</td></tr>
+        <tr><td><a href="admin/accounts.html">accounts.html</a></td><td>GET/PATCH /account-management/*</td><td>٣</td></tr>
+        <tr><td><a href="admin/fleet.html">fleet.html</a></td><td>GET /trucks · /trucks/active · /admin/shift-change-requests · socket /tracking</td><td>٤ · ٦</td></tr>
+        <tr><td><a href="admin/catalog.html">catalog.html</a></td><td>CRUD /admin/waste/* · /pricing · /points-rates · /admin/warehouses</td><td>٧</td></tr>
+        <tr><td><a href="admin/reports.html">reports.html</a></td><td>GET /admin/reports/{overview|accounts|trucks|warehouses|catalog}</td><td>١ · ٧</td></tr>
+        <tr><td><a href="admin/dashboard.html">dashboard.html</a></td><td>GET /admin/reports/overview · socket request:needs_admin</td><td>١ · ٥</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>مصادر الحقيقة</h3>
+    <p class="muted">التفاصيل الكاملة لعقود الـ API في المستندات: API_USER_APP.md · API_DRIVER_APP.md · API_ADMIN_APP.md · COLLECTION_API.md · COLLECTION_DESIGN.md — وهذه الصفحة تجسّدها في شكل فلوات مربوطة بالنماذج.</p>
+  </div>
+</main>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

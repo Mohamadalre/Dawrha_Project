@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>إنشاء حساب — تطبيق المستخدم</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="user">
+<div class="auth-wrap user">
+  <div class="auth-card">
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="auth-title">إنشاء حساب جديد</div>
+    <div class="auth-sub">الحساب يُنشأ بحالة INACTIVE ثم يُفعَّل بعد تحقق OTP</div>
+
+    <div class="tabs">
+      <div class="tab active" data-role="citizen">مواطن</div>
+      <div class="tab" data-role="institution">مؤسسة</div>
+      <div class="tab" data-role="factory">معمل</div>
+      <div class="tab" data-role="external">جهة حرة</div>
+    </div>
+
+    <form id="registerForm">
+      <div class="field">
+        <label>الاسم الكامل</label>
+        <input name="fullName" type="text" required placeholder="الاسم كما في الهوية">
+      </div>
+      <div class="field">
+        <label>البريد الإلكتروني</label>
+        <input name="email" type="email" required placeholder="you@example.com">
+      </div>
+      <div class="field">
+        <label>رقم الهاتف</label>
+        <input name="phoneNumber" type="tel" required placeholder="09xxxxxxxx" dir="ltr" style="text-align:left">
+      </div>
+      <div class="field">
+        <label>كلمة المرور</label>
+        <input name="password" type="password" required minlength="8" placeholder="8 أحرف على الأقل">
+      </div>
+      <button class="btn primary block" type="submit">إنشاء الحساب</button>
+    </form>
+
+    <div class="row mt-16" style="justify-content:center">
+      <a href="login.html" class="small muted">لديك حساب؟ سجّل الدخول</a>
+    </div>
+  </div>
+</div>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  var role = 'citizen';
+  var route = {
+    citizen: 'register/citizen',
+    institution: 'register/institution',
+    factory: 'register/factory',
+    external: 'register/external-partner'
+  };
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () {
+      document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
+      t.classList.add('active');
+      role = t.getAttribute('data-role');
+    });
+  });
+  /* الربط الحقيقي: POST /api/v1/auth/register/:role */
+  document.getElementById('registerForm').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var btn = this.querySelector('[type="submit"]');
+    btn.disabled = true;
+    try {
+      var json = await API.post('auth/' + route[role], {
+        fullName: this.fullName.value,
+        email: this.email.value,
+        phoneNumber: this.phoneNumber.value,
+        password: this.password.value
+      }, { noRetry: true });
+      var t = json.data || json; /* الاستجابة مغلفة دائمًا بـ { success, message, data } */
+      if (t.token) { API.saveSession(null, null, null, 'INACTIVE'); API.tmp = t.token; window.localStorage.setItem('daw_tmp', t.token); }
+      ui.ok(json.message || 'أُنشئ الحساب — أُرسل رمز التحقق إلى بريدك');
+      setTimeout(function () { location.href = 'otp.html'; }, 900);
+    } catch (err) {
+      ui.err(err.message || 'فشل إنشاء الحساب');
+    } finally { btn.disabled = false; }
+  });
+</script>
+</body>
+</html>

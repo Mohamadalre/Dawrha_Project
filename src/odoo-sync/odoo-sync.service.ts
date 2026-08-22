@@ -16,6 +16,7 @@ import {
   DriverDecisionPayload,
   PushDriverRequestPayload,
   PushHandoverPayload,
+  RegisterIntakePayload,
   PushShiftChangePayload,
   PushTruckProblemPayload,
   ShiftChangeDecisionPayload,
@@ -276,6 +277,11 @@ export class OdooSyncService {
 
   enqueuePushHandoverDropoff(payload: PushHandoverPayload) {
     return this.queue.add(ODOO_JOBS.PUSH_HANDOVER_DROPOFF, payload, this.opts(ODOO_JOBS.PUSH_HANDOVER_DROPOFF));
+  }
+
+  /** A delivered collection request — Odoo grows its stock with the ACTUALS. */
+  enqueueRegisterIntake(payload: RegisterIntakePayload) {
+    return this.queue.add(ODOO_JOBS.REGISTER_INTAKE, payload, this.opts(ODOO_JOBS.REGISTER_INTAKE));
   }
 
   enqueueDriverDecision(payload: DriverDecisionPayload) {

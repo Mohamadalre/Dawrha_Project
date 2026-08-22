@@ -7,6 +7,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  ParseFloatPipe,
   Patch,
   Post,
   Query,
@@ -23,9 +24,12 @@ import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { imageMemoryStorage } from '@src/common/config/multer/image-memory.config';
 import { AddLocationDto } from './dto/add-location.dto';
 import { UserService } from './user.service';
+import { DropOffService } from '@src/collection-request/services/drop-off.service';
+import { CoverageService } from '@src/collection-request/services/coverage.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { SetLanguageDto } from './dto/set-language.dto';
+import { CreateDropOffDto } from './dto/create-drop-off.dto';
 
 /**
  * Self-service account endpoints. The role is resolved from the JWT, so a single
@@ -35,7 +39,11 @@ import { SetLanguageDto } from './dto/set-language.dto';
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'user', version: '1' })
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    private readonly dropOffService: DropOffService,
+    private readonly coverageService: CoverageService,
+  ) {}
 
   // Readable in every status that holds a token: an applicant waiting on a
   // decision, or refused one, must still be able to see the account the
@@ -197,5 +205,35 @@ export class UserController {
     @Param('locationId', ParseUUIDPipe) locationId: string,
   ) {
     return this.userService.removeLocation(user.id, user.role, locationId);
+  }
+
+  // --- Coverage zones & walk-in drop-off -----------------------------------
+
+  @Get('coverage-zones')
+  @AccountsStatus(AccountStatus.ACTIVE)
+  async getCoverageZones(
+    @Query('lat', ParseFloatPipe) lat: number,
+    @Query('lng', ParseFloatPipe) lng: number,
+    @Query('radius', new DefaultValuePipe(10), ParseFloatPipe) radius: number,
+  ) {
+    const result = await this.coverageService.findNearbyZones(lat, lng, radius);
+    return { message: 'Coverage zones fetched successfully', result };
+  }
+
+  @Get('drivers/:driverId/qr')
+  @AccountsStatus(AccountStatus.ACTIVE)
+  async getDriverQR(@Param('driverId', ParseUUIDPipe) driverId: string) {
+    const result = await this.dropOffService.getDriverQR(driverId);
+    return { message: 'Driver QR data fetched successfully', result };
+  }
+
+  @Post('drop-off')
+  @AccountsStatus(AccountStatus.ACTIVE)
+  async createDropOff(
+    @CurrentUser() user,
+    @Body() dto: CreateDropOffDto,
+  ) {
+    const result = await this.dropOffService.createDropOff(user.id, dto);
+    return { message: 'Drop-off created successfully', result };
   }
 }

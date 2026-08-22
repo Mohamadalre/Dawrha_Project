@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الرئيسية — تطبيق المستخدم</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="user">
+<header class="topbar">
+  <div class="inner">
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="grow"></div>
+    <a href="requests.html" style="position:relative">🔔<span class="count-pill" style="position:absolute; top:-4px; left:-8px">2</span></a>
+    <a href="profile.html" class="avatar">م</a>
+  </div>
+</header>
+
+<main class="container">
+  <div class="row between mt-16" style="align-items:flex-end">
+    <div>
+      <h2 style="font-size:19px">مرحبًا، <span data-name>…</span> 👋</h2>
+      <p class="muted">ماذا تريد أن تبيع اليوم؟</p>
+    </div>
+    <a href="new-request.html" class="btn primary">+ طلب جمع</a>
+  </div>
+
+  <div class="card mt-8">
+    <div class="row between">
+      <h3>رصيد النقاط</h3>
+      <a href="#" class="small" style="color:var(--user)">المحفظة</a>
+    </div>
+    <div style="font-size:30px; font-weight:800"><span data-wallet-balance>—</span> <span class="muted" style="font-size:14px">نقطة</span></div>
+    <p class="hint">كل نقطة = 1,000 ل.س · تُمنح عند اكتمال الطلبات</p>
+  </div>
+
+  <div class="card">
+    <h3>الفئات <span class="endpoint">GET /api/v1/waste/categories</span></h3>
+    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; text-align:center" data-categories>
+      <div class="chip">جارٍ التحميل…</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row between">
+      <h3>المنتجات الرائجة</h3>
+      <span class="muted small">تصنيف حسب سعر الكيلو</span>
+    </div>
+    <div data-products>
+      <p class="muted small">جارٍ تحميل المنتجات…</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>عروض اليوم <span class="endpoint">GET /api/v1/waste/offers</span></h3>
+    <div data-offers>
+      <p class="muted small">جارٍ التحميل…</p>
+    </div>
+  </div>
+</main>
+
+<nav class="bottomnav">
+  <a href="home.html" class="active"><span class="ic">🏠</span>الرئيسية</a>
+  <a href="requests.html"><span class="ic">🚚</span>طلباتي</a>
+  <a href="cart.html"><span class="ic">🛒</span>السلة</a>
+  <a href="profile.html"><span class="ic">👤</span>ملفي</a>
+</nav>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+
+  var state = { categoryId: null, products: [] };
+
+  /* ---- البيانات الأساسية من الخادم ---- */
+  function fmt(n) { return (+n || 0).toLocaleString('en-US'); }
+  function price(p) { return p.price != null ? p.price : (p.unit_price != null ? p.unit_price : (p.latest_price != null ? p.latest_price : null)); }
+  function unitOf(p) { return (p.unit && p.unit.name) || p.unit_name || p.unitName || 'كغ'; }
+  function nameOf(p) { return p.name || p.productName || p.title || '—'; }
+
+  /* ---- المحفظة (نقطة الكبرى على الرصيد) ---- */
+  API.get('wallet').then(function (json) {
+    var w = API.one(json);
+    var bal = w.balance != null ? w.balance : (w.points != null ? w.points : (w.totalPoints != null ? w.totalPoints : null));
+    var el = document.querySelector('[data-wallet-balance]');
+    if (el && bal != null) el.textContent = fmt(bal);
+  }).catch(function (e) { /* لا محفظة لهذا الدور أو الحساب غير نشط */ });
+
+  /* ---- الفئات ---- */
+  function renderCategories(items) {
+    var box = document.querySelector('[data-categories]');
+    if (!box || !items.length) return;
+    var cols = items.length > 8 ? 4 : items.length > 4 ? 4 : items.length;
+    box.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+    box.innerHTML = items.map(function (c) {
+      return '<div class="chip" data-cat="' + c.id + '" style="cursor:pointer">' + API.esc(c.name) + '</div>';
+    }).join('');
+    box.querySelectorAll('[data-cat]').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        box.querySelectorAll('.chip').forEach(function (x) { x.classList.remove('active'); });
+        chip.classList.add('active');
+        var id = chip.getAttribute('data-cat');
+        if (id === state.categoryId) return;
+        state.categoryId = id;
+        loadProducts(id ? 'waste/categories/' + id + '/products' : 'waste/products');
+      });
+    });
+    // فئة افتراضية مفتوحة
+    var first = box.querySelector('[data-cat]');
+    if (first) { first.classList.add('active'); state.categoryId = first.getAttribute('data-cat'); }
+  }
+
+  /* ---- المنتجات ---- */
+  function renderProducts(items) {
+    var box = document.querySelector('[data-products]');
+    if (!box) return;
+    if (!items.length) { box.innerHTML = '<p class="muted small">لا توجد منتجات متاحة حاليًا.</p>'; return; }
+    box.innerHTML = items.map(function (p) {
+      var pr = price(p); var un = unitOf(p);
+      var bad = p.is_active === false ? '<span class="badge red">غير متوفر</span>' : '<span class="badge green">متوفر</span>';
+      return '<div class="list-item">' +
+        '<div style="flex:1"><b>' + API.esc(nameOf(p)) + '</b> ' + bad +
+        '<div class="muted small">' + (pr != null ? fmt(pr) + ' ل.س / ' + API.esc(un) : '—') +
+        (p.min_quantity ? ' · حد أدنى ' + fmt(p.min_quantity) + ' ' + API.esc(un) : '') + '</div></div>' +
+        '<button class="btn ghost" data-add="' + p.id + '">إضافة</button></div>';
+    }).join('');
+    box.querySelectorAll('[data-add]').forEach(function (btn) {
+      btn.addEventListener('click', function () { addToCart(btn.getAttribute('data-add')); });
+    });
+  }
+  function loadProducts(path) {
+    return API.get(path).then(function (json) { renderProducts(API.list(json)); })
+      .catch(function (e) { ui.err(e.message || 'تعذر تحميل المنتجات'); });
+  }
+
+  /* ---- إضافة إلى السلة: POST /cart/items ---- */
+  function addToCart(productId) {
+    var btnEl = document.querySelector('[data-add="' + productId + '"]');
+    if (btnEl) btnEl.disabled = true;
+    API.post('cart/items', { product_id: productId, quantity: 1 }).then(function () {
+      ui.ok('أُضيف المنتج إلى السلة');
+      var pill = document.querySelector('[data-cart-count]');
+      if (pill) pill.textContent = (+pill.textContent || 0) + 1;
+    }).catch(function (e) { ui.err(e.message || 'فشلت الإضافة'); })
+      .finally(function () { if (btnEl) btnEl.disabled = false; });
+  }
+
+  /* ---- الحقن ---- */
+  API.get('waste/categories').then(function (json) { renderCategories(API.list(json)); })
+    .catch(function (e) { ui.err(e.message || 'تعذر تحميل الفئات'); });
+  loadProducts('waste/products');
+
+  API.get('waste/offers').then(function (json) {
+    var items = API.list(json);
+    var box = document.querySelector('[data-offers]');
+    if (!box || !items.length) return;
+    box.innerHTML = items.map(function (o) {
+      var c = o.category || o.category_id;
+      return '<div class="list-item"><div style="flex:1"><b>' + API.esc(o.name || o.title || 'عرض') + '</b>' +
+        '<div class="muted small">' + API.esc(o.description || '') + (c ? ' · ' + API.esc(c) : '') + '</div></div>' +
+        '<span class="badge red">' + (o.discount_percent ? '-' + o.discount_percent + '%' : 'عرض') + '</span></div>';
+    }).join('');
+  }).catch(function () { /* لا عروض */ });
+
+  // اسم المستخدم في الترحيب
+  API.get('user/profile').then(function (json) {
+    var u = API.one(json);
+    var name = u.name || (API.user().email || '').split('@')[0] || '';
+    if (name) {
+      document.querySelectorAll('[data-name]').forEach(function (el) { el.textContent = name; });
+      API.setAvatar(name);
+    }
+  }).catch(function () {});
+</script>
+</body>
+</html>

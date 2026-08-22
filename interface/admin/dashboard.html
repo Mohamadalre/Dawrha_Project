@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>لوحة التحكم — الأدمن</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="admin">
+<div class="admin-shell">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="dot" style="width:28px;height:28px;border-radius:8px;background:var(--admin-accent);color:#1e293b;display:grid;place-items:center;font-size:14px">د</span> دورها — أدمن</div>
+    <nav>
+      <a href="dashboard.html" class="active">📊 لوحة التحكم</a>
+      <a href="accounts.html">👥 الحسابات</a>
+      <a href="requests.html">🚚 طلبات الجمع</a>
+      <a href="fleet.html">🛻 الأسطول والورديات</a>
+      <a href="shipments.html">📦 الشحنات</a>
+      <a href="catalog.html">🗂️ الكتالوج والتسعير</a>
+      <a href="reports.html">📈 التقارير</a>
+      <a href="login.html" data-logout-link>↩ خروج</a>
+    </nav>
+  </aside>
+
+  <main class="admin-content">
+    <div class="admin-header">
+      <div class="row">
+        <button class="btn sidebar-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <h1>لوحة التحكم</h1>
+      </div>
+      <span class="badge gray" data-admin-email>admin@dawrha.com</span>
+    </div>
+
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:14px; margin-bottom:20px" data-overview>
+      <div class="card" style="margin:0"><div class="muted small">لوحة التحكم</div><div style="font-size:26px; font-weight:800">…</div></div>
+    </div>
+
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px">
+      <div class="card" style="margin:0">
+        <h3>طلبات بحاجة لإسناد دستوي <span class="badge amber">NEEDS_ADMIN</span> <span class="endpoint">GET /api/v1/admin/collection-requests?status=NEEDS_ADMIN</span></h3>
+        <div data-needs-admin><p class="muted small">جارٍ التحميل…</p></div>
+      </div>
+
+      <div class="card" style="margin:0">
+        <h3>حسابات بانتظار الاعتماد <span class="endpoint">GET /api/v1/account-management/accounts</span></h3>
+        <p class="muted small mb-8">المعامل / المؤسسات / الجهات الحرة تُراجع هنا. <b>السائقون يُدارون في Odoo فقط</b>.</p>
+        <div data-pending-accounts><p class="muted small">جارٍ التحميل…</p></div>
+      </div>
+
+      <div class="card" style="margin:0">
+        <h3>حالة النظام</h3>
+        <div data-sys-alerts><p class="muted small">جارٍ التحميل…</p></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+
+  var user = JSON.parse(localStorage.getItem('daw_user') || 'null') || {};
+  var emailEl = document.querySelector('[data-admin-email]');
+  if (emailEl) emailEl.textContent = user.email || 'admin';
+  var lo = document.querySelector('[data-logout-link]');
+  if (lo) lo.addEventListener('click', function (ev) { ev.preventDefault(); API.logout('login.html'); });
+
+  var ov = document.querySelector('[data-overview]');
+  API.get('admin/reports/overview').then(function (json) {
+    var d = API.one(json);
+    var cells = [
+      ['إجمالي الحسابات', d.accounts && d.accounts.total, null],
+      ['حسابات نشطة', d.accounts && d.accounts.by_status && d.accounts.by_status.ACTIVE, null],
+      ['سائقون نشطون', d.drivers && d.drivers.active, 'من Odoo'],
+      ['شاحنات', d.trucks && d.trucks.total, null],
+      ['منتجات', d.catalog && d.catalog.products, null],
+      ['عروض', d.catalog && d.catalog.offers, null],
+    ];
+    if (ov) {
+      ov.innerHTML = '';
+      cells.forEach(function (c) {
+        if (c[1] == null) return;
+        var card = document.createElement('div');
+        card.className = 'card'; card.style.cssText = 'margin:0';
+        card.innerHTML = '<div class="muted small">' + c[0] + '</div><div style="font-size:26px; font-weight:800">' + (+c[1]).toLocaleString('en-US') + '</div>' +
+          (c[2] ? '<span class="badge amber">' + c[2] + '</span>' : '');
+        ov.appendChild(card);
+      });
+    }
+  }).catch(function (e) { if (ov) ov.innerHTML = '<p class="muted small">' + API.esc(e.message || '') + '</p>'; });
+
+  var na = document.querySelector('[data-needs-admin]');
+  API.get('admin/collection-requests?status=NEEDS_ADMIN&limit=5').then(function (json) {
+    var list = API.list(json);
+    if (!list.length) { na.innerHTML = '<p class="muted small">لا توجد طلبات عالقة.</p>'; return; }
+    na.innerHTML = '';
+    list.forEach(function (r) {
+      var d = document.createElement('div');
+      d.className = 'list-item';
+      var lines = (r.lines || []).map(function (l) { return (l.product_name || 'منتج') + ' × ' + (l.quantity || 0); }).join(' · ');
+      d.innerHTML = '<div style="flex:1"><b>' + API.esc(r.request_number || r.id.slice(0, 8)) + '</b>' +
+        '<div class="muted small">' + API.esc(lines || '') + '</div></div>' +
+        '<a class="btn amber" style="padding:6px 12px" href="requests.html">إسناد</a>';
+      na.appendChild(d);
+    });
+  }).catch(function (e) { na.innerHTML = '<p class="muted small">' + API.esc(e.message || '') + '</p>'; });
+
+  var pa = document.querySelector('[data-pending-accounts]');
+  API.get('account-management/accounts?status=PENDING_APPROVAL&limit=5').then(function (json) {
+    var list = API.list(json);
+    if (!list.length) { pa.innerHTML = '<p class="muted small">لا توجد حسابات معلقة.</p>'; return; }
+    pa.innerHTML = '';
+    list.forEach(function (a) {
+      var d = document.createElement('div');
+      d.className = 'list-item';
+      d.innerHTML = '<div style="flex:1"><b>' + API.esc(a.full_name || a.company_name || a.name || '—') + '</b>' +
+        '<div class="muted small">' + API.esc(a.role || '') + '</div></div>' +
+        '<a class="btn primary" style="padding:6px 12px" href="accounts.html">مراجعة</a>';
+      pa.appendChild(d);
+    });
+  }).catch(function (e) { pa.innerHTML = '<p class="muted small">' + API.esc(e.message || '') + '</p>'; });
+
+  var sa = document.querySelector('[data-sys-alerts]');
+  API.get('admin/reports/drivers').then(function (json) {
+    var d = API.one(json);
+    var drivers = d.active_drivers != null ? d.active_drivers : '';
+    var trucks = d.trucks != null ? d.trucks : '';
+    sa.innerHTML =
+      '<div class="notif-item"><div style="flex:1"><b>سائقون نشطون من Odoo</b><p class="muted small">' + API.esc(drivers) + '</p></div><span class="badge blue">مزامنة</span></div>' +
+      '<div class="notif-item"><div style="flex:1"><b>شاحنات مسجلة</b><p class="muted small">' + API.esc(trucks) + '</p></div><span class="badge gray">مرئية على الخريطة</span></div>';
+  }).catch(function () { sa.innerHTML = '<p class="muted small">تعذر تحميل حالة النظام.</p>'; });
+</script>
+</body>
+</html>

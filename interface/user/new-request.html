@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>طلب جمع جديد — تطبيق المستخدم</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="user">
+<header class="topbar">
+  <div class="inner">
+    <a href="home.html" class="btn ghost" style="padding:6px 12px">→</a>
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="grow"></div>
+    <a href="profile.html" class="avatar">م</a>
+  </div>
+</header>
+
+<main class="container">
+  <h2 style="font-size:19px; margin:16px 0 4px">طلب جمع جديد</h2>
+  <p class="muted">أنشئ طلبًا فوريًا أو مجدولًا وسيجده السائق الأقرب</p>
+
+  <form id="requestForm">
+    <div class="card mt-16">
+      <h3>نوع الطلب</h3>
+      <div class="row wrap">
+        <span class="chip active" data-type="IMMEDIATE">فوري IMMEDIATE</span>
+        <span class="chip" data-type="SCHEDULED">مجدول SCHEDULED</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>المنتجات</h3>
+      <div class="row" style="margin-bottom:10px">
+        <select data-product-select style="flex:1; padding:10px; border:1px solid var(--line); border-radius:10px">
+          <option value="">— اختر منتجًا —</option>
+        </select>
+        <input type="number" data-qty placeholder="كغ" style="width:90px; padding:10px; border:1px solid var(--line); border-radius:10px">
+        <button type="button" class="btn primary" data-add-line style="padding:10px 14px">+</button>
+      </div>
+      <div data-lines>
+        <p class="muted small">لم تُضف منتجات بعد.</p>
+      </div>
+      <p class="hint">الإجمالي التقديري <b data-est-total>0</b> ل.س — الوزن الفعلي يُثبَّت عند الجمع.</p>
+    </div>
+
+    <div class="card">
+      <h3>الموقع</h3>
+      <div class="field">
+        <label>العنوان النصي</label>
+        <input name="address" required placeholder="الحي، الشارع، رقم البناء" value="المزة — شارع المدارس، مقابل البنك">
+      </div>
+      <div class="row">
+        <div class="field grow">
+          <label>خط العرض</label>
+          <input id="lat" name="latitude" dir="ltr" style="text-align:left" placeholder="33.510000">
+        </div>
+        <div class="field grow">
+          <label>خط الطول</label>
+          <input id="lng" name="longitude" dir="ltr" style="text-align:left" placeholder="36.290000">
+        </div>
+      </div>
+      <button type="button" class="btn ghost block" data-pick-location data-lat="lat" data-lng="lng">📍 تحديد موقعي على الخريطة</button>
+    </div>
+
+    <div class="card">
+      <h3>الجدولة (اختياري)</h3>
+      <div class="field">
+        <label>موعد التقاط المجدول</label>
+        <input name="scheduledAt" type="datetime-local">
+      </div>
+      <p class="hint">اتركه فارغًا للطلب الفوري.</p>
+    </div>
+
+    <button class="btn primary block" type="submit">إرسال الطلب</button>
+  </form>
+</main>
+
+<nav class="bottomnav">
+  <a href="home.html"><span class="ic">🏠</span>الرئيسية</a>
+  <a href="requests.html"><span class="ic">🚚</span>طلباتي</a>
+  <a href="cart.html"><span class="ic">🛒</span>السلة</a>
+  <a href="profile.html"><span class="ic">👤</span>ملفي</a>
+</nav>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+
+  var fmt = function (n) { return (+n || 0).toLocaleString('en-US'); };
+  var lines = [];           // { product_id, name, quantity }
+  var products = [];        // قائمة المنتجات من الخادم
+  var type = 'IMMEDIATE';  // IMMEDIATE | SCHEDULED
+
+  function price(p) { return p.price != null ? p.price : (p.unit_price != null ? p.unit_price : 0); }
+  function unitOf(p) { return (p.unit && p.unit.name) || p.unit_name || 'كغ'; }
+
+  function renderSelect() {
+    var sel = document.querySelector('[data-product-select]');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— اختر منتجًا —</option>' + products.map(function (p) {
+      return '<option value="' + p.id + '">' + API.esc(p.name || 'منتج') + ' — ' + fmt(price(p)) + ' ل.س/' + API.esc(unitOf(p)) + '</option>';
+    }).join('');
+  }
+
+  function renderLines() {
+    var box = document.querySelector('[data-lines]');
+    var total = 0;
+    if (!box) return;
+    if (!lines.length) { box.innerHTML = '<p class="muted small">لم تُضف منتجات بعد.</p>'; }
+    else {
+      box.innerHTML = lines.map(function (l, i) {
+        var val = (price(l) * l.quantity);
+        total += val;
+        return '<div class="list-item"><b style="flex:1">' + API.esc(l.name) + ' × ' + fmt(l.quantity) + ' كغ</b>' +
+          '<span class="badge gray">' + fmt(val) + ' ل.س</span>' +
+          '<button class="btn danger" data-rm="' + i + '" style="padding:4px 8px">✕</button></div>';
+      }).join('');
+      box.querySelectorAll('[data-rm]').forEach(function (b) {
+        b.addEventListener('click', function () { lines.splice(+b.getAttribute('data-rm'), 1); renderLines(); });
+      });
+    }
+    var t = document.querySelector('[data-est-total]');
+    if (t && t.tagName === 'B') t.textContent = fmt(total);
+  }
+
+  /* تحميل المنتجات + تعبئة القائمة */
+  API.get('waste/products').then(function (json) {
+    products = API.list(json);
+    renderSelect();
+  }).catch(function (e) { ui.err(e.message || 'تعذر تحميل المنتجات'); });
+
+  document.querySelector('[data-add-line]').addEventListener('click', function () {
+    var sel = document.querySelector('[data-product-select]');
+    var q = document.querySelector('[data-qty]');
+    var p = products.find(function (x) { return x.id === sel.value; });
+    var qv = parseFloat(q.value);
+    if (!p) return ui.err('اختر منتجًا');
+    if (!qv || qv <= 0) return ui.err('أدخل كمية صالحة');
+    var prev = lines.find(function (l) { return l.product_id === p.id; });
+    if (prev) prev.quantity += qv; else lines.push(Object.assign({ product_id: p.id, name: p.name, quantity: qv }, p));
+    q.value = '';
+    renderLines();
+  });
+
+  /* نوع الطلب */
+  document.querySelectorAll('[data-type]').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      document.querySelectorAll('[data-type]').forEach(function (x) { x.classList.remove('active'); });
+      chip.classList.add('active');
+      type = chip.getAttribute('data-type');
+    });
+  });
+
+  /* الإرسال: POST /collection-requests */
+  document.getElementById('requestForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!lines.length) return ui.err('أضف منتجًا واحدًا على الأقل');
+    var schedule = this.scheduledAt && this.scheduledAt.value;
+    var lat = parseFloat(this.latitude.value), lng = parseFloat(this.longitude.value);
+    var btn = this.querySelector('[type="submit"]');
+    btn.disabled = true;
+    API.post('collection-requests', {
+      lines: lines.map(function (l) { return { product_id: l.product_id, quantity: l.quantity }; }),
+      scheduled_at: schedule ? new Date(schedule).toISOString() : undefined,
+      address_text: this.address.value,
+      lat: isNaN(lat) ? undefined : lat,
+      lng: isNaN(lng) ? undefined : lng
+    }, { noRetry: true }).then(function () {
+      ui.ok('أُنشئ الطلب وخرج للتوزيع', 'POST /api/v1/collection-requests');
+      setTimeout(function () { location.href = 'requests.html'; }, 1100);
+    }).catch(function (err) {
+      ui.err(err.message || 'فشل إنشاء الطلب');
+    }).finally(function () { btn.disabled = false; });
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>إكمال الملف — تطبيق السائقين</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="driver">
+<header class="topbar">
+  <div class="inner">
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="grow"></div>
+    <span class="badge amber" data-status-badge>PENDING_PROFILE</span>
+  </div>
+</header>
+
+<main class="container">
+  <h2 style="font-size:19px; margin:16px 0 4px">أكمل ملفك ليتم اعتماده</h2>
+  <p class="muted">الاعتماد النهائي يتم في Odoo — ستُشعر فور صدور القرار.</p>
+
+  <div class="progress"><div id="bar" style="width:0%"></div></div>
+
+  <!-- Step 1: المعلومات -->
+  <section id="step1">
+    <div class="card">
+      <h3>١ · المعلومات الشخصية <span class="endpoint">POST /api/v1/onboarding/collector/information</span></h3>
+      <div class="field"><label>الاسم الكامل</label><input data-nat-fullname disabled placeholder="الاسم كما في الهوية"></div>
+      <div class="field"><label>رقم الهاتف</label><input data-nat-phone disabled placeholder="09xxxxxxxx"></div>
+      <div class="field">
+        <label>الرقم الوطني (11 رقمًا)</label>
+        <input id="nationalId" inputmode="numeric" maxlength="11" required placeholder="00000000000" dir="ltr" style="text-align:left">
+      </div>
+      <div class="field">
+        <label>الوردية المطلوبة <span class="endpoint">GET /api/v1/shifts/onboarding</span></label>
+        <select id="shiftSelect" required>
+          <option value="">— اختر وردية —</option>
+        </select>
+      </div>
+      <button class="btn driver block" data-next1>تم — التالي</button>
+    </div>
+  </section>
+
+  <!-- Step 2: الموقع -->
+  <section id="step2" style="display:none">
+    <div class="card">
+      <h3>٢ · موقع العمل <span class="endpoint">POST /api/v1/onboarding/collector/location</span></h3>
+      <div class="field">
+        <label>العنوان النصي</label>
+        <input id="address" required placeholder="الحي، الشارع...">
+      </div>
+      <div class="field">
+        <label>المحافظة <span class="endpoint">GET /api/v1/onboarding/provinces</span></label>
+        <select id="province" required>
+          <option value="">— اختر المحافظة —</option>
+        </select>
+      </div>
+      <button class="btn driver block" data-next2>تم — الانتقال للوثائق</button>
+    </div>
+  </section>
+
+  <!-- Step 3: الوثائق -->
+  <section id="step3" style="display:none">
+    <div class="card">
+      <h3>٣ · الوثائق <span class="endpoint">POST /api/v1/onboarding/collector/upload-doc (multipart)</span></h3>
+      <p class="muted small" style="margin-bottom:12px">الملفات تُرفع إلى Cloudinary ثم يُنشأ السائق في Odoo (PUSH_DRIVER_REQUEST). النوع مقيد بـ ID_CARD_FRONT / ID_CARD_BACK.</p>
+
+      <div class="field">
+        <label>وجه الهوية الأمامي <span class="badge blue">ID_CARD_FRONT</span></label>
+        <input type="file" accept="image/*" data-doc="ID_CARD_FRONT" class="doc-input">
+      </div>
+      <div class="field">
+        <label>وجه الهوية الخلفي <span class="badge blue">ID_CARD_BACK</span></label>
+        <input type="file" accept="image/*" data-doc="ID_CARD_BACK" class="doc-input">
+      </div>
+      <p class="hint">رفع الوجهين معًا ثم «إرسال للاعتماد».</p>
+      <button class="btn driver block" data-next3>إرسال للاعتماد</button>
+    </div>
+  </section>
+
+  <!-- Step 4: الانتظار -->
+  <section id="step4" style="display:none">
+    <div class="card" style="text-align:center; padding:30px 18px">
+      <span style="font-size:44px">⏳</span>
+      <h3 style="margin-top:8px">بانتظار قرار Odoo</h3>
+      <p class="muted">عند القبول تصلك ورديتك وشاحنتك وتفعَّل حساباتك فورًا.</p>
+      <div class="statusbar mt-16">odoo → webhook /driver-decision { approved: true, truck_odoo_id, shift_odoo_id }</div>
+      <div class="row mt-16" style="justify-content:center">
+        <button class="btn" data-refresh>تحديث الحالة</button>
+      </div>
+      <p class="muted small mt-8" data-wait-msg></p>
+    </div>
+  </section>
+
+  <a href="login.html" class="small muted">العودة لصفحة الدخول</a>
+</main>
+
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  (function () {
+    if (!API.requireAuth('login.html')) return;
+    var $ = function (s) { return document.querySelector(s); };
+    var bar = $('#bar');
+    var sb = document.querySelector('[data-status-badge]');
+    if (sb) sb.textContent = API.status() || 'PENDING_PROFILE';
+    var user = JSON.parse(localStorage.getItem('daw_user') || 'null') || {};
+    $('[data-nat-fullname]').value = user.fullName || '';
+    $('[data-nat-phone]').value = user.phoneNumber || '';
+
+    function show(id) {
+      ['step1', 'step2', 'step3', 'step4'].forEach(function (s) { $('#' + s).style.display = s === id ? 'block' : 'none'; });
+    }
+
+    /* ورديات الالتحاق */
+    API.get('shifts/onboarding').then(function (json) {
+      var list = API.list(json);
+      (list || []).forEach(function (s) {
+        var o = document.createElement('option');
+        o.value = s.id;
+        o.textContent = (s.name || '') + ' · ' + (s.start_time || '').slice(0, 5) + ' – ' + (s.end_time || '').slice(0, 5);
+        $('#shiftSelect').appendChild(o);
+      });
+    }).catch(function () {});
+
+    /* المحافظات */
+    API.get('onboarding/provinces').then(function (json) {
+      var list = API.list(json);
+      (list || []).forEach(function (p) {
+        var o = document.createElement('option');
+        o.value = p.id;
+        o.textContent = p.name;
+        $('#province').appendChild(o);
+      });
+    }).catch(function () {});
+
+    function doneStep() {
+      localStorage.setItem('daw_onboard', '1');
+      show('step4');
+      checkStatus();
+    }
+
+    /* القفز للخطوة المفقودة عند تصحيح الطلب (NEED_CHANGES) */
+    API.get('onboarding/collector/submission').then(function (json) {
+      var sub = API.one(json);
+      var st = API.status();
+      if (st === 'PENDING_APPROVAL') return doneStep();
+      if (st !== 'NEED_CHANGES') return;
+      if (!sub.national_id) { show('step1'); $('#nationalId').value = sub.national_id || ''; }
+      else if (!sub.province_id) { show('step2'); $('#address').value = sub.address || ''; }
+      else show('step3');
+    }).catch(function (e) {
+      if (API.status() === 'ACTIVE') window.location.href = 'home.html';
+    });
+
+    /* الخطوة 1: المعلومات */
+    $('[data-next1]').addEventListener('click', function () {
+      var btn = this;
+      var nat = $('#nationalId').value.trim();
+      if (!/^\d{11}$/.test(nat)) return ui.err('الرقم الوطني يجب أن يكون 11 رقمًا');
+      var shiftId = $('#shiftSelect').value;
+      if (!shiftId) return ui.err('اختر الوردية المطلوبة');
+      btn.disabled = true;
+      API.post('onboarding/collector/information', { NationalID: nat, shiftId: shiftId })
+        .then(function () { ui.ok('سُجلت المعلومات'); bar.style.width = '33%'; show('step2'); })
+        .catch(function (e) { ui.err(e.message || 'فشل تسجيل المعلومات'); })
+        .finally(function () { btn.disabled = false; });
+    });
+
+    /* الخطوة 2: الموقع */
+    $('[data-next2]').addEventListener('click', function () {
+      var btn = this;
+      var address = $('#address').value.trim();
+      var provinceId = $('#province').value;
+      if (!address) return ui.err('أدخل العنوان النصي');
+      if (!provinceId) return ui.err('اختر المحافظة');
+      btn.disabled = true;
+      API.post('onboarding/collector/location', { address: address, provinceId: provinceId })
+        .then(function () { ui.ok('سُجّل الموقع'); bar.style.width = '66%'; show('step3'); })
+        .catch(function (e) { ui.err(e.message || 'فشل تسجيل الموقع'); })
+        .finally(function () { btn.disabled = false; });
+    });
+
+    /* الخطوة 3: الوثائق (multipart) */
+    $('[data-next3]').addEventListener('click', function () {
+      var btn = this;
+      var inputs = Array.prototype.slice.call(document.querySelectorAll('[data-doc]'));
+      var pending = inputs.filter(function (i) { return i.files && i.files[0]; });
+      if (!pending.length) return ui.err('اختر صورة الهوية (الأمامية والخلفية)');
+      btn.disabled = true;
+      btn.textContent = 'جارٍ الرفع…';
+      (function next(i) {
+        if (i >= pending.length) {
+          btn.textContent = 'إرسال للاعتماد';
+          ui.ok('رُفعت الوثائق — أُرسل الطلب للاعتماد');
+          bar.style.width = '100%';
+          doneStep();
+          return;
+        }
+        var inp = pending[i];
+        API.upload('onboarding/collector/upload-doc', inp.files[0], { fileType: inp.getAttribute('data-doc') })
+          .then(function () { next(i + 1); })
+          .catch(function (e) { ui.err(e.message || 'فشل رفع ' + inp.getAttribute('data-doc')); btn.disabled = false; btn.textContent = 'إرسال للاعتماد'; });
+      })(0);
+    });
+
+    /* الخطوة 4: فحص الحالة */
+    $('[data-refresh]').addEventListener('click', checkStatus);
+    function checkStatus() {
+      var msg = $('[data-wait-msg]');
+      if (msg) msg.textContent = 'آخر فحص: ' + new Date().toLocaleTimeString();
+      API.get('driver/my-truck').then(function (json) {
+        var d = API.one(json);
+        if (d.truck) {
+          ui.ok('تم تفعيل حسابك — شاحنتك: ' + (d.truck.model || ''));
+          setTimeout(function () { window.location.href = 'home.html'; }, 1200);
+        } else if (msg) msg.textContent = 'لا شاحنة بعد — انتظر قرار الإدارة.';
+      }).catch(function (e) { if (msg) msg.textContent = e.message || 'لا شاحنة بعد — انتظر قرار الإدارة.'; });
+    }
+
+    /* حالة مفعّلة بالفعل */
+    if (API.status() === 'ACTIVE') { window.location.href = 'home.html'; return; }
+    if (API.status() === 'PENDING_APPROVAL') { bar.style.width = '100%'; doneStep(); }
+  })();
+</script>
+</body>
+</html>

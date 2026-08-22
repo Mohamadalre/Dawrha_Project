@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ملفي — تطبيق المستخدم</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="user">
+<header class="topbar">
+  <div class="inner">
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="grow"></div>
+    <a href="home.html" class="avatar">م</a>
+  </div>
+</header>
+
+<main class="container">
+  <div class="card mt-16" style="text-align:center">
+    <div class="avatar" style="width:70px; height:70px; font-size:26px; margin:0 auto 8px">م</div>
+    <h3 style="font-size:18px"><input data-name-input value="" placeholder="اسمك" style="text-align:center; border:none; border-bottom:1px dashed var(--line); font-size:18px; font-weight:700; width:70%"></h3>
+    <span data-pstatus></span>
+    <p class="muted small mt-8" data-email>—</p>
+    <p class="muted small" data-phone>—</p>
+    <div class="row mt-16" style="justify-content:center">
+      <button class="btn primary" data-save>حفظ التعديلات</button>
+      <button class="btn danger" data-logout>تسجيل الخروج</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>المواقع المحفوظة <span class="endpoint">GET /api/v1/user/locations</span></h3>
+    <div data-locations>
+      <p class="muted small">جارٍ التحميل…</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>المحفظة والنقاط <span class="endpoint">GET /api/v1/wallet</span></h3>
+    <div class="row between">
+      <div>
+        <div style="font-size:26px; font-weight:800"><span data-wbalance>—</span> <span class="muted" style="font-size:13px">نقطة</span></div>
+        <p class="muted small">تُمنح النقاط عند اكتمال الطلبات</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>الإشعارات</h3>
+    <div data-notifs>
+      <p class="muted small">جارٍ التحميل…</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>الإعدادات والأمان</h3>
+    <div class="row between" style="padding:8px 0">
+      <span>تغيير كلمة المرور <span class="endpoint">PATCH /api/v1/user/password</span></span>
+      <button class="btn ghost" style="padding:6px 12px" onclick="ui.ok('أُرسل رابط تغيير كلمة المرور (محاكاة)')">تغيير</button>
+    </div>
+    <div class="row between">
+      <span>لغة التطبيق <span class="endpoint">PATCH /api/v1/device/language</span></span>
+      <select style="padding:6px; border:1px solid var(--line); border-radius:8px"><option>العربية</option><option>English</option></select>
+    </div>
+  </div>
+</main>
+
+<nav class="bottomnav">
+  <a href="home.html"><span class="ic">🏠</span>الرئيسية</a>
+  <a href="requests.html"><span class="ic">🚚</span>طلباتي</a>
+  <a href="cart.html"><span class="ic">🛒</span>السلة</a>
+  <a href="profile.html" class="active"><span class="ic">👤</span>ملفي</a>
+</nav>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+
+  var fmt = function (n) { return (+n || 0).toLocaleString('en-US'); };
+
+  function render() {
+    API.get('user/profile').then(function (json) {
+      var u = API.one(json);
+      var nameEl = document.querySelector('[data-pname]');
+      if (nameEl) nameEl.textContent = u.name || (API.user().email || '').split('@')[0];
+      var badgeEl = document.querySelector('[data-pstatus]');
+      if (badgeEl) badgeEl.innerHTML = API.badge(u.account_status || u.status);
+      ['email', 'phone'].forEach(function (k) {
+        var el = document.querySelector('[data-' + k + ']');
+        if (el) el.textContent = u[k] || '—';
+      });
+      API.setAvatar(u.name || 'م');
+    }).catch(function (e) { ui.err(e.message || 'تعذر تحميل الملف'); });
+
+    API.get('user/locations').then(function (json) {
+      var items = API.list(json);
+      var box = document.querySelector('[data-locations]');
+      if (!box) return;
+      box.innerHTML = items.map(function (loc) {
+        return '<div class="list-item"><div style="flex:1"><b>' + API.esc(loc.name || loc.label || 'موقع') + '</b>' +
+          '<div class="muted small">' + API.esc(loc.address || loc.address_text || '') + '</div></div>' +
+          (loc.lat != null ? '<span class="badge blue">' + fmt(loc.lat) + ', ' + fmt(loc.lng) + '</span>' : '') +
+          '<button class="btn danger" data-rm="' + loc.id + '" style="padding:6px 10px">✕</button></div>';
+      }).join('') || '<p class="muted small">لا توجد مواقع محفوظة.</p>';
+      box.querySelectorAll('[data-rm]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          API.del('user/locations/' + b.getAttribute('data-rm')).then(function () { ui.ok('حُذف الموقع'); render(); })
+            .catch(function (e) { ui.err(e.message || 'فشل الحذف'); });
+        });
+      });
+    }).catch(function () {});
+
+    API.get('wallet').then(function (json) {
+      var w = API.one(json);
+      var bal = w.balance != null ? w.balance : (w.points != null ? w.points : null);
+      var el = document.querySelector('[data-wbalance]');
+      if (el && bal != null) el.textContent = fmt(bal);
+    }).catch(function () {});
+
+    API.get('notifications').then(function (json) {
+      var items = API.list(json);
+      var box = document.querySelector('[data-notifs]');
+      if (!box) return;
+      if (!items.length) { box.innerHTML = '<p class="muted small">لا توجد إشعارات.</p>'; return; }
+      box.innerHTML = items.slice(0, 4).map(function (n) {
+        return '<div class="notif-item ' + (n.is_read ? '' : 'unread') + '"><div style="flex:1"><b>' +
+          API.esc(n.title || 'إشعار') + '</b><p class="muted small">' + API.esc(n.body || n.message || '') + '</p></div>' +
+          (n.is_read ? '' : '<span class="badge blue">جديد</span>') + '</div>';
+      }).join('');
+    }).catch(function () {});
+  }
+  render();
+
+  /* حفظ التعديلات: PATCH /user/profile */
+  document.querySelector('[data-save]').addEventListener('click', function () {
+    var inp = document.querySelector('[data-name-input]');
+    API.patch('user/profile', { name: inp ? inp.value : undefined }).then(function () {
+      ui.ok('حُفظ الملف'); render();
+    }).catch(function (e) { ui.err(e.message || 'فشل الحفظ'); });
+  });
+  /* خروج: POST /auth/logout */
+  document.querySelector('[data-logout]').addEventListener('click', function () {
+    API.logout('login.html');
+  });
+</script>
+</body>
+</html>

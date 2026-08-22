@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الجولة — تطبيق السائقين</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="driver">
+<header class="topbar">
+  <div class="inner">
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="grow"></div>
+    <span class="badge gray" data-tour-socket>غير متصل</span>
+    <a href="home.html" class="avatar">أ</a>
+  </div>
+</header>
+
+<main class="container">
+  <h2 style="font-size:19px; margin:16px 0 4px">جولتي <span class="endpoint">GET /api/v1/driver/collection-requests</span></h2>
+  <p class="muted" data-tour-head>جارٍ التحميل…</p>
+  <div class="row mt-8" style="gap:6px">
+    <span class="endpoint" style="font-size:10px">socket /collection → request:assigned</span>
+  </div>
+
+  <div data-tour>
+    <p class="muted small">جارٍ التحميل…</p>
+  </div>
+</main>
+
+<nav class="bottomnav">
+  <a href="home.html"><span class="ic">🏠</span>الرئيسية</a>
+  <a href="tour.html" class="active"><span class="ic">🗺️</span>الجولة</a>
+  <a href="profile.html"><span class="ic">👤</span>ملفي</a>
+</nav>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script src="../assets/socket.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+
+  var fmt = function (n) { return (+n || 0).toLocaleString('en-US'); };
+
+  function actBtn(label, cls, id, action, payload) {
+    var b = document.createElement('button');
+    b.className = 'btn ' + (cls || 'driver') + ' grow';
+    b.textContent = label;
+    b.addEventListener('click', function () {
+      b.disabled = true;
+      API.patch('driver/collection-requests/' + id + '/' + action, payload || {}).then(function () {
+        ui.ok('نُفّذت العملية: ' + action);
+        setTimeout(function () { render(); }, 700);
+      }).catch(function (e) { ui.err(e.message || 'فشلت العملية'); })
+        .finally(function () { b.disabled = false; });
+    });
+    return b;
+  }
+
+  function stopCard(r, idx) {
+    var st = r.status || '—';
+    var items = (r.lines || []).map(function (l) {
+      return (l.product_name || 'منتج') + ' × ' + fmt(l.quantity) + ' ' + (l.unit_type === 'PIECE' ? 'قطعة' : 'كغ');
+    }).join(' · ');
+    var contact = r.contact_name ? 'العميل: ' + API.esc(r.contact_name) + (r.contact_phone ? ' · ' + API.esc(r.contact_phone) : '') : '';
+    var html = '<div class="card"><div class="row between"><b>محطة ' + idx + ' · ' + API.esc(r.request_number || r.id.slice(0, 8)) + '</b>' + API.badge(st) + '</div>' +
+      '<p class="muted small mt-8">' + items + '</p>' +
+      '<p class="muted small">' + API.esc(r.address_text || '') + '</p>' +
+      (contact ? '<p class="muted small">' + contact + '</p>' : '') +
+      '<div class="row mt-8" data-actions></div></div>';
+    var tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    var row = tmp.querySelector('[data-actions]');
+
+    if (st === 'OFFERED') {
+      row.appendChild(actBtn('قبول', 'driver', r.id, 'accept'));
+      row.appendChild(actBtn('رفض', 'danger', r.id, 'reject'));
+    }
+    if (st === 'ASSIGNED' || st === 'EN_ROUTE') row.appendChild(actBtn('وصلت', 'driver', r.id, 'arrived'));
+    if (st === 'ARRIVED' || st === 'PICKING') {
+      var w = document.createElement('input');
+      w.type = 'number'; w.step = '0.1'; w.min = '0.001';
+      w.placeholder = 'وزن الميزان (كغ)';
+      w.style.cssText = 'flex:1; padding:10px; border:1px solid var(--line); border-radius:10px; margin-inline-end:8px';
+      row.appendChild(w);
+      var b = document.createElement('button');
+      b.className = 'btn driver grow'; b.textContent = 'سجّل الوزن';
+      b.addEventListener('click', function () {
+        var v = parseFloat(w.value);
+        if (!v || v <= 0) return ui.err('أدخل قراءة الميزان');
+        b.disabled = true;
+        API.patch('driver/collection-requests/' + r.id + '/collected', { actualWeightKg: v })
+          .then(function () { ui.ok('سُجّل الوزن ' + v + ' كغ'); setTimeout(function () { render(); }, 700); })
+          .catch(function (e) { ui.err(e.message || 'فشل التسجيل'); })
+          .finally(function () { b.disabled = false; });
+      });
+      row.appendChild(b);
+    }
+    if (st === 'PICKING' || st === 'DELIVERED') {
+      if (st === 'PICKING') row.appendChild(actBtn('سُلّمت للمستودع', 'driver', r.id, 'delivered'));
+      else row.appendChild(document.createTextNode(''));
+    }
+    return tmp.firstChild;
+  }
+
+  function render() {
+    var box = document.querySelector('[data-tour]');
+    if (!box) return;
+    box.innerHTML = '<p class="muted small">جارٍ تحميل جولتك…</p>';
+    API.get('driver/collection-requests').then(function (json) {
+      var d = API.one(json);
+      var stops = API.list(d.stops || d.requests || json) || [];
+      if (!stops.length) {
+        box.innerHTML = '<div class="card"><p class="muted small">لا توجد محطات في جولتك الآن — انتظر وصول عروض جديدة عبر القناة الحية.</p><p class="hint mt-8">العروض تصل تلقائيًا عبر socket /collection</p></div>';
+        var h = document.querySelector('[data-tour-head]');
+        if (h) h.textContent = 'لا توجد محطات اليوم';
+        return;
+      }
+      var head = document.querySelector('[data-tour-head]');
+      if (head) head.textContent = stops.length + ' محطة اليوم · التالية: ' + (stops[0].request_number || '—');
+      stops.forEach(function (r, i) { box.appendChild(stopCard(r, i + 1)); });
+    }).catch(function (e) {
+      box.innerHTML = '<div class="card"><p class="muted small">' + API.esc(e.message || 'تعذر تحميل الجولة') + '</p></div>';
+    });
+  }
+  render();
+
+  /* =================== عروض حية (Socket.IO /collection) =================== */
+  var tourSocket = null;
+
+  function connectTourSocket() {
+    Socket.connect('/collection').then(function (sock) {
+      tourSocket = sock;
+      var badge = document.querySelector('[data-tour-socket]');
+      if (badge) { badge.textContent = 'متصل — عروض حية'; badge.className = 'badge green'; }
+      /* عند وصول عرض جديد */
+      sock.on('request:assigned', function (data) {
+        ui.ok('عرض جديد وصل! جارٍ التحديث…', 'request:assigned');
+        setTimeout(render, 600);
+      });
+      /* عند تحديث طلب */
+      sock.on('request:updated', function (data) {
+        setTimeout(render, 600);
+      });
+    }).catch(function (err) {
+      var badge = document.querySelector('[data-tour-socket]');
+      if (badge) { badge.textContent = 'خطأ الاتصال'; badge.className = 'badge red'; }
+    });
+  }
+
+  connectTourSocket();
+
+  window.addEventListener('beforeunload', function () {
+    if (tourSocket) tourSocket.disconnect();
+  });
+</script>
+</body>
+</html>

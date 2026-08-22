@@ -39,6 +39,8 @@ export const ODOO_JOBS = {
   PUSH_TRUCK_PROBLEM: 'push-truck-problem-to-odoo',
   PUSH_HANDOVER_PICKUP: 'push-handover-pickup-to-odoo',
   PUSH_HANDOVER_DROPOFF: 'push-handover-dropoff-to-odoo',
+  /** The collector delivered material into stock — inventory grows with actuals. */
+  REGISTER_INTAKE: 'register-intake-to-odoo',
   APPLY_DRIVER_DECISION: 'apply-driver-decision-from-odoo',
   APPLY_SHIFT_CHANGE_DECISION: 'apply-shift-change-decision-from-odoo',
 } as const;
@@ -78,6 +80,7 @@ export const ODOO_JOB_OPTIONS: Record<string, { attempts: number; backoff: numbe
   [ODOO_JOBS.PUSH_TRUCK_PROBLEM]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.PUSH_HANDOVER_PICKUP]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.PUSH_HANDOVER_DROPOFF]: { attempts: 3, backoff: 5000 },
+  [ODOO_JOBS.REGISTER_INTAKE]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.APPLY_DRIVER_DECISION]: { attempts: 3, backoff: 5000 },
   [ODOO_JOBS.APPLY_SHIFT_CHANGE_DECISION]: { attempts: 3, backoff: 5000 },
 };
@@ -209,6 +212,22 @@ export interface PushTruckProblemPayload {
 }
 export interface PushHandoverPayload {
   handoverId: string;
+}
+/**
+ * A delivered collection request, pushed so Odoo's stock grows with the ACTUAL
+ * weights. The whole payload rides on the job (the processor has no collection
+ * repos) and the lines already carry each product's Odoo id, resolved at
+ * delivery time.
+ */
+export interface RegisterIntakePayload {
+  requestId: string;
+  odooWarehouseId?: number | null;
+  producerName?: string | null;
+  receivedAt?: string | null;
+  lines: {
+    odooProductId?: number | null;
+    quantity: number;
+  }[];
 }
 export interface DriverDecisionPayload {
   /** Collector profile id the backend sent as backend_driver_id. */

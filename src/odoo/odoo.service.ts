@@ -830,6 +830,23 @@ export class OdooService {
   }
 
   /**
+   * Registers a COLLECTION intake in Odoo: the material the collector actually
+   * carried from the producer into the warehouse. Idempotent on `request_id` —
+   * a retry after a timeout re-lands on the same intake instead of growing the
+   * stock twice. The lines already carry each product's Odoo id, resolved at
+   * delivery time (those without one are carried as `null` and Odoo skips them).
+   */
+  async registerIntake(payload: {
+    request_id: string;
+    warehouse_odoo_id?: number | null;
+    producer_name?: string | null;
+    received_at?: string | null;
+    lines: { product_odoo_id?: number | null; quantity: number }[];
+  }): Promise<{ odoo_id?: number }> {
+    return this.callKw('recycle.collection.request', 'backend_register_intake', [payload]);
+  }
+
+  /**
    * Notifies a warehouse's manager of a complaint about one of its parts — a
    * shortage or a quality problem, decided from the deduction evidence that
    * lives in Odoo, not here.

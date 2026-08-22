@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>التقارير — الأدمن</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="admin">
+<div class="admin-shell">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="dot" style="width:28px;height:28px;border-radius:8px;background:var(--admin-accent);color:#1e293b;display:grid;place-items:center;font-size:14px">د</span> دورها — أدمن</div>
+    <nav>
+      <a href="dashboard.html">📊 لوحة التحكم</a>
+      <a href="accounts.html">👥 الحسابات</a>
+      <a href="requests.html">🚚 طلبات الجمع</a>
+      <a href="fleet.html">🛻 الأسطول والورديات</a>
+      <a href="shipments.html">📦 الشحنات</a>
+      <a href="catalog.html">🗂️ الكتالوج والتسعير</a>
+      <a href="reports.html" class="active">📈 التقارير</a>
+      <a href="login.html" data-logout-link>↩ خروج</a>
+    </nav>
+  </aside>
+
+  <main class="admin-content">
+    <div class="admin-header">
+      <div class="row">
+        <button class="btn sidebar-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <h1>التقارير</h1>
+      </div>
+      <div class="row">
+        <input type="date" value="2026-08-18" style="padding:8px; border:1px solid var(--line); border-radius:8px">
+        <button class="btn admin" onclick="ui.ok('حُدّثت التقارير (محاكاة)','GET /api/v1/admin/reports/overview?from&to')">تحديث</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>نظرة عامة <span class="endpoint">GET /api/v1/admin/reports/overview</span></h3>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap:12px" data-ov-cards>
+        <div class="card" style="margin:0"><div class="muted small">حمل</div><b style="font-size:22px">…</b></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>الحسابات <span class="endpoint">GET /api/v1/admin/reports/accounts</span></h3>
+      <div data-acc-cards></div>
+    </div>
+
+    <div class="card">
+      <h3>السائقون والشاحنات والمستودعات <span class="endpoint">GET /api/v1/admin/reports/drivers · trucks · warehouses</span></h3>
+      <div data-drv-cards></div>
+    </div>
+
+    <div class="card">
+      <h3>الكتالوج <span class="endpoint">GET /api/v1/admin/reports/catalog</span></h3>
+      <div data-cat-cards></div>
+    </div>
+
+    <div class="card">
+      <h3>حالة المزامنة مع Odoo</h3>
+      <div class="statusbar">last sync: 06:12 · category ✓ · product ✓ · pricing ✓ · fleet ✗ (shift start_time null) · tariffs ✗</div>
+      <div class="row mt-8">
+        <button class="btn" onclick="ui.ok('أُعيدت المزامنة (محاكاة)','POST /api/v1/admin/odoo/sync')">إعادة المزامنة</button>
+        <button class="btn ghost" onclick="ui.ok('صُدّر التقرير (محاكاة)')">تصدير Excel</button>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+  var lo = document.querySelector('[data-logout-link]');
+  if (lo) lo.addEventListener('click', function (ev) { ev.preventDefault(); API.logout('login.html'); });
+
+  function cards(el, rows) {
+    if (!el) return;
+    el.innerHTML = '';
+    rows.forEach(function (r) {
+      if (!r || r[1] == null) return;
+      var d = document.createElement('div');
+      d.className = 'card'; d.style.cssText = 'margin:0';
+      d.innerHTML = '<div class="muted small">' + r[0] + '</div><b style="font-size:22px">' + API.esc(r[1]) + '</b>' +
+        (r[2] ? '<div class="muted small">' + API.esc(r[2]) + '</div>' : '');
+      el.appendChild(d);
+    });
+  }
+
+  API.get('admin/reports/overview').then(function (json) {
+    var d = API.one(json);
+    cards(document.querySelector('[data-ov-cards]'), [
+      ['حسابات', d.accounts && d.accounts.total],
+      ['نشطة', d.accounts && d.accounts.by_status && d.accounts.by_status.ACTIVE],
+      ['سائقون', d.drivers && d.drivers.total],
+      ['شاحنات', d.trucks && d.trucks.total],
+      ['مستودعات', d.warehouses && d.warehouses.total],
+      ['منتجات', d.catalog && d.catalog.products],
+    ]);
+  }).catch(function () {});
+
+  API.get('admin/reports/accounts').then(function (json) {
+    var d = API.one(json);
+    var br = d.by_role || d.byStatus || {};
+    cards(document.querySelector('[data-acc-cards]'), [
+      ['إجمالي', d.total],
+      ['مواطنون', br.CITIZEN],
+      ['معامل', br.FACTORY],
+      ['مؤسسات', br.INSTITUTIONS],
+      ['أجهزة حرة', br.EXTERNAL_PARTNER],
+    ]);
+  }).catch(function () {});
+
+  API.get('admin/reports/drivers').then(function (json) {
+    var d = API.one(json);
+    cards(document.querySelector('[data-drv-cards]'), [
+      ['سائقون', d.total],
+      ['نشطون', d.active],
+      ['بشاحنة', d.assigned_to_truck],
+      ['بدون شاحنة', d.without_truck],
+    ]);
+  }).catch(function () {});
+
+  API.get('admin/reports/warehouses').then(function (json) {
+    var d = API.one(json);
+    cards(document.querySelector('[data-drv-cards]'), [
+      ['مستودعات', d.total],
+      ['نشطة', d.active],
+    ]);
+  }).catch(function () {});
+
+  API.get('admin/reports/catalog').then(function (json) {
+    var d = API.one(json);
+    cards(document.querySelector('[data-cat-cards]'), [
+      ['فئات', d.categories],
+      ['منتجات', d.products],
+      ['منتجات نشطة', d.active_products],
+      ['عروض', d.offers],
+    ]);
+  }).catch(function () {});
+</script>
+</body>
+</html>

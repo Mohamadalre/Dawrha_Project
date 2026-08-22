@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>طلباتي — تطبيق المستخدم</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="user">
+<header class="topbar">
+  <div class="inner">
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="grow"></div>
+    <a href="home.html" class="avatar">م</a>
+  </div>
+</header>
+
+<main class="container">
+  <div class="row between mt-16" style="align-items:flex-end">
+    <h2 style="font-size:19px">طلباتي</h2>
+    <a href="new-request.html" class="btn primary" style="padding:8px 14px">+ جديد</a>
+  </div>
+
+  <div class="card mt-16" data-requests>
+    <p class="muted small">جارٍ تحميل طلباتك…</p>
+  </div>
+</main>
+
+<nav class="bottomnav">
+  <a href="home.html"><span class="ic">🏠</span>الرئيسية</a>
+  <a href="requests.html" class="active"><span class="ic">🚚</span>طلباتي</a>
+  <a href="cart.html"><span class="ic">🛒</span>السلة</a>
+  <a href="profile.html"><span class="ic">👤</span>ملفي</a>
+</nav>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+
+  var fmt = function (n) { return (+n || 0).toLocaleString('en-US'); };
+  var STEP_OF = {
+    QUEUED: 1, ASSIGNED: 2, OFFERED: 2, EN_ROUTE: 3, ARRIVED: 4, PICKING: 4,
+    DELIVERED: 5, COMPLETED: 6, CANCELLED: 0, NEEDS_ADMIN: 2, NEEDS_ATTENTION: 2
+  };
+  var STEP_LABELS = ['طُلب', 'أُسند', 'في الطريق', 'جُمِع', 'سُلّم', 'مكتمل'];
+  function stepper(status) {
+    var cur = STEP_OF[status] || 1;
+    var out = '<div class="stepper">';
+    for (var i = 0; i < 6; i++) {
+      var cls = status === 'CANCELLED' ? '' : (i + 1 < cur ? 'done' : (i + 1 === cur ? 'now' : ''));
+      var bubble = status === 'CANCELLED' ? '✕' : (i + 1 < cur ? '✓' : (i + 1 === cur ? (i + 1) : (i + 1)));
+      out += '<div class="step ' + cls + '"><div class="bubble">' + bubble + '</div><div class="lbl">' + STEP_LABELS[i] + '</div></div>';
+    }
+    return out + '</div>';
+  }
+  function summary(r) {
+    if (!r.lines || !r.lines.length) return '—';
+    return r.lines.map(function (l) {
+      return (l.product_name || 'منتج') + ' × ' + fmt(l.quantity) + ' ' + (l.unit_type === 'PIECE' ? 'قطعة' : 'كغ');
+    }).join(' · ');
+  }
+
+  function render() {
+    var box = document.querySelector('[data-requests]');
+    if (!box) return;
+    API.get('collection-requests').then(function (json) {
+      var items = API.list(json);
+      if (!items.length) { box.innerHTML = '<p class="muted small">لا توجد طلبات بعد.</p><a class="btn primary block mt-8" href="new-request.html">+ طلب جمع جديد</a>'; return; }
+      box.innerHTML = items.map(function (r) {
+        var st = r.status || '—';
+        var w = r.actual_weight_kg != null ? 'الوزن الفعلي: <b>' + fmt(r.actual_weight_kg) + ' كغ</b>' : 'الوزن التقديري: <b>' + fmt(r.estimated_weight_kg) + ' كغ</b>';
+        var t = r.actual_grand_total != null ? fmt(r.actual_grand_total) : fmt(r.estimated_grand_total);
+        var driver = (r.route && r.route.driver && r.route.driver.name) || (r.assignments && r.assignments[0] && r.assignments[0].driver && r.assignments[0].driver.name);
+        var cancel = (st === 'QUEUED') ? '<button class="btn danger" data-cancel="' + r.id + '" style="padding:6px 12px">إلغاء</button>' : '';
+        return '<div class="card">' +
+          '<div class="row between"><b>' + API.esc(r.request_number || r.id.slice(0, 8)) + '</b>' + API.badge(st) + '</div>' +
+          '<p class="muted small mt-8">' + summary(r) + '</p>' +
+          '<p class="muted small">' + w + ' · الإجمالي: <b>' + fmt(t) + ' ل.س</b>' + (driver ? ' · السائق: ' + API.esc(driver) : '') + '</p>' +
+          stepper(st) +
+          '<div class="row between mt-8">' +
+          '<span class="muted small">' + API.esc(r.address_text || '') + '</span>' + cancel +
+          '</div></div>';
+      }).join('');
+      box.querySelectorAll('[data-cancel]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          API.patch('collection-requests/' + b.getAttribute('data-cancel') + '/cancel', { reason: 'أُلغي من قبل المستخدم' })
+            .then(function () { ui.ok('أُلغي الطلب'); render(); })
+            .catch(function (e) { ui.err(e.message || 'تعذر الإلغاء'); });
+        });
+      });
+    }).catch(function (e) {
+      box.innerHTML = '<p class="muted small">' + API.esc(e.message || 'تعذر تحميل الطلبات') + '</p>';
+    });
+  }
+  render();
+</script>
+</body>
+</html>

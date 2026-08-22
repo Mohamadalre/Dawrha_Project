@@ -11,7 +11,8 @@ import { winstonConfig, winstonLogger } from './core/logger-config/winston.confi
 import { LoggerExceptionsFilter } from './common/filters/logger-exception.filter';
 
 import { NestExpressApplication } from '@nestjs/platform-express';
-import helmet from 'helmet';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+// import helmet from 'helmet';
 
 
 
@@ -80,7 +81,10 @@ async function bootstrap() {
 
     // Set global API prefix
     app.setGlobalPrefix('api');
-    
+
+    // Dev CORS: scenario UI (tools/scenario) and fake Odoo call in from other origins
+    app.enableCors();
+
     // Enable URI-based versioning (e.g., /api/v1/...)
     app.enableVersioning({ type: VersioningType.URI })
     
@@ -114,8 +118,20 @@ async function bootstrap() {
      */
     app.useGlobalInterceptors(new LoggerHttpInterceptor());
     app.useGlobalInterceptors(new TransformInterceptor());
-    app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
-
+app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
+    
+    // Swagger documentation
+    const config = new DocumentBuilder()
+      .setTitle('Dawrha API')
+      .setDescription('Dawrha platform API documentation')
+      .setVersion('1.0')
+      .addTag('User')
+      .addTag('Driver')
+      .addTag('Admin')
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document);
+    
     // Start listening on configured port
     await app.listen(port);
 

@@ -26,6 +26,11 @@ async function run() {
     // truth for shifts; they reach the backend only via the fleet mirror
     // (SYNC_FLEET). Any locally-seeded shift would be a phantom the driver
     // pickers must never show.
+    // NOTE: material conditions are intentionally NOT seeded. Conditions are
+    // per-product (material_conditions.product_id NOT NULL) and every material
+    // starts with NONE: the admin adds that material's own grades at runtime
+    // via the conditions routes. A global seed would plant grades that say
+    // nothing about the products that exist (FIXES round 2026-07-12, #47).
     await seedUnits(AppDataSource);
     // NOTE: material conditions (grades) are intentionally NOT seeded. They are
     // per-product, not a global list (see material-condition.entity.ts): a

@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import {
   ConnectedSocket,
@@ -29,10 +30,8 @@ interface SocketUser {
  *
  * Flow:
  *  - The driver app (COLLECTOR) emits `truck:location` with {truckId, lat, lng}.
- *    Coordinates are persisted in Redis and broadcast to subscribers.
- *  - The system admin (ADMIN) emits `truck:subscribe` {truckId} to join that
- *    truck's room and receive live `truck:location` events, or `admin:subscribeAll`
- *    to receive every truck's updates.
+ *    Coordinates are persisted in Redis and broadcast to subscribers in the
+ *    truck's room. The system admin has NO access to this namespace.
  *
  * Every connection is authenticated via JWT in the handshake
  * (`auth.token`, `?token=`, or the Authorization header).
@@ -54,6 +53,7 @@ export class TruckTrackingGateway
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly redisService: RedisService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -134,17 +134,16 @@ export class TruckTrackingGateway
     // actively operating this truck — i.e. an OPEN handover exists (he pressed
     // "pick up"). A truck that is merely assigned but not yet picked up is not
     // tracked, which is the whole point: tracking runs only when the driver has
-    // received/started the truck. Admins may report on behalf of any truck.
-    if (user.role === Role.COLLECTOR) {
-      const holding = await this.tracking.hasActiveHandover(user.id, dto.truckId);
-      if (!holding) {
-        return {
-          status: 'error',
-          message: 'Pick up the truck before tracking starts',
-        };
-      }
-    } else if (user.role !== Role.ADMIN) {
+    // received/started the truck.
+    if (user.role !== Role.COLLECTOR) {
       return { status: 'error', message: 'Forbidden' };
+    }
+    const holding = await this.tracking.hasActiveHandover(user.id, dto.truckId);
+    if (!holding) {
+      return {
+        status: 'error',
+        message: 'Pick up the truck before tracking starts',
+      };
     }
 
     // Remember which truck this socket reports for, so a disconnect can finalise it.
@@ -152,7 +151,19 @@ export class TruckTrackingGateway
 
     const stored = await this.tracking.saveLocation(dto, user.id);
     this.server.to(this.room(dto.truckId)).emit('truck:location', stored);
-    this.server.to('admins').emit('truck:location', stored);
+
+    // The dispatch engine listens for this and re-elects the oldest queued
+    // request (throttled per driver) so a driver's fresh position reaches the
+    // scores without anyone polling Redis.
+    if (user.role === Role.COLLECTOR) {
+      this.eventEmitter.emit('truck.location.updated', {
+        truckId: dto.truckId,
+        driverId: user.id,
+        lat: dto.lat,
+        lng: dto.lng,
+        heading: dto.heading,
+      });
+    }
     return { status: 'ok' };
   }
 
@@ -171,12 +182,11 @@ export class TruckTrackingGateway
     const truckId = data?.truckId ?? client.data.truckId;
     if (!truckId) return { status: 'error', message: 'truckId is required' };
 
-    if (user.role === Role.COLLECTOR) {
-      const isDriver = await this.tracking.isDriverOfTruck(user.id, truckId);
-      if (!isDriver) return { status: 'error', message: 'Not assigned to this truck' };
-    } else if (user.role !== Role.ADMIN) {
+    if (user.role !== Role.COLLECTOR) {
       return { status: 'error', message: 'Forbidden' };
     }
+    const isDriver = await this.tracking.isDriverOfTruck(user.id, truckId);
+    if (!isDriver) return { status: 'error', message: 'Not assigned to this truck' };
 
     const log = await this.tracking.finalizeStop(truckId, StopReason.MANUAL_STOP);
     this.emitStopped(truckId, StopReason.MANUAL_STOP, log);
@@ -186,25 +196,11 @@ export class TruckTrackingGateway
   private emitStopped(truckId: string, reason: StopReason, log: unknown): void {
     const payload = { truckId, reason, location: log };
     this.server?.to(this.room(truckId)).emit('truck:stopped', payload);
-    this.server?.to('admins').emit('truck:stopped', payload);
   }
 
   // ---------------------------------------------------------------------------
   // Session boundaries, driven by the handover flow (pickup / dropoff)
   // ---------------------------------------------------------------------------
-  /**
-   * The driver picked the truck up: tracking is now live for it. Tell the admin
-   * dashboards so a truck appears on the map the moment its session starts, even
-   * before the first GPS ping arrives.
-   */
-  announceSessionStarted(info: {
-    truckId: string;
-    driverId?: string | null;
-    plateNumber?: string | null;
-  }): void {
-    this.server?.to('admins').emit('truck:session', { ...info, status: 'started' });
-  }
-
   /**
    * The driver handed the truck back: end the live session. Persists the last
    * known position as a stop and notifies subscribers the truck is no longer
@@ -213,42 +209,6 @@ export class TruckTrackingGateway
   async endSession(truckId: string, reason: StopReason): Promise<void> {
     const log = await this.tracking.finalizeStop(truckId, reason);
     this.emitStopped(truckId, reason, log);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Admin → server: subscribe to a truck / all trucks
-  // ---------------------------------------------------------------------------
-  @SubscribeMessage('truck:subscribe')
-  async onSubscribe(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { truckId?: string },
-  ) {
-    const user: SocketUser | undefined = client.data.user;
-    if (user?.role !== Role.ADMIN) return { status: 'error', message: 'Forbidden' };
-    if (!data?.truckId) return { status: 'error', message: 'truckId is required' };
-
-    await client.join(this.room(data.truckId));
-    const lastKnown = await this.tracking.getLocation(data.truckId);
-    return { status: 'ok', location: lastKnown };
-  }
-
-  @SubscribeMessage('truck:unsubscribe')
-  async onUnsubscribe(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { truckId?: string },
-  ) {
-    if (data?.truckId) await client.leave(this.room(data.truckId));
-    return { status: 'ok' };
-  }
-
-  @SubscribeMessage('admin:subscribeAll')
-  async onSubscribeAll(@ConnectedSocket() client: Socket) {
-    const user: SocketUser | undefined = client.data.user;
-    if (user?.role !== Role.ADMIN) return { status: 'error', message: 'Forbidden' };
-
-    await client.join('admins');
-    const active = await this.tracking.getActiveTrucks();
-    return { status: 'ok', active };
   }
 
   private room(truckId: string): string {
