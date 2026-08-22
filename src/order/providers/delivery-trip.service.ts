@@ -603,7 +603,11 @@ export class DeliveryTripService {
     currency?: string;
   }> {
     if (order.fulfilmentMode === FulfilmentMode.DELIVERY) {
-      return { available: false, reason: 'This is a delivery order — it is brought to you' };
+      return {
+        available: false,
+        reason:
+          'This is a delivery order — it is brought to you via milk-run (one truck from farthest warehouse through nearer ones). For delivery splits, the far warehouse ships to the nearest then the nearest delivers — handled automatically by delivery planning.',
+      };
     }
     // Only up to the moment goods are ready to collect; once chosen it stays
     // reported as available so the buyer's screen still shows their choice.

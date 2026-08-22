@@ -65,9 +65,43 @@ export class AdminOrderController {
   }
 
   /**
+   * Approves a SPLIT order as-is: the warehouses-manager (مدير المستودعات)
+   * confirms the allocator's chosen set (e.g. A+B) without swapping.
+   * Only while the order is AWAITING_SPLIT_APPROVAL — no parts exist yet.
+   */
+  @Post(':orderId/approve-split')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('admin.orders.manage')
+  async approveSplit(
+    @CurrentUser() admin: any,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+  ) {
+    return this.allocation.approveSplit(orderId, admin.id);
+  }
+
+  /**
+   * Rejects a SPLIT order as a whole: the warehouses-manager refuses the
+   * allocation (no alternative set satisfies him). Only while
+   * AWAITING_SPLIT_APPROVAL — moves to REJECTED_AWAITING_BUYER for the
+   * buyer to confirm, exactly like a warehouse manager's post-creation
+   * rejection of a split.
+   */
+  @Post(':orderId/reject-split')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('admin.orders.manage')
+  async rejectSplit(
+    @CurrentUser() admin: any,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @Body() dto: { reason?: string },
+  ) {
+    return this.allocation.rejectSplit(orderId, dto?.reason, admin.id);
+  }
+
+  /**
    * Applies a MODIFY: re-routes the split order onto the warehouse set the admin
    * picked from the options above. Only while the split is still awaiting
-   * approval; the set must be the same size as the split and cover the order.
+   * approval (AWAITING_APPROVAL or AWAITING_SPLIT_APPROVAL); the set must be
+   * the same size as the split and cover the order.
    */
   @Post(':orderId/modify')
   @HttpCode(HttpStatus.OK)

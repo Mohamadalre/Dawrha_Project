@@ -176,3 +176,12 @@ export class CollectionOfferExpiredException extends ConflictException {
     });
   }
 }
+
+export class NoDriverAvailableException extends ConflictException {
+  constructor() {
+    super({
+      message: 'No driver available to serve this request',
+      errorCode: 'NO_DRIVER_AVAILABLE',
+    });
+  }
+}

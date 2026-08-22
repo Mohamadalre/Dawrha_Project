@@ -29,12 +29,14 @@ import {
   DuplicateLineProductException,
   EmptyRequestLinesException,
   InvalidScheduleException,
+  NoDriverAvailableException,
 } from '../exceptions/collection-request.exceptions';
 import { CreateCollectionRequestDto } from '../dto/create-collection-request.dto';
 import { ListCollectionRequestsQueryDto } from '../dto/list-collection-requests.dto';
 import { buildPagination } from '@src/waste-management/common/dto/pagination.dto';
 import { nextSequentialNumber } from '../utils/sequence.util';
 import { estimateWeightKg } from '../utils/weight.util';
+import { DispatchEngineService } from './dispatch-engine.service';
 
 const LOG_META = { context: 'COLLECTION_REQUEST', channel: 'collection' } as const;
 
@@ -66,13 +68,10 @@ export class CollectionRequestService {
     @InjectRepository(Product)
     private readonly productRepo: Repository<Product>,
     private readonly units: UnitsService,
-    // The single resolver for "what does THIS role earn for THIS material right
-    // now" — list price with any live offer applied in the right direction for
-    // a SELLER. The request must not compute that itself: a second copy of the
-    // sign is how a request that adds ends up beside a catalogue that subtracts.
     private readonly effectivePrice: EffectivePriceService,
     private readonly state: CollectionStateService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly dispatchEngine: DispatchEngineService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -158,17 +157,57 @@ export class CollectionRequestService {
     });
     const saved = await this.requestRepo.save(request);
 
-    // Immediate requests enter the queue right away and the engine elects a
-    // driver at once. Scheduled and plan requests stay CREATED until their
-    // lead-time window opens (scheduleWindow), so they can never be elected
-    // early — the producer's chosen slot is honoured.
+    // ── Synchronous dispatch for IMMEDIATE requests ────────────────────────
+    // The engine runs the election right here: if a driver is found, the
+    // request is created as ASSIGNED (never hits the queue). If no driver is
+    // available the request is NOT created — we throw a 409.
     if (saved.type === CollectionRequestType.IMMEDIATE) {
+      const election = await this.dispatchEngine.electSynchronous(saved);
+      if (!election) {
+        await this.requestRepo.remove(saved);
+        throw new NoDriverAvailableException();
+      }
+
+      // ── Path A: merge into an active route (already ASSIGNED) ──────────
+      if ('merged' in election) {
+        // The request is already bound to a route; just load the driver profile.
+        const profileRepo = this.requestRepo.manager.getRepository('CollectorProfile');
+        const profile = await profileRepo.findOne({
+          where: { id: election.driverId },
+          relations: ['account', 'assignment', 'assignment.truck', 'shift'],
+        });
+        return { ...this.toView(saved), assigned_driver: profile ?? null };
+      }
+
+      // ── Path B: scored election → create assignment + settle ──────────
+      const driverProfile = await this.dispatchEngine.loadCandidateProfile(election.candidate);
+      if (driverProfile) driverProfile.score = +election.score.toFixed(2);
+
+      // Set to QUEUED so settleOffer's status guard passes, then create
+      // the assignment record and settle it synchronously.
       this.state.applyRequestStatus(saved, CollectionRequestStatus.QUEUED);
       await this.requestRepo.save(saved);
+
+      const assignment = this.assignmentRepo.create({
+        request: saved,
+        requestId: saved.id,
+        driverId: election.candidate.driverId,
+        status: CollectionRequestAssignmentStatus.OFFERED,
+        score: null,
+        offerExpiresAt: null,
+      });
+      const savedAssignment = await this.assignmentRepo.save(assignment);
+      await this.dispatchEngine.settleOffer(
+        savedAssignment,
+        CollectionRequestAssignmentStatus.ACCEPTED,
+      );
+
+      return { ...this.toView(saved), assigned_driver: driverProfile };
     }
 
-    // The dispatch engine reacts to this event: immediate requests are elected
-    // right away, scheduled ones get their lead-time window job.
+    // ── Scheduled / Plan requests: async flow (unchanged) ──────────────────
+    this.state.applyRequestStatus(saved, CollectionRequestStatus.QUEUED);
+    await this.requestRepo.save(saved);
     this.eventEmitter.emit('collection.request.queued', { requestId: saved.id });
 
     return this.toView(saved);

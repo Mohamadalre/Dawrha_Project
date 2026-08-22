@@ -178,6 +178,17 @@ export class OrderAllocationService {
       return { result: 'PARTIAL_NEEDS_BUYER', missingRatio: missing };
     }
 
+    if (plan.parts.length > 1) {
+      order.status = OrderStatus.AWAITING_SPLIT_APPROVAL;
+      order.requestedLines = lines;
+      await this.orderRepo.save(order);
+      winstonLogger.info(
+        `Order ${order.orderNumber}: split across ${plan.parts.length} warehouse(s) — awaiting warehouses-manager approval`,
+        LOG_META,
+      );
+      return { result: 'ALLOCATED', parts: plan.parts.length };
+    }
+
     // Allocation is proceeding, so the pending-decision snapshot is spent.
     order.requestedLines = null;
     const round = order.allocationRound + 1;
@@ -213,6 +224,50 @@ export class OrderAllocationService {
   async modificationOptions(orderId: string) {
     const order = await this.orderRepo.findOne({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Order not found');
+
+    if (order.status === OrderStatus.AWAITING_SPLIT_APPROVAL) {
+      const requested = (order.requestedLines ?? []) as RequestedLine[];
+      if (!requested.length) throw new NotFoundException('No pending split found');
+      const required: RequiredLine[] = requested.map((l) => ({
+        key: lineKey(l.odooProductId, l.conditionCode),
+        quantity: l.quantity,
+      }));
+      const supplies = await this.buildSupplies(order, requested);
+      const plan = planAllocation({ required, supplies, mode: order.fulfilmentMode });
+      const currentWarehouses = plan.parts.map((p) => p.warehouseId);
+      const size = currentWarehouses.length;
+      const base = {
+        order_id: orderId,
+        order_number: order.orderNumber,
+        split_size: size,
+        is_split: size > 1,
+      };
+      if (size < 2) {
+        return { ...base, current: await this.namedWarehouses(currentWarehouses), options: [] };
+      }
+      const combos = coveringCombinations({ required, supplies, size });
+      const currentKey = [...currentWarehouses].sort().join('|');
+      const alternatives = combos.filter(
+        (c) => [...c.warehouseIds].sort().join('|') !== currentKey,
+      );
+      const names = await this.warehouseNameMap([
+        ...new Set([...currentWarehouses, ...alternatives.flatMap((a) => a.warehouseIds)]),
+      ]);
+      const enrich = (ids: string[]) =>
+        ids.map((id) => ({
+          id,
+          name: names.get(id)?.name ?? null,
+          odoo_warehouse_id: names.get(id)?.odoo ?? null,
+        }));
+      return {
+        ...base,
+        current: enrich(currentWarehouses),
+        options: alternatives.map((a) => ({
+          warehouses: enrich(a.warehouseIds),
+          total_distance_km: a.totalDistanceKm,
+        })),
+      };
+    }
 
     const parts = await this.partRepo.find({ where: { orderId }, relations: ['lines'] });
     const live = parts.filter(
@@ -281,13 +336,82 @@ export class OrderAllocationService {
    * offered to the chosen warehouses — a new allocation round, exactly as if the
    * order had landed on them in the first place.
    */
+  async approveSplit(orderId: string, adminId?: string) {
+    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.status !== OrderStatus.AWAITING_SPLIT_APPROVAL) {
+      throw new ConflictException(
+        `This order is not awaiting split approval — it is ${order.status}`,
+      );
+    }
+    const requested = (order.requestedLines ?? []) as RequestedLine[];
+    if (!requested.length) throw new BadRequestException('No pending split to approve');
+    const required: RequiredLine[] = requested.map((l) => ({
+      key: lineKey(l.odooProductId, l.conditionCode),
+      quantity: l.quantity,
+    }));
+    const supplies = await this.buildSupplies(order, requested);
+    const plan = planAllocation({ required, supplies, mode: order.fulfilmentMode });
+    if (!plan.parts.length || plan.parts.length < 2) {
+      throw new BadRequestException('Cannot approve — no split covering set available');
+    }
+    const warehouseIds = plan.parts.map((p) => p.warehouseId);
+    return this.createSplitParts(order, requested, warehouseIds, adminId);
+  }
+
+  async rejectSplit(orderId: string, reason?: string, adminId?: string) {
+    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.status !== OrderStatus.AWAITING_SPLIT_APPROVAL) {
+      throw new ConflictException(
+        `This order is not awaiting split approval — it is ${order.status}`,
+      );
+    }
+    order.status = OrderStatus.REJECTED_AWAITING_BUYER;
+    order.requestedLines = null;
+    order.cancelReason = reason || 'Split order rejected by warehouse manager';
+    await this.orderRepo.save(order);
+    winstonLogger.info(
+      `Order ${order.orderNumber} split REJECTED by ADMIN ${adminId ?? 'system'} — awaiting buyer confirmation`,
+      LOG_META,
+    );
+    return {
+      message: 'Split rejected — awaiting buyer confirmation',
+      order_id: order.id,
+      status: order.status,
+    };
+  }
+
   async applyModification(orderId: string, warehouseIds: string[], adminId?: string) {
     const order = await this.orderRepo.findOne({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Order not found');
-    if (order.status !== OrderStatus.AWAITING_APPROVAL) {
+    const isSplitApproval = order.status === OrderStatus.AWAITING_SPLIT_APPROVAL;
+    if (order.status !== OrderStatus.AWAITING_APPROVAL && !isSplitApproval) {
       throw new ConflictException(
         `This order can no longer be modified — it is ${order.status}`,
       );
+    }
+
+    if (isSplitApproval) {
+      const requested = (order.requestedLines ?? []) as RequestedLine[];
+      if (!requested.length) throw new BadRequestException('No pending split to modify');
+      const required: RequiredLine[] = requested.map((l) => ({
+        key: lineKey(l.odooProductId, l.conditionCode),
+        quantity: l.quantity,
+      }));
+      const supplies = await this.buildSupplies(order, requested);
+      const plan = planAllocation({ required, supplies, mode: order.fulfilmentMode });
+      const currentWarehouses = plan.parts.map((p) => p.warehouseId);
+      if (currentWarehouses.length < 2) {
+        throw new BadRequestException('This order is not split — there is nothing to modify');
+      }
+      const chosen = [...new Set(warehouseIds)];
+      if (chosen.length !== currentWarehouses.length) {
+        throw new BadRequestException(
+          `Choose exactly ${currentWarehouses.length} warehouse(s) — the same number the order was split across`,
+        );
+      }
+      return this.createSplitParts(order, requested, chosen, adminId);
     }
 
     const parts = await this.partRepo.find({ where: { orderId }, relations: ['lines'] });
@@ -365,6 +489,46 @@ export class OrderAllocationService {
       message: 'Order re-routed to the chosen warehouses',
       order_id: orderId,
       warehouses: await this.namedWarehouses(chosen),
+      parts: plan.parts.length,
+    };
+  }
+
+  private async createSplitParts(
+    order: Order,
+    requested: RequestedLine[],
+    warehouseIds: string[],
+    adminId?: string,
+  ) {
+    const required: RequiredLine[] = requested.map((l) => ({
+      key: lineKey(l.odooProductId, l.conditionCode),
+      quantity: l.quantity,
+    }));
+    const supplies = await this.buildSupplies(order, requested);
+    const plan = planForWarehouses({ required, supplies, warehouseIds });
+    if (!plan) {
+      throw new BadRequestException(
+        'Those warehouses cannot cover this order — pick a set from the offered options',
+      );
+    }
+    const byKey = new Map(requested.map((l) => [lineKey(l.odooProductId, l.conditionCode), l]));
+    const round = order.allocationRound + 1;
+    let sequence = await this.partRepo.count({ where: { orderId: order.id } });
+    for (const planned of plan.parts) {
+      sequence += 1;
+      await this.createPart(order, planned, byKey, sequence, round);
+    }
+    order.allocationRound = round;
+    order.status = OrderStatus.AWAITING_APPROVAL;
+    order.requestedLines = null;
+    await this.recalculateTotals(order);
+    winstonLogger.info(
+      `Order ${order.orderNumber} split approved by ADMIN ${adminId ?? 'system'} → ${plan.parts.length} warehouse(s)`,
+      LOG_META,
+    );
+    return {
+      message: 'Split approved — order sent to warehouses',
+      order_id: order.id,
+      warehouses: await this.namedWarehouses(warehouseIds),
       parts: plan.parts.length,
     };
   }

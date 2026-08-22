@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>محاكاة خوارزمية التعيين</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Tahoma,sans-serif;background:#0f1117;color:#e0e0e0;line-height:1.6}
+.container{max-width:1200px;margin:0 auto;padding:20px}
+h1{text-align:center;color:#7eb8ff;margin-bottom:6px;font-size:1.5em}
+.sub{text-align:center;color:#666;margin-bottom:24px;font-size:.85em}
+.tabs{display:flex;gap:4px;margin-bottom:20px;background:#1a1d27;border-radius:10px;padding:4px}
+.tab{flex:1;padding:12px;text-align:center;border-radius:8px;cursor:pointer;font-size:.95em;font-weight:600;color:#888;transition:all .2s}
+.tab:hover{background:#252836;color:#ccc}
+.tab.active{background:#2a3f6f;color:#7eb8ff}
+.panel{background:#1a1d27;border:1px solid #2a2d3a;border-radius:12px;padding:20px;margin-bottom:16px}
+.pt{font-size:1.05em;font-weight:700;color:#7eb8ff;margin-bottom:12px}
+.form-row{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:flex-end}
+.fg{display:flex;flex-direction:column;gap:3px}
+.fg label{font-size:.75em;color:#999}
+.fg input,.fg select{background:#252836;border:1px solid #3a3d4a;color:#e0e0e0;padding:7px 10px;border-radius:6px;font-size:.85em;min-width:70px}
+.fg input:focus{border-color:#7eb8ff;outline:none}
+.btn{padding:7px 16px;border-radius:6px;border:none;font-weight:600;cursor:pointer;font-size:.85em;transition:all .15s}
+.bp{background:#2a5dba;color:#fff}.bp:hover{background:#3670d4}
+.bg{background:#2a7a3a;color:#fff}.bg:hover{background:#339944}
+.bd{background:#6a2a2a;color:#fff}.bd:hover{background:#883333}
+.bs{padding:4px 10px;font-size:.78em}
+table{width:100%;border-collapse:collapse;font-size:.82em}
+th{background:#252836;padding:8px 10px;text-align:right;color:#999;font-weight:600;border-bottom:2px solid #3a3d4a}
+td{padding:6px 10px;border-bottom:1px solid #252836}
+.chip{display:inline-block;padding:2px 7px;border-radius:4px;font-size:.78em;font-weight:600}
+.cb{background:#1a3a6a;color:#7eb8ff}
+.cg{background:#1a4a2a;color:#7eff7e}
+.cr{background:#5a1a1a;color:#ff7e7e}
+.cy{background:#5a4a1a;color:#ffe07e}
+.rg{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:12px 0}
+.rc{background:#252836;border-radius:10px;padding:14px;border-left:4px solid #3a7a5a}
+.rc.part{border-left-color:#aa7a2a}
+.rc.empty{border-left-color:#5a2a2a}
+.rc .m{font-size:1.8em;font-weight:700;color:#7eff7e}
+.rc.part .m{color:#ffe07e}
+.rc .l{font-size:.75em;color:#888}
+.wb{display:flex;align-items:center;gap:10px;margin:5px 0}
+.wb-n{width:80px;font-weight:600;font-size:.82em;text-align:left}
+.wb-t{flex:1;height:24px;background:#1a1d27;border-radius:6px;overflow:hidden}
+.wb-f{height:100%;border-radius:6px;display:flex;align-items:center;padding-right:6px;font-size:.72em;font-weight:600;color:#fff;transition:width .5s}
+.wb-f.used{background:linear-gradient(90deg,#2a5dba,#3670d4)}
+.wb-l{width:70px;text-align:left;font-size:.78em;color:#888}
+.log{background:#111318;border:1px solid #2a2d3a;border-radius:8px;padding:12px;font-family:Consolas,monospace;font-size:.8em;max-height:350px;overflow-y:auto;line-height:1.8;direction:ltr;text-align:left;white-space:pre-wrap}
+.log .s{color:#7eb8ff;font-weight:700}
+.log .ok{color:#7eff7e}
+.log .w{color:#ffe07e}
+.log .f{color:#ff7e7e}
+.sc{background:#252836;border:1px solid #3a3d4a;border-radius:10px;padding:16px;cursor:pointer;transition:all .2s;margin-bottom:10px}
+.sc:hover{border-color:#7eb8ff;background:#1f2236}
+.sc h3{color:#7eb8ff;font-size:.95em;margin-bottom:4px}
+.sc p{color:#999;font-size:.82em}
+.ti{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;margin:3px 0;font-size:.82em}
+.ti.ok{background:#0a1a0a}.ti.fl{background:#1a0a0a}
+.badge{display:inline-block;width:10px;height:10px;border-radius:50%}
+.badge.ok{background:#7eff7e}.badge.fl{background:#ff7e7e}
+.hidden{display:none}
+#testSummary{font-size:1.1em;font-weight:700;margin:10px 0}
+.noresult{text-align:center;color:#555;padding:40px;font-size:1.1em}
+.remove-btn{background:none;border:none;color:#ff5555;cursor:pointer;font-size:1.1em;padding:2px 6px}
+.remove-btn:hover{color:#ff8888}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>محاكاة خوارزمية التعيين</h1>
+<p class="sub">Allocation Planner Simulator — المستودعات، التعيين، التقييم، والاختبارات</p>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab(0)">محاكاة يدوية</div>
+  <div class="tab" onclick="switchTab(1)">سيناريوهات جاهزة</div>
+  <div class="tab" onclick="switchTab(2)">اختبارات الخوارزمية</div>
+</div>
+
+<!-- ═══ Tab 0: Manual ═══ -->
+<div class="tab-content active" id="tc0">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+<div>
+  <div class="panel">
+    <div class="pt">المطلوب (Required Lines)</div>
+    <div id="reqRows"></div>
+    <button class="btn bp bs" onclick="addReq()" style="margin-top:8px">+ إضافة مادة</button>
+  </div>
+  <div class="panel">
+    <div class="pt">المستودعات (Warehouses)</div>
+    <div id="whHeaders"></div>
+    <div id="whRows"></div>
+    <button class="btn bp bs" onclick="addWh()" style="margin-top:8px">+ إضافة مستودع</button>
+  </div>
+</div>
+<div>
+  <button class="btn bg" onclick="runAllocation()" style="width:100%;padding:14px;font-size:1.1em;margin-bottom:16px">تشغيل الخوارزمية ▶</button>
+  <div id="results"><div class="noresult">أضف مستودعات ومواد مطلوبة ثم اضغط تشغيل</div></div>
+</div>
+</div>
+</div>
+
+<!-- ═══ Tab 1: Presets ═══ -->
+<div class="tab-content" id="tc1">
+<div class="rg" style="grid-template-columns:1fr 1fr">
+  <div class="sc" onclick="loadPreset(0)"><h3>1. مستودع واحد يغطي الطلب</h3><p>W-near يملك 200 كيلو عند 10 كم — الخوارزمية تختاره وحده</p></div>
+  <div class="sc" onclick="loadPreset(1)"><h3>2. تقسيم على مستودعين</h3><p>لا مستودع يكفي وحده (60+50=110) — تقسيم على أقرب اثنين</p></div>
+  <div class="sc" onclick="loadPreset(2)"><h3>3. ثلاثة مستودعات</h3><p>40+35+30=105 — لا زوج يكفي، يحتاج الثلاثة</p></div>
+  <div class="sc" onclick="loadPreset(3)"><h3>4. ملء جزئي</h3><p>المخزون الكلي 75 — لا يكفي لتغطية 100 — يعرض للعميل</p></div>
+  <div class="sc" onclick="loadPreset(4)"><h3>5. مواد متعددة</h3><p>طلب A:50 + B:30 — مستودعان يغطيان معًا</p></div>
+  <div class="sc" onclick="loadPreset(5)"><h3>6. المدير يُعيد التعيين</h3><p>خوارزمية تختار A+B — المدير يُغيّر إلى A+C</p></div>
+</div>
+</div>
+
+<!-- ═══ Tab 2: Tests ═══ -->
+<div class="tab-content" id="tc2">
+  <button class="btn bg" onclick="runAllTests()" style="margin-bottom:16px">تشغيل جميع الاختبارات ▶</button>
+  <div id="testSummary"></div>
+  <div id="testResults"></div>
+</div>
+</div>
+
+<script>
+// ─── Algorithm ──────────────────────────────────────────────
+const EPS=0.0001;
+function r3(v){return Math.round(v*1000)/1000}
+function ccov(req,combo){return req.every(l=>{if(l.quantity<=EPS)return true;return combo.reduce((s,w)=>s+(w.available.get(l.key)||0),0)>=l.quantity-EPS})}
+function tf(sup,rem){const L=[];for(const[k,n]of rem){if(n<=EPS)continue;const f=sup.available.get(k)||0,t=Math.min(n,f);if(t<=EPS)continue;L.push({key:k,quantity:r3(t)});rem.set(k,r3(n-t))}return L}
+function*combs(I,k){if(k<=0||k>I.length)return;const x=Array.from({length:k},(_,i)=>i);while(true){yield x.map(i=>I[i]);let p=k-1;while(p>=0&&x[p]===I.length-k+p)p--;if(p<0)return;x[p]++;for(let i=p+1;i<k;i++)x[i]=x[i-1]+1}}
+function sat(rem){for(const q of rem.values())if(q>EPS)return false;return true}
+function sf(req,rem){return req.map(l=>{const m=rem.get(l.key)||0;return{key:l.key,requested:l.quantity,allocated:r3(l.quantity-m),missing:r3(m)}}).filter(s=>s.missing>EPS)}
+function psw(req,sup){const c=sup.find(s=>ccov(req,[s]));if(!c)return null;return{parts:[{warehouseId:c.warehouseId,distanceKm:c.distanceKm,lines:req.filter(l=>l.quantity>EPS).map(l=>({key:l.key,quantity:r3(l.quantity)}))}],shortfalls:[],score:r3(c.distanceKm),fullyCovered:true}}
+function bcp(req,combo){const rem=new Map(req.map(l=>[l.key,l.quantity]));const P=[];for(const s of combo){if(sat(rem))break;const L=tf(s,rem);if(!L.length)continue;P.push({warehouseId:s.warehouseId,distanceKm:s.distanceKm,lines:L})}return{parts:P,shortfalls:sf(req,rem),score:r3(P.reduce((a,p)=>a+p.distanceKm,0)),fullyCovered:true}}
+function pfp(req,sup,mx){for(let sz=2;sz<=mx;sz++){let b=null;for(const c of combs(sup,sz)){if(!ccov(req,c))continue;const km=c.reduce((a,w)=>a+w.distanceKm,0);if(!b||km<b.km)b={c,km}}if(b)return bcp(req,b.c)}return null}
+function pp(req,sup,mx){const rem=new Map(req.map(l=>[l.key,l.quantity]));const P=[];for(const s of sup){if(P.length>=mx)break;if(sat(rem))break;const L=tf(s,rem);if(!L.length)continue;P.push({warehouseId:s.warehouseId,distanceKm:s.distanceKm,lines:L})}const sh=sf(req,rem);return{parts:P,shortfalls:sh,score:r3(P.reduce((a,p)=>a+p.distanceKm,0)),fullyCovered:sh.length===0}}
+function planAllocation(P){const{required}=P;const sup=[...P.supplies].sort((a,b)=>a.distanceKm-b.distanceKm);const mx=sup.length;const s=psw(required,sup);if(s)return s;const sp=pfp(required,sup,mx);if(sp)return sp;return pp(required,sup,mx)}
+function planForWarehouses(P){const w=new Set(P.warehouseIds);const ch=P.supplies.filter(s=>w.has(s.warehouseId));if(ch.length!==w.size)return null;if(!ccov(P.required,ch))return null;return bcp(P.required,[...ch].sort((a,b)=>a.distanceKm-b.distanceKm))}
+function coveringCombinations(P){const{required,size}=P;const c=P.supplies.filter(s=>required.some(l=>l.quantity>EPS&&(s.available.get(l.key)||0)>EPS));const sup=c.sort((a,b)=>a.distanceKm-b.distanceKm);if(size<1||size>sup.length)return[];const O=[];for(const co of combs(sup,size)){if(!ccov(required,co))continue;O.push({warehouseIds:co.map(w=>w.warehouseId),totalDistanceKm:r3(co.reduce((a,w)=>a+w.distanceKm,0))})}return O.sort((a,b)=>a.totalDistanceKm-b.totalDistanceKm)}
+function sfr(P,R){const t=R.reduce((a,l)=>a+l.quantity,0);if(t<=0)return 0;return P.shortfalls.reduce((a,s)=>a+s.missing,0)/t}
+
+// ─── State ──────────────────────────────────────────────────
+let reqList=[{key:'mat-A',quantity:100}];
+let whList=[
+  {id:'W-1',dist:5,stock:{'mat-A':60}},
+  {id:'W-2',dist:10,stock:{'mat-A':50}},
+  {id:'W-3',dist:20,stock:{'mat-A':80}},
+];
+
+// ─── Tab switching ──────────────────────────────────────────
+function switchTab(i){
+  document.querySelectorAll('.tab').forEach((t,j)=>t.classList.toggle('active',j===i));
+  document.querySelectorAll('.tab-content').forEach((t,j)=>t.classList.toggle('active',j===i));
+}
+
+// ─── Render inputs ──────────────────────────────────────────
+function renderReq(){
+  const el=document.getElementById('reqRows');
+  el.innerHTML='';
+  reqList.forEach((r,i)=>{
+    el.innerHTML+=`<div class="form-row">
+      <div class="fg"><label>المادة</label><input value="${r.key}" onchange="reqList[${i}].key=this.value"></div>
+      <div class="fg"><label>الكمية</label><input type="number" step="0.1" value="${r.quantity}" onchange="reqList[${i}].quantity=+this.value"></div>
+      <button class="btn bd bs" onclick="reqList.splice(${i},1);renderReq();renderWh()">✕</button>
+    </div>`;
+  });
+  renderWh();
+}
+function addReq(){reqList.push({key:'mat-'+String.fromCharCode(65+reqList.length),quantity:50});renderReq()}
+
+function renderWh(){
+  const hdr=document.getElementById('whHeaders');
+  hdr.innerHTML='<table><tr><th>المستودع</th><th>المسافة كم</th>';
+  reqList.forEach(r=>{hdr.innerHTML+=`<th>${r.key}</th>`});
+  hdr.innerHTML+='<th></th></tr></table>';
+  
+  const el=document.getElementById('whRows');
+  el.innerHTML='';
+  whList.forEach((w,i)=>{
+    let row=`<div class="form-row"><input style="width:80px" value="${w.id}" onchange="whList[${i}].id=this.value"><input type="number" step="0.1" style="width:80px" value="${w.dist}" onchange="whList[${i}].dist=+this.value">`;
+    reqList.forEach(r=>{
+      const v=w.stock[r.key]||0;
+      row+=`<input type="number" step="0.1" style="width:80px" value="${v}" onchange="whList[${i}].stock['${r.key}']=+this.value">`;
+    });
+    row+=`<button class="btn bd bs" onclick="whList.splice(${i},1);renderWh()">✕</button></div>`;
+    el.innerHTML+=row;
+  });
+}
+function addWh(){whList.push({id:'W-'+(whList.length+1),dist:15,stock:{}});renderWh()}
+
+// ─── Run allocation ─────────────────────────────────────────
+function runAllocation(){
+  const required=reqList.filter(r=>r.quantity>EPS);
+  const supplies=whList.map(w=>{const m=new Map();Object.entries(w.stock).forEach(([k,v])=>{if(v>EPS)m.set(k,v)});return{warehouseId:w.id,distanceKm:w.dist,available:m}});
+  const plan=planAllocation({required,supplies});
+  renderResults(plan,required,supplies);
+}
+
+function renderResults(plan,required,supplies){
+  const el=document.getElementById('results');
+  const covPct=plan.fullyCovered?100:Math.round(((required.reduce((a,l)=>a+l.quantity,0)-plan.shortfalls.reduce((a,s)=>a+s.missing,0))/required.reduce((a,l)=>a+l.quantity,0))*100);
+  const status=plan.fullyCovered?'تغطية كاملة':plan.parts.length>0?'تغطية جزئية':'لا مخزون';
+  const statusCls=plan.fullyCovered?'':plan.parts.length>0?'part':'empty';
+  const totalReq=required.reduce((a,l)=>a+l.quantity,0);
+
+  let h=`<div class="rg">
+    <div class="rc"><div class="l">المستودعات المختارة</div><div class="m">${plan.parts.length}</div></div>
+    <div class="rc ${statusCls}"><div class="l">المسافة الكلية</div><div class="m">${plan.score} كم</div></div>
+    <div class="rc ${statusCls}"><div class="l">نسبة التغطية</div><div class="m">${covPct}%</div></div>
+    <div class="rc ${statusCls}"><div class="l">حالة الطلب</div><div class="m" style="font-size:1.1em">${status}</div></div>
+  </div>`;
+
+  // Algorithm trace log
+  h+=`<div class="panel"><div class="pt">تتبع الخوارزمية</div><div class="log" id="alog"></div></div>`;
+  
+  // Warehouse bars
+  if(plan.parts.length>0){
+    h+=`<div class="panel"><div class="pt">التوزيع على المستودعات</div>`;
+    plan.parts.forEach(p=>{
+      p.lines.forEach(l=>{
+        const reqLine=required.find(r=>r.key===l.key);
+        const pct=Math.round((l.quantity/(reqLine?reqLine.quantity:1))*100);
+        h+=`<div class="wb"><div class="wb-n">${p.warehouseId}</div><div class="wb-t"><div class="wb-f used" style="width:${pct}%">${l.key}: ${l.quantity}</div></div><div class="wb-l">${p.distanceKm} كم</div></div>`;
+      });
+    });
+    h+=`</div>`;
+  }
+
+  // Shortfalls
+  if(plan.shortfalls.length>0){
+    h+=`<div class="panel"><div class="pt">النقص (Shortfalls)</div><table><tr><th>المادة</th><th>المطلوب</th><th>المُعيَّن</th><th>النقص</th></tr>`;
+    plan.shortfalls.forEach(s=>{
+      h+=`<tr><td><span class="chip cb">${s.key}</span></td><td>${s.requested}</td><td><span class="chip cg">${s.allocated}</span></td><td><span class="chip cr">${s.missing}</span></td></tr>`;
+    });
+    h+=`</table></div>`;
+  }
+
+  // Covering alternatives
+  if(plan.parts.length>1 && plan.fullyCovered){
+    const alts=coveringCombinations({required,supplies,size:plan.parts.length});
+    if(alts.length>1){
+      h+=`<div class="panel"><div class="pt">بدائل التعيين (${alts.length} مجموعات ممكنة)</div><table><tr><th>#</th><th>المستودعات</th><th>المسافة الكلية</th></tr>`;
+      alts.forEach((a,i)=>{
+        const isCurrent=a.totalDistanceKm===plan.score;
+        h+=`<tr style="${isCurrent?'background:#1a2a4a':''}"><td>${i+1} ${isCurrent?'◀ الحالي':''}</td><td>${a.warehouseIds.map(w=>'<span class="chip cb">'+w+'</span>').join(' + ')}</td><td>${a.totalDistanceKm} كم</td></tr>`;
+      });
+      h+=`</table></div>`;
+    }
+  }
+
+  el.innerHTML=h;
+
+  // Generate trace log
+  generateTraceLog(plan,required,supplies);
+}
+
+function generateTraceLog(plan,required,supplies){
+  const log=document.getElementById('alog');
+  if(!log)return;
+  const sup=[...supplies].sort((a,b)=>a.distanceKm-b.distanceKm);
+  let lines=[];
+  lines.push('<span class="s">═══ بدء الخوارزمية ═══</span>');
+  lines.push(`الطلب: ${required.map(r=>r.key+'='+r.quantity).join(', ')}`);
+  lines.push(`المستودعات (${sup.length}): ${sup.map(s=>s.warehouseId+'@'+s.distanceKm+'km ['+([...s.available.entries()].map(([k,v])=>k+':'+v).join(', '))+']').join(' | ')}`);
+  lines.push('');
+  
+  // Step 1: Single warehouse
+  lines.push('<span class="s">الخطوة 1: البحث عن مستودع واحد يغطي الطلب بالكامل</span>');
+  const single=sup.find(s=>ccov(required,[s]));
+  if(single){
+    lines.push(`  → ${single.warehouseId} يملك ما يكفي: ${[...single.available.entries()].map(([k,v])=>k+'='+v).join(', ')}`);
+    lines.push('<span class="ok">  → تم اختيار مستودع واحد ✓</span>');
+  }else{
+    lines.push('  → لا مستودع يكفي وحده');
+    lines.push('<span class="w">  → الانتقال للخطوة 2</span>');
+    lines.push('');
+    
+    // Step 2: Fewest parts
+    lines.push('<span class="s">الخطوة 2: البحث عن أقل عدد مستودعات تغطي الطلب</span>');
+    let found=false;
+    for(let sz=2;sz<=sup.length;sz++){
+      lines.push(`  فحص مجموعات بحجم ${sz}...`);
+      let bestKm=Infinity;
+      let bestCombo=null;
+      for(const c of combs(sup,sz)){
+        if(!ccov(required,c))continue;
+        const km=c.reduce((a,w)=>a+w.distanceKm,0);
+        if(km<bestKm){bestKm=km;bestCombo=c}
+      }
+      if(bestCombo){
+        lines.push(`  → مجموعة بحجم ${sz}: ${bestCombo.map(w=>w.warehouseId).join(' + ')} = ${bestKm} كم`);
+        lines.push('<span class="ok">  → تم العثور على تغطية ✓</span>');
+        found=true;
+        break;
+      }else{
+        lines.push(`  → لا مجموعة بحجم ${sz} تكفي`);
+      }
+    }
+    if(!found){
+      lines.push('<span class="w">  → لا مجموعة تكفي — الانتقال للملء الجزئي</span>');
+    }
+  }
+  
+  lines.push('');
+  lines.push('<span class="s">═══ النتيجة النهائية ═══</span>');
+  if(plan.fullyCovered){
+    lines.push(`<span class="ok">تغطية كاملة — ${plan.parts.length} مستودع(ات) — المسافة: ${plan.score} كم</span>`);
+  }else if(plan.parts.length>0){
+    lines.push(`<span class="w">تغطية جزئية — ${plan.shortfalls.length} نقص — نسبة التغطية: ${Math.round((1-sfr(plan,required))*100)}%</span>`);
+  }else{
+    lines.push('<span class="f">لا مخزون متاح</span>');
+  }
+  plan.parts.forEach(p=>{
+    lines.push(`  ${p.warehouseId}: ${p.lines.map(l=>l.key+'='+l.quantity).join(', ')}`);
+  });
+
+  log.innerHTML=lines.join('\n');
+}
+// ─── Presets ────────────────────────────────────────────────
+const PRESETS=[
+  {req:[{key:'mat-A',quantity:100}],wh:[{id:'W-far',dist:50,stock:{'mat-A':50}},{id:'W-near',dist:10,stock:{'mat-A':200}},{id:'W-mid',dist:30,stock:{'mat-A':80}]},
+   title:'100 كيلو عند مستودع واحد'},
+  {req:[{key:'mat-A',quantity:100}],wh:[{id:'W-1',dist:5,stock:{'mat-A':60}},{id:'W-2',dist:10,stock:{'mat-A':50}},{id:'W-3',dist:8,stock:{'mat-A':30}}]},
+  {req:[{key:'mat-A',quantity:100}],wh:[{id:'W-1',dist:5,stock:{'mat-A':40}},{id:'W-2',dist:10,stock:{'mat-A':35}},{id:'W-3',dist:15,stock:{'mat-A':30}}]},
+  {req:[{key:'mat-A',quantity:100}],wh:[{id:'W-1',dist:5,stock:{'mat-A':30}},{id:'W-2',dist:10,stock:{'mat-A':25}},{id:'W-3',dist:15,stock:{'mat-A':20}}]},
+  {req:[{key:'A',quantity:50},{key:'B',quantity:30}],wh:[{id:'W-1',dist:5,stock:{'A':60,'B':10}},{id:'W-2',dist:10,stock:{'A':20,'B':40}},{id:'W-3',dist:20,stock:{'A':10,'B':5}}]},
+  {req:[{key:'mat-A',quantity:100}],wh:[{id:'W-A',dist:5,stock:{'mat-A':60}},{id:'W-B',dist:10,stock:{'mat-A':50}},{id:'W-C',dist:20,stock:{'mat-A':60}}]}
+];
+function loadPreset(i){
+  const p=PRESETS[i];
+  reqList=JSON.parse(JSON.stringify(p.req));
+  whList=JSON.parse(JSON.stringify(p.wh));
+  renderReq();
+  switchTab(0);
+  setTimeout(()=>runAllocation(),100);
+}
+
+// ─── Tests ──────────────────────────────────────────────────
+function runAllTests(){
+  const res=[];let pass=0,fail=0;
+  function T(label,fn){try{fn();pass++;res.push({label,ok:true})}
+    catch(e){fail++;res.push({label,ok:false,err:e.message})}}
+  function eq(a,b){if(JSON.stringify(a)!==JSON.stringify(b))throw new Error('expected '+JSON.stringify(b)+', got '+JSON.stringify(a))}
+  function ok(v,m){if(!v)throw new Error(m||'expected truthy')}
+  function w(id,d,s){const m=new Map();if(s)Object.entries(s).forEach(([k,v])=>m.set(k,v));return{warehouseId:id,distanceKm:d,available:m}}
+  function r(k,q){return{key:k,quantity:q}}
+
+  T('مستودع واحد يغطي الطلب',()=>{const p=planAllocation({required:[r('mat-A',100)],supplies:[w('W-far',50,{'mat-A':50}),w('W-near',10,{'mat-A':200}),w('W-mid',30,{'mat-A':80})]});eq(p.parts.length,1);eq(p.parts[0].warehouseId,'W-near');ok(p.fullyCovered)});
+  T('أكثر من مستودع يكفي → الأقرب',()=>{const p=planAllocation({required:[r('A',100)],supplies:[w('W-f',40,{'A':150}),w('W-n',5,{'A':100}),w('W-m',20,{'A':120})]});eq(p.parts[0].warehouseId,'W-n')});
+  T('لا مستودع يكفي → تقسيم 2',()=>{const p=planAllocation({required:[r('A',100)],supplies:[w('W-1',10,{'A':60}),w('W-2',15,{'A':50}),w('W-3',8,{'A':30})]});eq(p.parts.length,2);ok(p.fullyCovered)});
+  T('يختار أقل عدد مستودعات',()=>{const p=planAllocation({required:[r('A',100)],supplies:[w('W-1',5,{'A':40}),w('W-2',10,{'A':35}),w('W-3',15,{'A':30}),w('W-4',20,{'A':80})]});eq(p.parts.length,2)});
+  T('المجموعة الأقرب تُختار',()=>{const p=planAllocation({required:[r('A',100)],supplies:[w('W-f1',30,{'A':60}),w('W-f2',35,{'A':60}),w('W-n1',10,{'A':55}),w('W-n2',12,{'A':55})]});eq(p.score,22)});
+  T('ثلاثة مستودعات مطلوبة',()=>{const p=planAllocation({required:[r('A',100)],supplies:[w('W-1',5,{'A':40}),w('W-2',10,{'A':35}),w('W-3',15,{'A':30})]});eq(p.parts.length,3);ok(p.fullyCovered)});
+  T('ملء جزئي — نقص 25',()=>{const p=planAllocation({required:[r('A',100)],supplies:[w('W-1',5,{'A':30}),w('W-2',10,{'A':25}),w('W-3',15,{'A':20})]});eq(p.fullyCovered,false);eq(p.shortfalls[0].missing,25)});
+  T('لا مخزون — مادة مختلفة',()=>{const p=planAllocation({required:[r('A',100)],supplies:[w('W-1',5,{'B':50})]});eq(p.parts.length,0);eq(p.shortfalls[0].missing,100)});
+  T('مواد متعددة',()=>{const p=planAllocation({required:[r('A',50),r('B',30)],supplies:[w('W-1',5,{'A':60,'B':10}),w('W-2',10,{'A':20,'B':40}),w('W-3',20,{'A':10,'B':5})]});ok(p.fullyCovered)});
+  T('الأقرب أولًا دائماً',()=>{const p=planAllocation({required:[r('A',100)],supplies:[w('W-huge',100,{'A':999}),w('W-small',1,{'A':100})]});eq(p.parts[0].warehouseId,'W-small')});
+  T('تعديل يدوي — نجاح',()=>{const s=[w('W-A',5,{'A':60}),w('W-B',10,{'A':50}),w('W-C',20,{'A':60})];const p=planForWarehouses({required:[r('A',100)],supplies:s,warehouseIds:['W-A','W-C']});ok(p);eq(p.parts.length,2);eq(p.parts[1].warehouseId,'W-C')});
+  T('تعديل يدوي — رفض (لا يكفي)',()=>{const p=planForWarehouses({required:[r('A',100)],supplies:[w('W-A',5,{'A':40}),w('W-B',10,{'A':35})],warehouseIds:['W-A','W-B']});eq(p,null)});
+  T('تعديل يدوي — رفض (مستودع غير موجود)',()=>{const p=planForWarehouses({required:[r('A',100)],supplies:[w('W-A',5,{'A':100})],warehouseIds:['W-A','W-X']});eq(p,null)});
+  T('بدائل التعيين',()=>{const opts=coveringCombinations({required:[r('A',100)],supplies:[w('W-A',5,{'A':60}),w('W-B',10,{'A':50}),w('W-C',20,{'A':60})],size:2});ok(opts.length>=2)});
+  T('لا بدائل — حجم أكبر',()=>{eq(coveringCombinations({required:[r('A',100)],supplies:[w('W-A',5,{'A':100})],size:5}).length,0)});
+  T('نسبة النقص = 0 (تغطية كاملة)',()=>{eq(sfr(planAllocation({required:[r('A',100)],supplies:[w('W-1',5,{'A':100})]}),[r('A',100)]),0)});
+  T('نسبة النقص = 0.25',()=>{eq(sfr(planAllocation({required:[r('A',100)],supplies:[w('W-1',5,{'A':75})]}),[r('A',100)]),0.25)});
+  T('نسبة النقص = 1.0 (لا مخزون)',()=>{eq(sfr(planAllocation({required:[r('A',100)],supplies:[w('W-1',5,{'B':50})]}),[r('A',100)]),1)});
+  T('لا مستودعات',()=>{const p=planAllocation({required:[r('A',100)],supplies:[]});eq(p.parts.length,0);eq(p.shortfalls[0].missing,100)});
+  T('الطلب = 0',()=>{const p=planAllocation({required:[r('A',0)],supplies:[w('W-1',5,{'A':100})]});ok(p.fullyCovered);eq(p.shortfalls.length,0)});
+  T('أصغر من epsilon',()=>{const p=planAllocation({required:[r('A',0.00005)],supplies:[w('W-1',5,{'A':100})]});ok(p.fullyCovered)});
+  T('المخزون بالضبط = الطلب',()=>{const p=planAllocation({required:[r('A',100)],supplies:[w('W-1',5,{'A':100})]});ok(p.fullyCovered);eq(p.parts[0].lines[0].quantity,100)});
+  T('مسافات متساوية',()=>{const p=planAllocation({required:[r('A',100)],supplies:[w('W-1',10,{'A':60}),w('W-2',10,{'A':50})]});eq(p.parts.length,2);ok(p.fullyCovered)});
+  T('جزئي — مادة ناقصة',()=>{const p=planAllocation({required:[r('A',50),r('B',50)],supplies:[w('W-1',5,{'A':50})]});eq(p.fullyCovered,false);ok(p.shortfalls.find(s=>s.key==='B'))});
+  T('الأقرب يُختار حتى مع وجود أبعد يكفي',()=>{const p=planAllocation({required:[r('A',100)],supplies:[w('W-c',2,{'A':100}),w('W-m',15,{'A':100}),w('W-f',50,{'A':100})]});eq(p.parts[0].warehouseId,'W-c');eq(p.score,2)});
+
+  const el=document.getElementById('testResults');
+  let h='';res.forEach((t,i)=>{
+    h+=`<div class="ti ${t.ok?'ok':'fl'}"><span class="badge ${t.ok?'ok':'fl'}"></span> ${i+1}. ${t.label}`;
+    if(!t.ok)h+=` <span style="color:#ff7e7e;font-size:.78em">— ${t.err}</span>`;
+    h+='</div>';
+  });
+  el.innerHTML=h;
+  document.getElementById('testSummary').innerHTML=`النتيجة: <span style="color:#7eff7e">${pass}</span> ناجح | <span style="color:${fail?'#ff7e7e':'#7eff7e'}">${fail}</span> فاشل`;
+}
+</script>
+</body>
+</html>
