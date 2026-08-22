@@ -14,7 +14,6 @@ import {
   AccountsStatus,
   TOKEN_HOLDING_STATUSES,
 } from '@src/auth/decorators/account-status.decorator';
-import { I18nContext } from 'nestjs-i18n';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { Account } from '@src/user/entities/account.entity';
 import { NotificationService } from './notification.service';
@@ -57,18 +56,14 @@ export class NotificationController {
 
   @Get('unread-count')
   async getUnreadCount(@CurrentUser() user: Account) {
-    const count = await this.notificationService.countUnread(user.id);
-    // The count is part of the sentence ("You have N unread…"), so it is
-    // interpolated into the translated message here — the response interceptor
-    // only looks up whole keys and cannot inject an argument. The reader's saved
-    // language wins over any header, exactly like everywhere else.
-    const lang = (user as any).language ?? I18nContext.current()?.lang;
-    const message =
-      I18nContext.current()?.t(
-        'translation.You have {count} unread notification(s), fetched successfully',
-        { args: { count }, lang },
-      ) ?? `You have ${count} unread notification(s), fetched successfully`;
-    return { message, result: { count } };
+    // `result` is `{ unread_count }` — a flat data object — and the message is a
+    // whole translatable key the response interceptor localises. No argument
+    // interpolation, so nothing can turn the count into "[object Object]".
+    const result = await this.notificationService.countUnread(user.id);
+    return {
+      message: 'The number of unread notifications has been retrieved',
+      result,
+    };
   }
 
   @Get(':id')

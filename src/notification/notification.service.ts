@@ -169,18 +169,17 @@ export class NotificationService {
     };
   }
 
-  async countUnread(userId: string){
-    const data = await this.notificationRepository.count({
+  async countUnread(userId: string): Promise<{ unread_count: number }> {
+    const unread_count = await this.notificationRepository.count({
       where: {
         userId,
         isRead: false,
         deletedAt: IsNull(),
       },
     });
-    return {
-      message:'The number of unread notifications has been retrieved',
-      unread_count:data
-    }
+    // Just the data — the controller owns the (translatable) response message,
+    // so it is never duplicated here nor nested inside `data`.
+    return { unread_count };
   }
 
   async getNotificationById(
