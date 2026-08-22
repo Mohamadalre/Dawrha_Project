@@ -182,8 +182,14 @@ export class DispatchGatewayEvents implements OnGatewayConnection, OnGatewayDisc
     const radiusKm = Math.min(Math.max(data.radius_km ?? 10, 1), 50);
     this.nearbySubscriptions.set(client.id, { lat: data.lat, lng: data.lng, radiusKm });
 
-    const zones = await this.coverageService.findNearbyZones(data.lat, data.lng, radiusKm);
-    return { status: 'ok', zones };
+    try {
+      const zones = await this.coverageService.findNearbyZones(data.lat, data.lng, radiusKm);
+      return { status: 'ok', zones };
+    } catch (err) {
+      const e = err as Error;
+      this.logger.error(`nearby_drivers failed: ${e.message}`, e.stack);
+      return { status: 'error', message: e.message || 'nearby lookup failed' };
+    }
   }
 
   @SubscribeMessage('user:unsubscribe_nearby')
