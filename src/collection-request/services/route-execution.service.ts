@@ -251,6 +251,10 @@ export class RouteExecutionService {
 
     await this.registerIntake(stop, warehouseOdooId);
     this.events.announceToRequest(stop.id, 'request:status', this.statusPayload(stop));
+
+    // Stop tracking GPS for this request (delivered to warehouse).
+    await this.engine.untrackRequest(stop.id);
+
     winstonLogger.info(
       `Collection request ${stop.requestNumber}: delivered to ${warehouseOdooId ?? 'origin'} (route ${route.routeNumber})`,
       LOG_META,

@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Logger, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
@@ -12,9 +12,11 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import Redis from 'ioredis';
 import { RedisService } from '@src/core/redis/redis.service';
 import { Role } from '@src/user/enums/role.enum';
 import { CoverageService } from '../services/coverage.service';
+import { DISPATCH_REDIS } from '../constants/dispatch.constants';
 
 interface SocketUser {
   id: string;
@@ -61,6 +63,7 @@ export class DispatchGatewayEvents implements OnGatewayConnection, OnGatewayDisc
     private readonly redisService: RedisService,
     private readonly coverageService: CoverageService,
     private readonly eventEmitter: EventEmitter2,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
   async handleConnection(client: Socket): Promise<void> {
@@ -218,8 +221,29 @@ export class DispatchGatewayEvents implements OnGatewayConnection, OnGatewayDisc
   }
 
   @OnEvent('truck.location.updated')
-  async onTruckLocationUpdated(): Promise<void> {
+  async onTruckLocationUpdated(payload: { truckId?: string; lat?: number; lng?: number; heading?: number | null }): Promise<void> {
     await this.pushNearbyDriversUpdate();
+
+    // Forward GPS to users tracking requests assigned to this truck.
+    if (payload.truckId && payload.lat != null && payload.lng != null) {
+      try {
+        const requestIds = await this.redis.smembers(
+          DISPATCH_REDIS.truckRequestsKey(payload.truckId),
+        );
+        for (const requestId of requestIds) {
+          this.server?.to(this.requestRoom(requestId)).emit('request:driver_location', {
+            request_id: requestId,
+            truck_id: payload.truckId,
+            lat: payload.lat,
+            lng: payload.lng,
+            heading: payload.heading ?? null,
+            updated_at: new Date(),
+          });
+        }
+      } catch {
+        // Redis read failure must not crash the gateway.
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
