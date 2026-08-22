@@ -202,12 +202,6 @@ export class HandoverService {
     if (now.getTime() < win.start.getTime()) throw new PickupBeforeShiftException();
     if (now.getTime() > win.end.getTime() + win.toleranceMs) throw new PickupAfterShiftException();
 
-    // He may not already hold a truck.
-    const alreadyOpen = await this.handoverRepo.findOne({
-      where: { driverId: driver.id, status: HandoverStatus.OPEN },
-    });
-    if (alreadyOpen) throw new TruckAlreadyHeldException();
-
     // The physical truck must not still be held by the previous shift's driver.
     const heldByOther = await this.handoverRepo.findOne({
       where: { truckId: truck.id, status: HandoverStatus.OPEN, driverId: Not(driver.id) },
@@ -245,19 +239,6 @@ export class HandoverService {
     }
     await this.handoverRepo.save(h);
     await this.odooSync.enqueuePushHandoverPickup({ handoverId: h.id });
-
-    // Tracking becomes live now: the admin map may show this truck the moment
-    // its session opens, even before the first coordinate arrives. Best-effort —
-    // the handover is already saved, so a socket hiccup must not fail the pickup.
-    try {
-      this.tracking.announceSessionStarted({
-        truckId: truck.id,
-        driverId: driver.id,
-        plateNumber: truck.plateNumber ?? null,
-      });
-    } catch {
-      /* the truck is picked up regardless; its first ping will surface it */
-    }
 
     return {
       message: 'Truck picked up successfully',

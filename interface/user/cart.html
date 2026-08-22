@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>السلة — تطبيق المستخدم</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="user">
+<header class="topbar">
+  <div class="inner">
+    <a href="home.html" class="btn ghost" style="padding:6px 12px">→</a>
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="grow"></div>
+    <a href="profile.html" class="avatar">م</a>
+  </div>
+</header>
+
+<main class="container">
+  <h2 style="font-size:19px; margin:16px 0 4px">سلة الطلب</h2>
+  <p class="muted">تُحوَّل السلة إلى طلب جمع عند تأكيدها</p>
+
+  <div class="card mt-16" data-cart-items>
+    <p class="muted small">جارٍ تحميل السلة…</p>
+  </div>
+
+  <div class="row between" style="border-top:1px dashed var(--line); padding-top:10px; margin-top:10px">
+    <b>الإجمالي التقديري</b>
+    <b style="font-size:18px"><span data-total>—</span> <span class="muted small">ل.س</span></b>
+  </div>
+  <p class="hint">يُثبَّت السعر النهائي بعد وزن الكميات من قبل السائق.</p>
+
+  <button class="btn primary block" data-checkout>تأكيد وإنشاء طلب الجمع</button>
+
+  <div class="card mt-16">
+    <div class="row"><span>🚚</span><div><b>التوزيع التلقائي</b><p class="muted small mt-8">سيُعرض الطلب على السائقين المؤهلين، ويُعاد تقييمه للتوزيع عند أي تغيير.</p></div></div>
+  </div>
+</main>
+
+<nav class="bottomnav">
+  <a href="home.html"><span class="ic">🏠</span>الرئيسية</a>
+  <a href="requests.html"><span class="ic">🚚</span>طلباتي</a>
+  <a href="cart.html" class="active"><span class="ic">🛒</span>السلة</a>
+  <a href="profile.html"><span class="ic">👤</span>ملفي</a>
+</nav>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+
+  var fmt = function (n) { return (+n || 0).toLocaleString('en-US'); };
+
+  function render() {
+    API.get('cart').then(function (json) {
+      var items = API.list(json);
+      var box = document.querySelector('[data-cart-items]');
+      if (!box) return;
+      if (!items.length) {
+        box.innerHTML = '<p class="muted small">السلة فارغة — أضف منتجات من الرئيسية.</p>' +
+          '<a class="btn primary block" href="home.html">تصفح المنتجات</a>';
+        document.querySelector('[data-checkout]').style.display = 'none';
+        return;
+      }
+      var total = 0;
+      box.innerHTML = items.map(function (it) {
+        var q = +it.quantity || 0;
+        var pr = it.price != null ? it.price : (it.unit_price != null ? it.unit_price : 0);
+        total += q * pr;
+        var pname = (it.product && (it.product.name || it.product.productName)) || it.product_name || it.productName || 'منتج';
+        return '<div class="list-item" data-item="' + it.id + '">' +
+          '<div style="flex:1"><b>' + API.esc(pname) + '</b>' +
+          '<div class="muted small">' + fmt(pr) + ' ل.س / كغ</div></div>' +
+          '<input type="number" min="0.001" step="0.1" value="' + q + '" data-qty style="width:80px; padding:8px; border:1px solid var(--line); border-radius:8px">' +
+          '<span class="muted small">كغ</span>' +
+          '<button class="btn danger" data-rm style="padding:6px 10px">✕</button></div>';
+      }).join('');
+      box.querySelectorAll('[data-item]').forEach(function (row) {
+        var id = row.getAttribute('data-item');
+        var inp = row.querySelector('[data-qty]');
+        function updateQty() {
+          var v = parseFloat(inp.value);
+          if (!v || v <= 0) return ui.err('كمية غير صالحة');
+          API.put('cart/items/' + id, { quantity: v }).then(function () { ui.ok('حُدّثت الكمية'); render(); })
+            .catch(function (e) { ui.err(e.message || 'فشل التحديث'); render(); });
+        }
+        inp.addEventListener('change', updateQty);
+        row.querySelector('[data-rm]').addEventListener('click', function () {
+          API.del('cart/items/' + id).then(function () { ui.ok('حُذف المنتج'); render(); })
+            .catch(function (e) { ui.err(e.message || 'فشل الحذف'); });
+        });
+      });
+      var totalEl = document.querySelector('[data-total]');
+      if (totalEl) totalEl.textContent = fmt(total);
+    }).catch(function (e) { ui.err(e.message || 'تعذر تحميل السلة'); });
+  }
+
+  /* إنشاء طلب جمع من السلة: POST /collection-requests { lines } */
+  document.querySelector('[data-checkout]').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    API.get('cart').then(function (json) {
+      var items = API.list(json);
+      if (!items.length) throw { message: 'السلة فارغة' };
+      var lines = items.map(function (it) { return { product_id: it.product_id || (it.product && it.product.id), quantity: +it.quantity }; });
+      return API.post('collection-requests', { lines: lines, address_text: 'عنواني المحفوظ' });
+    }).then(function () {
+      ui.ok('أُنشئ طلب الجمع وخرج للتوزيع', 'POST /api/v1/collection-requests');
+      setTimeout(function () { location.href = 'requests.html'; }, 1100);
+    }).catch(function (e) { ui.err(e.message || 'فشل إنشاء الطلب'); })
+      .finally(function () { btn.disabled = false; });
+  });
+
+  render();
+</script>
+</body>
+</html>

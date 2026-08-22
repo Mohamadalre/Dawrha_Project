@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ملفي — تطبيق السائقين</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="driver">
+<header class="topbar">
+  <div class="inner">
+    <div class="logo"><span class="dot">د</span> دورها</div>
+    <div class="grow"></div>
+    <span class="badge green">ACTIVE_ACCOUNT</span>
+  </div>
+</header>
+
+<main class="container">
+  <div class="card mt-16" style="text-align:center">
+    <div class="avatar" style="width:70px; height:70px; font-size:26px; margin:0 auto 8px" data-driver-avatar>أ</div>
+    <h3 style="font-size:18px" data-driver-name>السائق</h3>
+    <span class="badge green">سائق · نشط</span>
+    <p class="muted small mt-8" data-driver-stats></p>
+    <div class="row mt-16" style="justify-content:center">
+      <button class="btn danger" data-logout>خروج</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>طلبات تغيير الوردية <span class="endpoint">POST /api/v1/shift-change-requests</span></h3>
+    <div class="field">
+      <label>الوردية الجديدة <span class="endpoint">GET /api/v1/shift-change-requests/available-shifts</span></label>
+      <select data-shift-available>
+        <option value="">— تحميل الورديات… —</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>السبب (3–500 حرف)</label>
+      <textarea rows="2" data-shift-reason placeholder="مثال: ظروف عائلية تمنع الوردية الحالية..."></textarea>
+    </div>
+    <button class="btn driver block" data-shift-request>إرسال الطلب</button>
+    <div class="mt-8" data-shift-mine></div>
+    <p class="hint mt-8">القرار يتم في Odoo — webhook /shift-change-decision يحدّث الحالة.</p>
+  </div>
+
+  <div class="card">
+    <h3>الإبلاغ عن مشكلة شاحنة <span class="endpoint">POST /api/v1/truck-problems</span></h3>
+    <div class="field">
+      <label>وصف المشكلة (إجباري)</label>
+      <textarea rows="2" data-problem-reason placeholder="مثال: عطل في الفرامل..."></textarea>
+    </div>
+    <div class="row mt-8">
+      <button class="btn grow" data-problem-photo>📷 صورة اختيارية</button>
+    </div>
+    <input type="file" accept="image/*" data-problem-file style="display:none">
+    <button class="btn driver block mt-8" data-problem-send>إرسال البلاغ</button>
+  </div>
+
+  <div class="card">
+    <h3>وثائقي <span class="endpoint">GET /api/v1/media/owner/:ownerId</span></h3>
+    <div data-media-list></div>
+  </div>
+</main>
+
+<nav class="bottomnav">
+  <a href="home.html"><span class="ic">🏠</span>الرئيسية</a>
+  <a href="tour.html"><span class="ic">🗺️</span>الجولة</a>
+  <a href="profile.html" class="active"><span class="ic">👤</span>ملفي</a>
+</nav>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  if (!API.requireAuth('login.html')) throw new Error('redirect');
+
+  var user = JSON.parse(localStorage.getItem('daw_user') || 'null') || {};
+  var fmt = function (n) { return (+n || 0).toLocaleString('en-US'); };
+
+  function renderInfo() {
+    var b = document.querySelector('[data-driver-name]');
+    if (b) b.textContent = user.fullName || 'السائق';
+    var box = document.querySelector('[data-driver-stats]');
+    if (!box) return;
+    box.innerHTML = '<p class="muted small">' + API.esc(user.phoneNumber || '') + '</p>';
+    API.get('driver/my-truck').then(function (json) {
+      var d = API.one(json);
+      var t = d.truck || {};
+      box.innerHTML = '<p class="muted small">' + API.esc(t.model || '') + ' · ' + API.esc(t.plate_number || '') +
+        ' · سعة ' + fmt(t.capacity_kg) + ' كغ</p>';
+    }).catch(function () {});
+  }
+  renderInfo();
+
+  /* طلبات تغيير الوردية */
+  function renderShiftMine() {
+    var box = document.querySelector('[data-shift-mine]');
+    if (!box) return;
+    API.get('shift-change-requests/mine').then(function (json) {
+      var list = API.list(json);
+      if (!list.length) { box.innerHTML = '<p class="muted small">لا توجد طلبات سابقة.</p>'; return; }
+      box.innerHTML = '';
+      list.forEach(function (r) {
+        var card = document.createElement('div');
+        card.className = 'notif-item';
+        var reason = (r.reason || '').slice(0, 80);
+        card.innerHTML =
+          '<div style="flex:1"><b>الوردية المطلوبة: ' + API.esc(r.new_shift_name || r.shift_name || '—') + '</b>' +
+          '<p class="muted small">' + API.esc(reason) + '</p></div>' + API.badge(r.status || 'PENDING');
+        if (r.status === 'PENDING') {
+          var x = document.createElement('button');
+          x.className = 'btn danger sm'; x.textContent = 'إلغاء';
+          x.addEventListener('click', function () {
+            API.post('shift-change-requests/' + r.id + '/cancel').then(function () {
+              ui.ok('أُلغي الطلب'); renderShiftMine();
+            }).catch(function (e) { ui.err(e.message); });
+          });
+          card.appendChild(x);
+        }
+        box.appendChild(card);
+      });
+    }).catch(function (e) { box.innerHTML = '<p class="muted small">' + API.esc(e.message || '') + '</p>'; });
+  }
+  renderShiftMine();
+
+  var shiftSel = document.querySelector('[data-shift-available]');
+  API.get('shift-change-requests/available-shifts').then(function (json) {
+    var list = API.list(json);
+    if (!list.length) return;
+    shiftSel.innerHTML = '<option value="">— اختر وردية —</option>';
+    list.forEach(function (s) {
+      var o = document.createElement('option');
+      o.value = s.id;
+      o.textContent = (s.name || '') + ' · ' + (s.start_time || '').slice(0, 5) + ' – ' + (s.end_time || '').slice(0, 5);
+      shiftSel.appendChild(o);
+    });
+  }).catch(function () {});
+
+  document.querySelector('[data-shift-request]').addEventListener('click', function () {
+    var btn = this;
+    var shiftId = shiftSel.value;
+    var reason = document.querySelector('[data-shift-reason]').value.trim();
+    if (!shiftId) return ui.err('اختر الوردية الجديدة');
+    if (reason.length < 3) return ui.err('اكتب سببًا (3 أحرف على الأقل)');
+    btn.disabled = true;
+    API.post('shift-change-requests', { shiftId: shiftId, reason: reason })
+      .then(function () { ui.ok('أُرسل طلب تغيير الوردية'); document.querySelector('[data-shift-reason]').value = ''; renderShiftMine(); })
+      .catch(function (e) { ui.err(e.message || 'فشل الإرسال'); })
+      .finally(function () { btn.disabled = false; });
+  });
+
+  /* مشاكل الشاحنة (multipart: reason + صور) */
+  var photoBtn = document.querySelector('[data-problem-photo]');
+  var probFile = document.querySelector('[data-problem-file]');
+  photoBtn.addEventListener('click', function () { probFile.click(); });
+  probFile.addEventListener('change', function () {
+    if (probFile.files[0]) { photoBtn.textContent = '🖼 ' + probFile.files[0].name; photoBtn.className = 'btn sm grow'; }
+  });
+  document.querySelector('[data-problem-send]').addEventListener('click', function () {
+    var btn = this;
+    var reason = document.querySelector('[data-problem-reason]').value.trim();
+    if (!reason) return ui.err('اكتب وصف المشكلة (إجباري)');
+    btn.disabled = true;
+    var fd = new FormData();
+    fd.append('reason', reason);
+    if (probFile.files[0]) fd.append('images', probFile.files[0]);
+    API.request('POST', 'truck-problems', null, { body: fd }).then(function () {
+      ui.ok('سُجّلت المشكلة — تنتظر فحص الإدارة');
+      document.querySelector('[data-problem-reason]').value = '';
+      probFile.value = ''; photoBtn.textContent = '📷 صورة اختيارية'; photoBtn.className = 'btn grow';
+    }).catch(function (e) { ui.err(e.message || 'فشل الإرسال'); }).finally(function () { btn.disabled = false; });
+  });
+
+  document.querySelector('[data-logout]').addEventListener('click', function () { API.logout('login.html'); });
+
+  /* الوثائق */
+  (function () {
+    var box = document.querySelector('[data-media-list]');
+    if (!box) return;
+    if (user.id) API.get('media/owner/' + user.id).then(function (json) {
+      var list = API.list(json);
+      if (!list.length) { box.innerHTML = '<p class="muted small">لا توجد وثائق.</p>'; return; }
+      list.forEach(function (m) {
+        var d = document.createElement('div');
+        d.className = 'list-item';
+        d.innerHTML = '<div style="flex:1"><b>' + API.esc(m.file_type || m.type || '—') + '</b></div>' + API.badge(m.status || 'PENDING');
+        box.appendChild(d);
+      });
+    }).catch(function (e) { box.innerHTML = '<p class="muted small">' + API.esc(e.message || '') + '</p>'; });
+  })();
+</script>
+</body>
+</html>

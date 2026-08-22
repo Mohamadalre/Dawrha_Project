@@ -57,7 +57,6 @@ describe('HandoverService', () => {
       enqueuePushHandoverDropoff: jest.fn().mockResolvedValue(undefined),
     };
     tracking = {
-      announceSessionStarted: jest.fn(),
       endSession: jest.fn().mockResolvedValue(undefined),
     };
     service = new HandoverService(handoverRepo, driverRepo, assignmentRepo, odooSync, tracking);
@@ -98,10 +97,6 @@ describe('HandoverService', () => {
           pickupLat: '31.9',
           pickupLng: '35.9',
         }),
-      );
-      // Tracking goes live the moment the truck is picked up.
-      expect(tracking.announceSessionStarted).toHaveBeenCalledWith(
-        expect.objectContaining({ truckId: 't1' }),
       );
     });
 

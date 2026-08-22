@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>دخول الأدمن</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="admin">
+<div class="auth-wrap admin">
+  <div class="auth-card">
+    <div class="logo"><span class="dot">د</span> لوحة الأدمن</div>
+    <div class="auth-title" style="color:#111827">تسجيل الدخول</div>
+    <div class="auth-sub">إدارة دورها — المنصة الداخلية</div>
+
+    <form id="loginForm">
+      <div class="field">
+        <label>البريد الإلكتروني</label>
+        <input name="email" type="email" required placeholder="admin@dawrha.com" value="admin@dawrha.com">
+      </div>
+      <div class="field">
+        <label>كلمة المرور</label>
+        <input name="password" type="password" required value="Admin@123">
+      </div>
+      <button class="btn admin block" type="submit">دخول</button>
+    </form>
+
+    <div class="row mt-16" style="justify-content:center">
+      <a class="chip" href="../user/login.html">تطبيق المستخدم</a>
+      <a class="chip" href="../driver/login.html">تطبيق السائق</a>
+      <a class="chip" href="../index.html">الفهرس</a>
+    </div>
+  </div>
+</div>
+<script src="../assets/app.js"></script>
+<script src="../assets/config.js"></script>
+<script src="../assets/api.js"></script>
+<script>
+  /* الربط الحقيقي: POST /api/v1/auth/login/admin */
+  document.getElementById('loginForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var btn = this.querySelector('[type="submit"]');
+    btn.disabled = true;
+    API.login('login/admin', { email: this.email.value, password: this.password.value }, {
+      home: 'dashboard.html',
+      otp: 'otp.html'
+    }).finally(function () { btn.disabled = false; });
+  });
+</script>
+</body>
+</html>

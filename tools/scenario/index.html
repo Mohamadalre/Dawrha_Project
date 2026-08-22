@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>لوحة سيناريو الجمع — Dawrha API</title>
+<script src="api.js"></script>
+<style>
+  :root{
+    --bg:#0f1220; --card:#171b2e; --card2:#1e2440; --line:#2a3158;
+    --txt:#e7e9f5; --mut:#8b93b8; --acc:#4f8cff; --ok:#2fbf71; --err:#ff5c6c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:'Segoe UI',Tahoma,Arial,sans-serif;font-size:14px}
+  header{padding:14px 20px;background:var(--card);border-bottom:1px solid var(--line);display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  .api-url{color:var(--mut);font-family:Consolas,monospace}
+  button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px}
+  button:hover{filter:brightness(1.12)}
+  button.ghost{background:var(--card2);border:1px solid var(--line)}
+  button.ok{background:var(--ok)} button.err{background:var(--err)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input,select,textarea{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit}
+  input:focus,select:focus,textarea:focus{outline:1px solid var(--acc)}
+  .tabs{display:flex;gap:6px;padding:10px 20px;background:var(--card);border-bottom:1px solid var(--line)}
+  .tab-btn{background:transparent;border:1px solid transparent;color:var(--mut);padding:8px 18px;font-size:14px}
+  .tab-btn.active{background:var(--card2);color:var(--txt);border-color:var(--line)}
+  .tab{display:none;padding:20px;max-width:1200px;margin:0 auto}
+  .tab.active{display:block}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+  .card h2{margin:0 0 12px;font-size:15px;color:var(--acc)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+  .grid .full{grid-column:1/-1}
+  label{display:block;font-size:12px;color:var(--mut);margin:6px 0 2px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  pre.out{background:#0a0d1a;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;margin:10px 0 0;font-family:Consolas,monospace}
+  pre.ok{border-color:var(--ok);color:#bff3d3}
+  pre.err{border-color:var(--err);color:#ffd7db}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:right;vertical-align:top}
+  th{color:var(--mut);font-weight:600}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:var(--card2);border:1px solid var(--line)}
+  .pill.warn{background:#3a2f1a;border-color:#6b5520;color:#ffd97a}
+  .pill.good{background:#123b26;border-color:#1e6b42;color:#7ee2ae}
+  .pill.bad{background:#3d1620;border-color:#7a2338;color:#ff9dac}
+  .pill.info{background:#12263f;border-color:#1f4a7a;color:#8ec6ff}
+  .login-box{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+  .muted{color:var(--mut);font-size:12px}
+  .hint{background:#142036;border:1px dashed var(--line);border-radius:8px;padding:8px 10px;color:var(--mut);font-size:12px;margin:8px 0}
+  code{background:var(--card2);padding:1px 5px;border-radius:4px;font-family:Consolas,monospace;font-size:12px}
+  .session-line{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
+  .line-item{margin:4px 0}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>لوحة سيناريو الجمع — Dawrha</h1>
+  <span class="api-url" id="apiBase"></span>
+  <button class="ghost" onclick="health()">فحص الاتصال</button>
+  <span id="healthOut" class="muted"></span>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="citizen" onclick="switchTab('citizen')">المواطن</button>
+  <button class="tab-btn" data-tab="admin" onclick="switchTab('admin')">الأدمن</button>
+  <button class="tab-btn" data-tab="driver" onclick="switchTab('driver')">السائق</button>
+</div>
+
+<!-- ==================== CITIZEN ==================== -->
+<section class="tab active" id="tab-citizen">
+  <div class="card" id="cit-login-card">
+    <h2>دخول المواطن</h2>
+    <div class="login-box">
+      <div><label>البريد</label><input id="cit-email" placeholder="citizen@example.com"></div>
+      <div><label>كلمة المرور</label><input id="cit-pass" type="password" placeholder="••••••••"></div>
+      <div class="row"><button onclick="doLogin('citizen')">دخول</button><button class="ghost" onclick="toggleReg('citizen')" id="cit-reg-toggle">تسجيل حساب جديد</button></div>
+    </div>
+    <div id="cit-reg-box" style="display:none;margin-top:10px" class="grid">
+      <div><label>الاسم الكامل</label><input id="cit-reg-name" style="width:100%"></div>
+      <div><label>البريد</label><input id="cit-reg-email" style="width:100%"></div>
+      <div><label>كلمة المرور (حرف كبير+صغير+رقم، 8+)</label><input id="cit-reg-pass" type="password" style="width:100%"></div>
+      <div><label>الهاتف (9639xxxxxxxx)</label><input id="cit-reg-phone" placeholder="96391234567" style="width:100%"></div>
+      <div class="full"><button onclick="doRegister('citizen')">إنشاء الحساب</button></div>
+    </div>
+    <div id="cit-otp-box" style="display:none;margin-top:10px" class="row">
+      <div><label>رمز التحقق (5 أرقام، يُرسل للبريد)</label><input id="cit-otp" maxlength="5"></div>
+      <button class="ok" onclick="doOtp('citizen')">تأكيد</button>
+    </div>
+    <div class="session-line" id="cit-session" style="display:none"></div>
+  </div>
+
+  <div class="card" id="cit-app" style="display:none">
+    <h2>الكتالوج</h2>
+    <div class="row">
+      <button onclick="loadCatalog('citizen')">تحميل المنتجات</button>
+      <span class="muted" id="cit-cat-count"></span>
+    </div>
+    <div class="grid" style="margin-top:10px">
+      <div><label>المنتج</label><select id="cit-prod"></select></div>
+      <div><label>الكمية</label><input id="cit-qty" type="number" step="0.001" min="0.001" value="10"></div>
+      <div><label>ملاحظة (اختياري)</label><input id="cit-line-note"></div>
+      <div class="row" style="align-items:end"><button class="ghost" onclick="addLine()">+ إضافة سطر</button></div>
+    </div>
+    <p class="muted line-item" id="cit-lines"></p>
+  </div>
+
+  <div class="card" id="cit-create-card" style="display:none">
+    <h2>إنشاء طلب جمع</h2>
+    <div class="grid">
+      <div><label>تاريخ الجدولة (اختياري — فارغ = فوري)</label><input id="cit-when" type="datetime-local"></div>
+      <div><label>خط العرض lat</label><input id="cit-lat" value="33.5138"></div>
+      <div><label>خط الطول lng</label><input id="cit-lng" value="36.2765"></div>
+      <div><label>العنوان النصي</label><input id="cit-addr"></div>
+      <div><label>اسم جهة الاتصال</label><input id="cit-contact"></div>
+      <div><label>هاتف الاتصال</label><input id="cit-contact-phone"></div>
+      <div class="full"><button class="ok" onclick="createRequest()">إرسال الطلب</button></div>
+    </div>
+    <pre class="out" id="cit-out-create"></pre>
+  </div>
+
+  <div class="card" id="cit-list-card" style="display:none">
+    <h2>طلباتي</h2>
+    <div class="row"><button onclick="listMyRequests()">تحديث</button></div>
+    <div id="cit-req-table"></div>
+    <pre class="out" id="cit-out-list"></pre>
+  </div>
+</section>
+
+<!-- ==================== ADMIN ==================== -->
+<section class="tab" id="tab-admin">
+  <div class="card" id="adm-login-card">
+    <h2>دخول الأدمن</h2>
+    <div class="login-box">
+      <div><label>البريد</label><input id="adm-email" value="admin@dawrha.com"></div>
+      <div><label>كلمة المرور</label><input id="adm-pass" type="password" placeholder="Admin@123"></div>
+      <button onclick="doLogin('admin')">دخول</button>
+    </div>
+    <div class="session-line" id="adm-session" style="display:none"></div>
+  </div>
+
+  <div class="card" id="adm-app" style="display:none">
+    <h2>طابور الطلبات</h2>
+    <div class="row">
+      <div><label>الحالة</label>
+        <select id="adm-status-filter">
+          <option value="">الكل</option>
+          <option>CREATED</option><option>QUEUED</option><option>ASSIGNED</option>
+          <option>EN_ROUTE</option><option>ARRIVED</option><option>PICKING</option>
+          <option>DELIVERED</option><option>COMPLETED</option><option>NEEDS_ADMIN</option>
+          <option>CANCELLED</option>
+        </select>
+      </div>
+      <div style="align-self:end"><button onclick="loadQueue()">تحميل الطابور</button></div>
+      <div style="align-self:end"><button class="ghost" onclick="loadDrivers()">قائمة السائقين</button></div>
+    </div>
+    <p class="muted line-item" id="adm-drivers"></p>
+    <div id="adm-queue-table"></div>
+    <pre class="out" id="adm-out-queue"></pre>
+  </div>
+
+  <div class="card" id="adm-catalog-card" style="display:none">
+    <h2>إدارة الكتالوج</h2>
+    <div class="row">
+      <button onclick="loadAdminCatalog('admin')">تحميل الأصناف</button>
+      <span class="muted" id="adm-cat-count"></span>
+    </div>
+    <div class="grid" style="margin-top:10px">
+      <div><label>فئة جديدة</label><input id="adm-cat-name" placeholder="الاسم"></div>
+      <div><label>وصف الفئة</label><input id="adm-cat-desc"></div>
+      <div><label>صورة الفئة (مطلوبة)</label><input id="adm-cat-file" type="file" accept="image/*"></div>
+      <div class="row" style="align-items:end"><button class="ghost" onclick="createCategory()">إنشاء الفئة</button></div>
+    </div>
+    <div class="grid" style="margin-top:10px">
+      <div><label>وحدة جديدة — الكود</label><input id="adm-unit-code" placeholder="BAG" maxlength="20"></div>
+      <div><label>الاسم إنجليزي</label><input id="adm-unit-en"></div>
+      <div><label>الاسم عربي</label><input id="adm-unit-ar"></div>
+      <div class="row" style="align-items:end">
+        <label style="margin:0"><input type="checkbox" id="adm-unit-weight"> وزن</label>
+        <label style="margin:0"><input type="checkbox" id="adm-unit-tol"> سماحية</label>
+      </div>
+      <div class="row" style="align-items:end"><button class="ghost" onclick="createUnit()">إنشاء الوحدة</button></div>
+    </div>
+    <div class="grid" style="margin-top:10px">
+      <div><label>منتج جديد — الاسم</label><input id="adm-prod-name"></div>
+      <div><label>الفئة</label><select id="adm-prod-cat"></select></div>
+      <div><label>الوحدة</label><select id="adm-prod-unit"></select></div>
+      <div><label>وزن الوحدة كغ</label><input id="adm-prod-wkg" type="number" step="0.001" min="0.001"></div>
+      <div><label>صورة المنتج (مطلوبة)</label><input id="adm-prod-file" type="file" accept="image/*"></div>
+      <div class="row" style="align-items:end"><button class="ghost" onclick="createProduct()">إنشاء المنتج</button></div>
+    </div>
+    <pre class="out" id="adm-out-cat"></pre>
+  </div>
+
+  <div class="card" id="adm-cov-card" style="display:none">
+    <h2>نقاط التغطية</h2>
+    <div class="row"><button onclick="loadCoverage()">تحميل النقاط</button></div>
+    <div class="grid" style="margin-top:10px">
+      <div><label>الاسم</label><input id="cov-name"></div>
+      <div><label>النوع</label>
+        <select id="cov-type"><option value="GENERAL">عام</option><option value="SCHOOL">مدرسة</option><option value="MARKET">سوق</option><option value="HOSPITAL">مستشفى</option></select>
+      </div>
+      <div><label>lat</label><input id="cov-lat" value="33.5138"></div>
+      <div><label>lng</label><input id="cov-lng" value="36.2765"></div>
+      <div><label>نصف القطر م</label><input id="cov-radius" type="number" value="1000" min="100"></div>
+      <div><label>الأولوية</label><input id="cov-priority" type="number" value="0" min="0" max="1000"></div>
+      <div class="row" style="align-items:end"><button class="ghost" onclick="createCoverage()">إنشاء النقطة</button></div>
+    </div>
+    <pre class="out" id="adm-out-cov"></pre>
+  </div>
+
+  <div class="card" id="adm-disp-card" style="display:none">
+    <h2>إعدادات التوزيع (Dispatch)</h2>
+    <div class="row"><button onclick="loadDispatch()">تحميل الإعدادات</button></div>
+    <div class="grid" style="margin-top:10px">
+      <div><label>accept_window_sec (ثانية)</label><input id="disp-window" type="number" min="30"></div>
+      <div><label>rebalance_min (دقيقة)</label><input id="disp-rebalance" type="number" min="1" max="240"></div>
+      <div><label>scheduled_lead_min</label><input id="disp-lead" type="number" min="5"></div>
+      <div class="row" style="align-items:end">
+        <label style="margin:0"><input type="checkbox" id="disp-enabled"> التوزيع مفعّل</label>
+      </div>
+      <div class="row" style="align-items:end"><button class="ghost" onclick="saveDispatch()">حفظ</button></div>
+    </div>
+    <pre class="out" id="adm-out-disp"></pre>
+  </div>
+
+  <div class="card" id="adm-approve-card" style="display:none">
+    <h2>تفعيل حسابات السائقين</h2>
+    <div class="row">
+      <div><label>الحالة</label>
+        <select id="adm-acct-status">
+          <option value="PENDING_APPROVAL">PENDING_APPROVAL</option>
+          <option value="PENDING_PROFILE">PENDING_PROFILE</option>
+          <option value="NEED_CHANGES">NEED_CHANGES</option>
+          <option value="ACTIVE">ACTIVE</option>
+        </select>
+      </div>
+      <div style="align-self:end"><button onclick="loadCollectorAccounts()">تحميل</button></div>
+    </div>
+    <div id="adm-acct-table"></div>
+    <pre class="out" id="adm-out-acct"></pre>
+  </div>
+
+  <div class="card" id="adm-rep-card" style="display:none">
+    <h2>تقارير سريعة</h2>
+    <div class="row">
+      <button onclick="reportOverview()">نظرة عامة</button>
+      <button class="ghost" onclick="reportDaily()">ملخص اليوم</button>
+    </div>
+    <pre class="out" id="adm-out-rep"></pre>
+  </div>
+</section>
+
+<!-- ==================== DRIVER ==================== -->
+<section class="tab" id="tab-driver">
+  <div class="card" id="drv-login-card">
+    <h2>دخول السائق (جامع النفايات)</h2>
+    <div class="login-box">
+      <div><label>البريد</label><input id="drv-email"></div>
+      <div><label>كلمة المرور</label><input id="drv-pass" type="password"></div>
+      <div class="row"><button onclick="doLogin('driver')">دخول</button><button class="ghost" onclick="toggleReg('driver')" id="drv-reg-toggle">تسجيل حساب جديد</button></div>
+    </div>
+    <div id="drv-reg-box" style="display:none;margin-top:10px" class="grid">
+      <div><label>الاسم الكامل</label><input id="drv-reg-name" style="width:100%"></div>
+      <div><label>البريد</label><input id="drv-reg-email" style="width:100%"></div>
+      <div><label>كلمة المرور (حرف كبير+صغير+رقم، 8+)</label><input id="drv-reg-pass" type="password" style="width:100%"></div>
+      <div><label>الهاتف (9639xxxxxxxx)</label><input id="drv-reg-phone" placeholder="96391234567" style="width:100%"></div>
+      <div class="full"><button onclick="doRegister('driver')">إنشاء الحساب</button></div>
+      <div class="full hint">بعد التأكيد بالرمز قد يبقى الحساب PENDING_PROFILE — أكمل onboarding (بيانات + موقع + مستند) ويوافق عليه الأدمن قبل أن يعمل كسائق.</div>
+    </div>
+    <div id="drv-otp-box" style="display:none;margin-top:10px" class="row">
+      <div><label>رمز التحقق (5 أرقام)</label><input id="drv-otp" maxlength="5"></div>
+      <button class="ok" onclick="doOtp('driver')">تأكيد</button>
+    </div>
+    <div class="session-line" id="drv-session" style="display:none"></div>
+  </div>
+
+  <div class="card" id="drv-app" style="display:none">
+    <h2>جولتي (الطلبات المسندة)</h2>
+    <div class="row"><button onclick="loadTour()">تحديث الجولة</button></div>
+    <div id="drv-tour-table"></div>
+    <pre class="out" id="drv-out-tour"></pre>
+  </div>
+
+  <div class="card" id="drv-onboard-card" style="display:none">
+    <h2>إكمال ملف السائق (Onboarding)</h2>
+    <div class="hint">بعد التسجيل وتأكيد OTP يصبح الحساب PENDING_PROFILE. أكمل المعلومات والموقع، ثم ارفع المستندات (upload-doc) ويوافق الأدمن من تبويبه، ثم عُد وسجّل الدخول.</div>
+    <div class="row"><button onclick="loadOnboardingRefs()">تحميل الورديات والمحافظات</button></div>
+    <div class="grid" style="margin-top:10px">
+      <div><label>رقم الهوية الوطنية</label><input id="ob-national-id"></div>
+      <div><label>الوردية (shift)</label><select id="ob-shift"></select></div>
+      <div><label>المحافظة</label><select id="ob-province"></select></div>
+      <div><label>العنوان (اختياري)</label><input id="ob-address"></div>
+      <div class="row" style="align-items:end"><button class="ghost" onclick="submitOnboarding()">حفظ المعلومات</button></div>
+    </div>
+    <pre class="out" id="drv-out-onboard"></pre>
+  </div>
+
+  <div class="card" id="drv-truck-card" style="display:none">
+    <h2>الآلية / التسليم</h2>
+    <div class="row">
+      <button onclick="myTruck()">آليتي</button>
+      <button class="ghost" onclick="handover()">حالة التسليم</button>
+    </div>
+    <div class="grid" style="margin-top:10px">
+      <div><label>استلام — ملاحظة</label><input id="pk-note"></div>
+      <div><label>lat</label><input id="pk-lat"></div>
+      <div><label>lng</label><input id="pk-lng"></div>
+      <div class="row" style="align-items:end"><button class="ghost" onclick="pickup()">استلام الآلية</button></div>
+      <div><label>تسليم — السبب (إجباري)</label><input id="do-reason"></div>
+      <div class="row" style="align-items:end"><button class="ghost" onclick="dropoff()">تسليم الآلية</button></div>
+    </div>
+    <pre class="out" id="drv-out-truck"></pre>
+  </div>
+</section>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const STATUS_AR = {
+  CREATED:'منشأ', QUEUED:'في الطابور', ASSIGNED:'مُسند', EN_ROUTE:'في الطريق',
+  ARRIVED:'وصل', PICKING:'جارٍ الجمع', DELIVERED:'سُلّم', COMPLETED:'مكتمل',
+  NEEDS_ADMIN:'يحتاج أدمن', CANCELLED:'ملغي',
+};
+const STATUS_CLS = {
+  CREATED:'info', QUEUED:'', ASSIGNED:'', EN_ROUTE:'warn', ARRIVED:'warn',
+  PICKING:'warn', DELIVERED:'good', COMPLETED:'good', NEEDS_ADMIN:'bad', CANCELLED:'bad',
+};
+const POINT_TYPE_AR = { SCHOOL:'مدرسة', MARKET:'سوق', HOSPITAL:'مستشفى', GENERAL:'عام' };
+const ROLES = {
+  citizen: { login:'user-app', reg:'citizen', regLabel:'المواطن' },
+  admin:   { login:'admin', reg:null },
+  driver:  { login:'collector-app', reg:'collector', regLabel:'السائق' },
+};
+const state = { products: [], categories: [], units: [], lines: [], tour: [], reqMap: {} };
+
+$('apiBase').textContent = Dawrha.base;
+switchTab('citizen');
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + name));
+}
+
+async function health() {
+  const out = $('healthOut');
+  out.textContent = '...';
+  try {
+    const r = await fetch(Dawrha.base.replace('/api/v1', '/api'));
+    out.textContent = 'متصل (' + r.status + ')';
+    out.style.color = 'var(--ok)';
+  } catch (e) {
+    out.textContent = 'غير متصل: ' + e.message;
+    out.style.color = 'var(--err)';
+  }
+}
+
+function outTo(role, section, ok, text) {
+  const el = $(({ citizen:{catalog:'cit-out-catalog',create:'cit-out-create',list:'cit-out-list'},
+    admin:{queue:'adm-out-queue',cat:'adm-out-cat',cov:'adm-out-cov',disp:'adm-out-disp',rep:'adm-out-rep',acct:'adm-out-acct'},
+    driver:{tour:'drv-out-tour',truck:'drv-out-truck',onboard:'drv-out-onboard'} })[role][section]);
+  if (!el) return;
+  el.className = 'out ' + (ok ? 'ok' : 'err');
+  el.textContent = text;
+}
+
+async function exec(role, section, fn) {
+  try {
+    const r = await fn();
+    outTo(role, section, true, JSON.stringify(r, null, 2));
+    return r;
+  } catch (e) {
+    const extra = e.json ? ('\nerrorCode: ' + (e.json.errorCode || '-') + '\nstatusCode: ' + e.json.statusCode) : '';
+    outTo(role, section, false, e.message + extra);
+    return null;
+  }
+}
+
+function refreshSessionUI(role) {
+  const s = Dawrha.session(role);
+  const wrap = role === 'citizen' ? $('cit-session') : role === 'admin' ? $('adm-session') : $('drv-session');
+  const logged = s && s.access;
+  wrap.style.display = logged ? 'flex' : 'none';
+  wrap.innerHTML = logged ? (
+    '<span class="pill info">' + (s.role || '') + '</span>' +
+    '<span class="pill ' + (s.status === 'ACTIVE_ACCOUNT' ? 'good' : 'warn') + '">' + s.status + '</span>' +
+    '<button class="ghost" onclick="logoutRole(\'' + role + '\')">خروج</button>'
+  ) : '';
+  const appId = role === 'citizen' ? 'cit-app' : role === 'admin' ? 'adm-app' : 'drv-app';
+  const extra = role === 'admin'
+    ? ['adm-catalog-card','adm-cov-card','adm-disp-card','adm-rep-card','adm-approve-card']
+    : role === 'citizen' ? ['cit-create-card','cit-list-card'] : ['drv-truck-card','drv-onboard-card'];
+  $('cit-login-card').style.display = role === 'citizen' && logged ? 'none' : role === 'citizen' ? '' : $('cit-login-card').style.display;
+  $('adm-login-card').style.display = role === 'admin' && logged ? 'none' : role === 'admin' ? '' : $('adm-login-card').style.display;
+  $('drv-login-card').style.display = role === 'driver' && logged ? 'none' : role === 'driver' ? '' : $('drv-login-card').style.display;
+  $(appId).style.display = logged ? '' : 'none';
+  extra.forEach(id => { const el = $(id); if (el) el.style.display = logged ? '' : 'none'; });
+}
+
+function logoutRole(role) {
+  Dawrha.logout(role);
+  refreshSessionUI(role);
+}
+
+async function doLogin(role) {
+  const email = $(role === 'citizen' ? 'cit-email' : role === 'admin' ? 'adm-email' : 'drv-email').value.trim();
+  const pass = $(role === 'citizen' ? 'cit-pass' : role === 'admin' ? 'adm-pass' : 'drv-pass').value;
+  if (!email || !pass) { alert('أدخل البريد وكلمة المرور'); return; }
+  try {
+    const r = await Dawrha.login(role, ROLES[role].login, email, pass);
+    const st = r.session.status;
+    let msg = 'تم الدخول — الحالة: ' + st;
+    if (st && st !== 'ACTIVE_ACCOUNT') {
+      msg += '\nالحساب غير مفعّل بعد (PENDING_PROFILE/PENDING_APPROVAL...) — أكمل باقي الخطوات';
+    }
+    alert(msg);
+    refreshSessionUI(role);
+    if (st === 'ACTIVE_ACCOUNT') {
+      if (role === 'citizen') { loadCatalog('citizen'); listMyRequests(); }
+      if (role === 'admin') { loadQueue(); loadAdminCatalog('admin'); }
+      if (role === 'driver') { loadTour(); }
+    }
+  } catch (e) {
+    alert('فشل الدخول: ' + e.message + (e.json && e.json.errorCode ? ' [' + e.json.errorCode + ']' : ''));
+  }
+}
+
+function toggleReg(role) {
+  const boxId = role === 'citizen' ? 'cit-reg-box' : 'drv-reg-box';
+  const btn = $(role === 'citizen' ? 'cit-reg-toggle' : 'drv-reg-toggle');
+  const hidden = boxId === 'cit-reg-box' ? $('cit-reg-box') : $('drv-reg-box');
+  hidden.style.display = hidden.style.display === 'none' ? '' : 'none';
+  btn.textContent = hidden.style.display === 'none' ? 'تسجيل حساب جديد' : 'لديّ حساب';
+}
+
+async function doRegister(role) {
+  const p = (s) => $(role === 'citizen' ? 'cit-reg-' + s : 'drv-reg-' + s).value.trim();
+  try {
+    const r = await Dawrha.call('POST', '/auth/register/' + ROLES[role].reg, {
+      body: { fullName: p('name'), email: p('email'), password: p('pass'), phoneNumber: p('phone') },
+    });
+    localStorage.setItem('dawrha.temp.' + role, r.token);
+    alert('أُنشئ الحساب. أدخل رمز التحقق المرسل لبريدك.');
+    $(role === 'citizen' ? 'cit-otp-box' : 'drv-otp-box').style.display = 'flex';
+  } catch (e) {
+    alert('فشل التسجيل: ' + e.message);
+  }
+}
+
+async function doOtp(role) {
+  const otp = $(role === 'citizen' ? 'cit-otp' : 'drv-otp').value.trim();
+  const temp = localStorage.getItem('dawrha.temp.' + role);
+  if (!temp) { alert('لا يوجد حساب مؤقت — سجّل أولاً'); return; }
+  try {
+    const data = await Dawrha.call('POST', '/auth/otp/verify', {
+      body: { otpCode: otp, deviceId: Dawrha.deviceId(role) },
+      token: temp,
+    });
+    alert('تم التحقق — الحالة: ' + data.details.status);
+    refreshSessionUI(role);
+  } catch (e) {
+    alert('فشل التحقق: ' + e.message);
+  }
+}
+
+/* ---------- citizen ---------- */
+
+async function loadCatalog(role) {
+  await exec(role, 'catalog', async () => {
+    const data = await Dawrha.call('GET', '/waste/products?page=1&limit=50', { role });
+    state.products = Dawrha.rows(data);
+    const sel = $('cit-prod');
+    sel.innerHTML = state.products.map(p =>
+      '<option value="' + p.id + '">' + (p.name || p.name_en || p.id) + ' — ' + (p.unit_type || '') + '</option>'
+    ).join('') || '<option value="">لا منتجات بعد — أنشئها من تبويب الأدمن</option>';
+    $('cit-cat-count').textContent = 'المنتجات: ' + state.products.length;
+    return data;
+  });
+}
+
+function addLine() {
+  const pid = $('cit-prod').value;
+  const qty = parseFloat($('cit-qty').value);
+  const note = $('cit-line-note').value.trim();
+  if (!pid || !qty) { alert('اختر منتجاً وأدخل كمية'); return; }
+  const prod = state.products.find(p => p.id === pid);
+  state.lines.push({ product_id: pid, quantity: qty, note: note || undefined });
+  $('cit-lines').textContent = 'الأسطر: ' + state.lines.map(l => {
+    const p = state.products.find(x => x.id === l.product_id);
+    return (p ? p.name : l.product_id) + ' × ' + l.quantity;
+  }).join(' — ');
+  $('cit-qty').value = '10';
+  $('cit-line-note').value = '';
+}
+
+async function createRequest() {
+  if (!state.lines.length) { alert('أضف سطراً واحداً على الأقل'); return; }
+  const whenRaw = $('cit-when').value;
+  const body = { lines: state.lines };
+  if (whenRaw) body.scheduled_at = new Date(whenRaw).toISOString();
+  const lat = parseFloat($('cit-lat').value), lng = parseFloat($('cit-lng').value);
+  if (!isNaN(lat)) body.lat = lat;
+  if (!isNaN(lng)) body.lng = lng;
+  if ($('cit-addr').value.trim()) body.address_text = $('cit-addr').value.trim();
+  if ($('cit-contact').value.trim()) body.contact_name = $('cit-contact').value.trim();
+  if ($('cit-contact-phone').value.trim()) body.contact_phone = $('cit-contact-phone').value.trim();
+  const r = await exec('citizen', 'create', () => Dawrha.call('POST', '/collection-requests', { role: 'citizen', body }));
+  if (r) { state.lines = []; $('cit-lines').textContent = 'الأسطر: —'; listMyRequests(); }
+}
+
+async function listMyRequests() {
+  const data = await exec('citizen', 'list', () => Dawrha.call('GET', '/collection-requests?page=1&limit=50', { role: 'citizen' }));
+  if (!data) return;
+  const rows = Dawrha.rows(data);
+  $('cit-req-table').innerHTML = '<table><tr><th>الطلب</th><th>الحالة</th><th>النوع</th><th>المجدول</th><th>السطور</th><th></th></tr>' +
+    rows.map(r => '<tr>' +
+      '<td><code>' + r.id + '</code></td>' +
+      '<td><span class="pill ' + (STATUS_CLS[r.status] || '') + '">' + (STATUS_AR[r.status] || r.status) + '</span></td>' +
+      '<td>' + r.type + '</td>' +
+      '<td>' + (r.scheduled_at || 'فوري') + '</td>' +
+      '<td>' + (Array.isArray(r.lines) ? r.lines.length : '-') + '</td>' +
+      '<td><button class="err" onclick="cancelMyRequest(\'' + r.id + '\')">إلغاء</button></td>' +
+      '</tr>').join('') + '</table>';
+}
+
+async function cancelMyRequest(id) {
+  const reason = prompt('سبب الإلغاء (اختياري):');
+  if (reason === null) return;
+  await exec('citizen', 'list', () => Dawrha.call('PATCH', '/collection-requests/' + id + '/cancel', {
+    role: 'citizen', body: reason ? { reason } : {},
+  }));
+  listMyRequests();
+}
+
+/* ---------- admin ---------- */
+
+async function loadQueue() {
+  const st = $('adm-status-filter').value;
+  const data = await exec('admin', 'queue', () => Dawrha.call('GET', '/admin/collection-requests?limit=100' + (st ? '&status=' + st : ''), { role: 'admin' }));
+  if (!data) return;
+  const rows = Dawrha.rows(data);
+  $('adm-queue-table').innerHTML = '<table><tr><th>الطلب</th><th>الحالة</th><th>النوع</th><th>السائق</th><th>التاريخ</th><th></th><th></th></tr>' +
+    rows.map(r => '<tr>' +
+      '<td><code>' + r.id + '</code></td>' +
+      '<td><span class="pill ' + (STATUS_CLS[r.status] || '') + '">' + (STATUS_AR[r.status] || r.status) + '</span></td>' +
+      '<td>' + r.type + '</td>' +
+      '<td><code>' + (r.driver_id || '-') + '</code></td>' +
+      '<td>' + (r.created_at || '') + '</td>' +
+      '<td><button class="ok" onclick="assignDriver(\'' + r.id + '\')">إسناد</button></td>' +
+      '<td><button class="err" onclick="adminCancel(\'' + r.id + '\')">إلغاء</button></td>' +
+      '</tr>').join('') + '</table>';
+}
+
+async function loadDrivers() {
+  await exec('admin', 'queue', () => Dawrha.call('GET', '/admin/reports/drivers', { role: 'admin' })).then(data => {
+    if (!data) return;
+    const rows = Dawrha.rows(data);
+    $('adm-drivers').innerHTML = 'السائقون (' + rows.length + '): ' + rows.map(d =>
+      '<code>' + (d.id || d.account_id) + '</code>' + (d.name || '') + ' ' + (d.status || '')
+    ).join(' | ');
+  });
+}
+
+async function assignDriver(id) {
+  const driverId = prompt('معرّف السائق (uuid):');
+  if (!driverId) return;
+  await exec('admin', 'queue', () => Dawrha.call('POST', '/admin/collection-requests/' + id + '/assign', {
+    role: 'admin', body: { driver_id: driverId },
+  }));
+  loadQueue();
+}
+
+async function adminCancel(id) {
+  const reason = prompt('سبب الإلغاء:');
+  if (reason === null) return;
+  await exec('admin', 'queue', () => Dawrha.call('PATCH', '/admin/collection-requests/' + id + '/cancel', {
+    role: 'admin', body: reason ? { reason } : {},
+  }));
+  loadQueue();
+}
+
+async function loadAdminCatalog(role) {
+  await exec('admin', 'cat', async () => {
+    const cats = await Dawrha.call('GET', '/admin/waste/categories?page=1&limit=100', { role: 'admin' });
+    const units = await Dawrha.call('GET', '/admin/waste/units?page=1&limit=100', { role: 'admin' });
+    const prods = await Dawrha.call('GET', '/admin/waste/products?page=1&limit=100', { role: 'admin' });
+    state.categories = Dawrha.rows(cats);
+    state.units = Dawrha.rows(units);
+    state.products = Dawrha.rows(prods);
+    $('adm-prod-cat').innerHTML = state.categories.map(c => '<option value="' + c.id + '">' + c.name + '</option>').join('');
+    $('adm-prod-unit').innerHTML = state.units.map(u => '<option value="' + u.id + '">' + (u.name_ar || u.name_en) + ' (' + u.code + ')</option>').join('');
+    $('adm-cat-count').textContent = 'فئات: ' + state.categories.length + ' | وحدات: ' + state.units.length + ' | منتجات: ' + state.products.length;
+    return { categories: state.categories, units: state.units, products: state.products };
+  });
+}
+
+async function createCategory() {
+  const name = $('adm-cat-name').value.trim();
+  if (!name) { alert('اسم الفئة مطلوب'); return; }
+  const fields = { name };
+  if ($('adm-cat-desc').value.trim()) fields.description = $('adm-cat-desc').value.trim();
+  await exec('admin', 'cat', () => Dawrha.callForm('admin', 'POST', '/admin/waste/categories', fields, $('adm-cat-file')));
+  loadAdminCatalog('admin');
+}
+
+async function createUnit() {
+  const code = $('adm-unit-code').value.trim().toUpperCase();
+  const nameEn = $('adm-unit-en').value.trim();
+  const nameAr = $('adm-unit-ar').value.trim();
+  if (!code || !nameEn || !nameAr) { alert('أكمل حقول الوحدة'); return; }
+  const body = { code, name_en: nameEn, name_ar: nameAr, is_weight: $('adm-unit-weight').checked, allows_tolerance: $('adm-unit-tol').checked };
+  await exec('admin', 'cat', () => Dawrha.call('POST', '/admin/waste/units', { role: 'admin', body }));
+  loadAdminCatalog('admin');
+}
+
+async function createProduct() {
+  const name = $('adm-prod-name').value.trim();
+  const cat = $('adm-prod-cat').value, unit = $('adm-prod-unit').value;
+  if (!name || !cat || !unit) { alert('اسم المنتج والفئة والوحدة مطلوبة'); return; }
+  const fields = { name, category_id: cat, unit_id: unit };
+  const wkg = parseFloat($('adm-prod-wkg').value);
+  if (!isNaN(wkg) && wkg > 0) fields.unit_weight_kg = wkg;
+  await exec('admin', 'cat', () => Dawrha.callForm('admin', 'POST', '/admin/waste/products', fields, $('adm-prod-file')));
+  loadAdminCatalog('admin');
+}
+
+async function loadCoverage() {
+  await exec('admin', 'cov', () => Dawrha.call('GET', '/admin/coverage-points', { role: 'admin' }));
+}
+
+async function createCoverage() {
+  const body = {
+    name: $('cov-name').value.trim(),
+    point_type: $('cov-type').value,
+    lat: parseFloat($('cov-lat').value),
+    lng: parseFloat($('cov-lng').value),
+    radius_m: parseInt($('cov-radius').value, 10),
+    priority: parseInt($('cov-priority').value, 10),
+  };
+  if (!body.name) { alert('الاسم مطلوب'); return; }
+  await exec('admin', 'cov', () => Dawrha.call('POST', '/admin/coverage-points', { role: 'admin', body }));
+}
+
+async function loadDispatch() {
+  const data = await exec('admin', 'disp', () => Dawrha.call('GET', '/admin/dispatch-config', { role: 'admin' }));
+  if (!data) return;
+  $('disp-window').value = data.accept_window_sec || '';
+  $('disp-rebalance').value = data.rebalance_min || '';
+  $('disp-lead').value = data.scheduled_lead_min || '';
+  $('disp-enabled').checked = !!data.is_enabled;
+}
+
+async function saveDispatch() {
+  const body = { accept_window_sec: parseInt($('disp-window').value, 10), rebalance_min: parseInt($('disp-rebalance').value, 10), scheduled_lead_min: parseInt($('disp-lead').value, 10), is_enabled: $('disp-enabled').checked };
+  await exec('admin', 'disp', () => Dawrha.call('PATCH', '/admin/dispatch-config', { role: 'admin', body }));
+}
+
+async function reportOverview() {
+  await exec('admin', 'rep', () => Dawrha.call('GET', '/admin/reports/overview', { role: 'admin' }));
+}
+
+async function loadCollectorAccounts() {
+  const st = $('adm-acct-status').value;
+  const data = await exec('admin', 'acct', () => Dawrha.call('GET', '/account-management/accounts?role=COLLECTOR&status=' + st + '&limit=50', { role: 'admin' }));
+  if (!data) return;
+  const rows = Dawrha.rows(data);
+  $('adm-acct-table').innerHTML = '<table><tr><th>الحساب</th><th>الاسم</th><th>البريد</th><th>الحالة</th><th></th></tr>' +
+    rows.map(a => '<tr>' +
+      '<td><code>' + (a.id || a.account_id) + '</code></td>' +
+      '<td>' + (a.name || '') + '</td>' +
+      '<td>' + (a.email || '') + '</td>' +
+      '<td>' + (a.account_status || a.status || '') + '</td>' +
+      '<td><button class="ok" onclick="activateAccount(\'' + (a.id || a.account_id) + '\')">تفعيل</button></td>' +
+      '</tr>').join('') + '</table>';
+}
+
+async function activateAccount(id) {
+  await exec('admin', 'acct', () => Dawrha.call('PATCH', '/account-management/' + id + '/status', {
+    role: 'admin', body: { status: 'ACTIVE' },
+  }));
+  loadCollectorAccounts();
+}
+
+async function reportDaily() {
+  const today = new Date().toISOString().slice(0, 10);
+  await exec('admin', 'rep', () => Dawrha.call('GET', '/admin/reports/collection/daily?date=' + today, { role: 'admin' }));
+}
+
+/* ---------- driver ---------- */
+
+async function loadTour() {
+  const data = await exec('driver', 'tour', () => Dawrha.call('GET', '/driver/collection-requests', { role: 'driver' }));
+  if (!data) return;
+  const stops = Dawrha.rows(data);
+  state.tour = stops;
+  $('drv-tour-table').innerHTML = '<table><tr><th>الطلب</th><th>الحالة</th><th>المسار</th><th></th></tr>' +
+    stops.map(s => {
+      const id = s.request_id || s.id || s.requestId;
+      const st = s.status || s.request_status || '';
+      const btn = (st === 'ASSIGNED' || st === 'QUEUED' || st === 'CREATED')
+        ? '<button class="ok" onclick="drvAction(\'' + id + '\',\'accept\')">قبول</button> <button class="err" onclick="drvAction(\'' + id + '\',\'reject\')">رفض</button>'
+        : st === 'EN_ROUTE' ? '<button class="ok" onclick="drvAction(\'' + id + '\',\'arrived\')">وصلت</button>'
+        : st === 'ARRIVED' ? '<button class="ok" onclick="drvAction(\'' + id + '\',\'collected\')">تم الجمع</button>'
+        : st === 'PICKING' ? '<button class="ok" onclick="drvAction(\'' + id + '\',\'delivered\')">سُلم</button>'
+        : '';
+      return '<tr>' +
+        '<td><code>' + id + '</code></td>' +
+        '<td><span class="pill ' + (STATUS_CLS[st] || '') + '">' + (STATUS_AR[st] || st) + '</span></td>' +
+        '<td>' + (s.route_number || '') + '</td>' +
+        '<td>' + btn + '</td></tr>';
+    }).join('') + '</table>';
+}
+
+async function drvAction(id, action) {
+  let body = {};
+  if (action === 'collected') {
+    const w = prompt('الوزن الفعلي بالكيلوغرام:');
+    if (!w) return;
+    body = { actualWeightKg: parseFloat(w) };
+  }
+  if (action === 'delivered') {
+    const wh = prompt('معرّف المستودع (uuid) — اختياري:');
+    if (wh === null) return;
+    if (wh.trim()) body = { warehouseId: wh.trim() };
+  }
+  const r = await exec('driver', 'tour', () => Dawrha.call('PATCH', '/driver/collection-requests/' + id + '/' + action, { role: 'driver', body }));
+  if (r) loadTour();
+}
+
+async function myTruck() {
+  await exec('driver', 'truck', () => Dawrha.call('GET', '/driver/my-truck', { role: 'driver' }));
+}
+
+async function loadOnboardingRefs() {
+  await exec('driver', 'onboard', async () => {
+    const shifts = await Dawrha.call('GET', '/shifts/onboarding', { role: 'driver' });
+    const provinces = await Dawrha.call('GET', '/onboarding/provinces', { role: 'driver' });
+    const sh = Dawrha.rows(shifts);
+    const pr = Dawrha.rows(provinces);
+    $('ob-shift').innerHTML = (sh.length
+      ? sh.map(s => '<option value="' + s.id + '">' + (s.name || s.id) + '</option>').join('')
+      : '<option value="">لا ورديات — أطلق مزامنة الأسطول أولاً</option>');
+    $('ob-province').innerHTML = pr.map(p => '<option value="' + p.id + '">' + (p.name_ar || p.name_en || p.name || p.id) + '</option>').join('');
+    return { shifts: sh, provinces: pr };
+  });
+}
+
+async function submitOnboarding() {
+  const sh = $('ob-shift').value, pv = $('ob-province').value, ni = $('ob-national-id').value.trim();
+  if (!ni || !sh) { alert('رقم الهوية والوردية مطلوبان'); return; }
+  await exec('driver', 'onboard', () => Dawrha.call('POST', '/onboarding/collector/information', {
+    role: 'driver', body: { NationalID: ni, shiftId: sh },
+  }));
+  const loc = { provinceId: pv };
+  if ($('ob-address').value.trim()) loc.address = $('ob-address').value.trim();
+  await exec('driver', 'onboard', () => Dawrha.call('POST', '/onboarding/location', {
+    role: 'driver', body: loc,
+  }));
+}
+
+async function handover() {
+  await exec('driver', 'truck', () => Dawrha.call('GET', '/driver/handover-status', { role: 'driver' }));
+}
+
+async function pickup() {
+  const body = {};
+  if ($('pk-note').value.trim()) body.note = $('pk-note').value.trim();
+  const lat = parseFloat($('pk-lat').value), lng = parseFloat($('pk-lng').value);
+  if (!isNaN(lat)) body.lat = lat;
+  if (!isNaN(lng)) body.lng = lng;
+  await exec('driver', 'truck', () => Dawrha.call('POST', '/driver/pickup', { role: 'driver', body }));
+}
+
+async function dropoff() {
+  const reason = $('do-reason').value.trim();
+  if (!reason) { alert('السبب مطلوب'); return; }
+  await exec('driver', 'truck', () => Dawrha.call('POST', '/driver/dropoff', { role: 'driver', body: { reason } }));
+}
+
+refreshSessionUI('citizen');
+refreshSessionUI('admin');
+refreshSessionUI('driver');
+</script>
+</body>
+</html>

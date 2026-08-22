@@ -22,8 +22,8 @@ export class PointsRateMigration1789300000000 implements MigrationInterface {
         "amount_per_point" numeric(14,3) NOT NULL,
         "currency"         character varying(8) NOT NULL DEFAULT 'SYP',
         "updated_by"       uuid,
-        "createdAt"        TIMESTAMP NOT NULL DEFAULT now(),
-        "updatedAt"        TIMESTAMP NOT NULL DEFAULT now(),
+        "created_at"       TIMESTAMP NOT NULL DEFAULT now(),
+        "updated_at"       TIMESTAMP NOT NULL DEFAULT now(),
         CONSTRAINT "PK_points_rates" PRIMARY KEY ("id"),
         CONSTRAINT "UQ_points_rates_role" UNIQUE ("role")
       )

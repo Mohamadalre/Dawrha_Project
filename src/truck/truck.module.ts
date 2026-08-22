@@ -68,5 +68,6 @@ import { TruckTrackingController } from './tracking/truck-tracking.controller';
     TruckTrackingService,
     TruckTrackingGateway,
   ],
+  exports: [HandoverService],
 })
 export class TruckModule {}

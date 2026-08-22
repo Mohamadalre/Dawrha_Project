@@ -30,13 +30,15 @@ describe('TruckTrackingGateway', () => {
     tracking = {
       hasActiveHandover: jest.fn(),
       isDriverOfTruck: jest.fn(),
-      saveLocation: jest.fn(async (dto: any, driverId: string) => ({ ...dto, driverId })),
+      saveLocation: jest.fn((dto: any, driverId: string) => ({ ...dto, driverId })),
       finalizeStop: jest.fn().mockResolvedValue({ id: 'log1' }),
       getLocation: jest.fn(),
       getActiveTrucks: jest.fn(),
     };
-    gateway = new TruckTrackingGateway(tracking, {} as any, {} as any, {} as any);
+    const emitter = { emit: jest.fn() };
+    gateway = new TruckTrackingGateway(tracking, {} as any, {} as any, {} as any, emitter as any);
     (gateway as any).server = mkServer();
+    (gateway as any).eventEmitter = emitter;
   });
 
   it('rejects a location when the driver has NOT picked up the truck', async () => {
@@ -57,14 +59,9 @@ describe('TruckTrackingGateway', () => {
 
     expect(res.status).toBe('ok');
     expect(tracking.saveLocation).toHaveBeenCalled();
-    // Broadcast to the truck's room and the admins channel.
+    // Broadcast only to the truck's room (no admin access).
     const events = emitted.map((e) => `${e.room}:${e.event}`);
-    expect(events).toEqual(
-      expect.arrayContaining([
-        `truck:${validLocation.truckId}:truck:location`,
-        'admins:truck:location',
-      ]),
-    );
+    expect(events).toEqual([`truck:${validLocation.truckId}:truck:location`]);
   });
 
   it('rejects a malformed location payload outright', async () => {
@@ -76,25 +73,11 @@ describe('TruckTrackingGateway', () => {
     expect(tracking.saveLocation).not.toHaveBeenCalled();
   });
 
-  it('announceSessionStarted tells the admins channel a truck went live', () => {
-    gateway.announceSessionStarted({ truckId: 't1', driverId: 'd1', plateNumber: 'ABC-1' });
-
-    expect(emitted).toEqual([
-      {
-        room: 'admins',
-        event: 'truck:session',
-        payload: { truckId: 't1', driverId: 'd1', plateNumber: 'ABC-1', status: 'started' },
-      },
-    ]);
-  });
-
   it('endSession finalises the stop and notifies subscribers', async () => {
     await gateway.endSession('t1', StopReason.HANDOVER_DROPOFF);
 
     expect(tracking.finalizeStop).toHaveBeenCalledWith('t1', StopReason.HANDOVER_DROPOFF);
     const events = emitted.map((e) => `${e.room}:${e.event}`);
-    expect(events).toEqual(
-      expect.arrayContaining(['truck:t1:truck:stopped', 'admins:truck:stopped']),
-    );
+    expect(events).toEqual(['truck:t1:truck:stopped']);
   });
 });

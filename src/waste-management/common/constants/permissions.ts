@@ -35,6 +35,17 @@ export const WASTE_PERMISSIONS = {
   'admin.shifts.manage': 'Edit work shift times',
   'admin.delivery.rate.view': 'View the per-kilometre delivery rate',
   'admin.delivery.rate.manage': 'Set the per-kilometre delivery rate',
+  'collection.requests.create': 'Create collection requests (citizens and institutions)',
+  'collection.requests.view': 'View own collection requests',
+  'collection.requests.cancel': 'Cancel own collection requests',
+  'collection.plans.view': 'View own collection plan',
+  'collection.plans.manage': 'Manage own collection plan',
+  'collection.driver.view': 'View assigned collection requests (driver)',
+  'collection.driver.manage': 'Execute collection stops (driver)',
+  'collection.admin.view': 'View all collection requests and plans (admin)',
+  'collection.admin.manage': 'Assign and cancel collection requests (admin)',
+  'collection.coverage.manage': 'Manage coverage points (admin)',
+  'collection.dispatch.manage': 'Manage dispatch configuration (admin)',
 } as const;
 
 export type WastePermissionKey = keyof typeof WASTE_PERMISSIONS;
@@ -75,6 +86,18 @@ const MATERIALS_EXTRA: WastePermissionKey[] = ['waste.materials.view'];
 // and orders, but has no basket of their own to view or fill.
 const ADMIN_PERMISSIONS = (Object.keys(WASTE_PERMISSIONS) as WastePermissionKey[])
   .filter((k) => !CART_PERMISSIONS.includes(k));
+/** All collection-related permissions — granted to every role EXCEPT plans. */
+const ALL_COLLECTION_PERMISSIONS: WastePermissionKey[] = [
+  'collection.requests.create',
+  'collection.requests.view',
+  'collection.requests.cancel',
+  'collection.driver.view',
+  'collection.driver.manage',
+  'collection.admin.view',
+  'collection.admin.manage',
+  'collection.coverage.manage',
+  'collection.dispatch.manage',
+];
 
 /**
  * Maps each platform role to the waste permission keys it should hold.
@@ -83,9 +106,17 @@ const ADMIN_PERMISSIONS = (Object.keys(WASTE_PERMISSIONS) as WastePermissionKey[
  *   Factory -> FACTORY, Free Facility -> EXTERNAL_PARTNER.
  */
 export const ROLE_PERMISSIONS_MAP: Partial<Record<Role, WastePermissionKey[]>> = {
-  [Role.CITIZEN]: BUYER_PERMISSIONS,
-  [Role.INSTITUTIONS]: [...BUYER_PERMISSIONS, ...INSTITUTION_EXTRA, ...MATERIALS_EXTRA],
-  [Role.FACTORY]: [...BUYER_PERMISSIONS, ...AVAILABILITY_EXTRA, ...MATERIALS_EXTRA],
-  [Role.EXTERNAL_PARTNER]: [...BUYER_PERMISSIONS, ...AVAILABILITY_EXTRA, ...MATERIALS_EXTRA],
+  [Role.CITIZEN]: [...BUYER_PERMISSIONS, ...ALL_COLLECTION_PERMISSIONS],
+  [Role.INSTITUTIONS]: [
+    ...BUYER_PERMISSIONS,
+    ...INSTITUTION_EXTRA,
+    ...MATERIALS_EXTRA,
+    ...ALL_COLLECTION_PERMISSIONS,
+    'collection.plans.view',
+    'collection.plans.manage',
+  ],
+  [Role.FACTORY]: [...BUYER_PERMISSIONS, ...AVAILABILITY_EXTRA, ...MATERIALS_EXTRA, ...ALL_COLLECTION_PERMISSIONS],
+  [Role.EXTERNAL_PARTNER]: [...BUYER_PERMISSIONS, ...AVAILABILITY_EXTRA, ...MATERIALS_EXTRA, ...ALL_COLLECTION_PERMISSIONS],
+  [Role.COLLECTOR]: ALL_COLLECTION_PERMISSIONS,
   [Role.ADMIN]: ADMIN_PERMISSIONS,
 };
