@@ -24,6 +24,15 @@ export enum OrderStatus {
   REJECTED_AWAITING_BUYER = 'REJECTED_AWAITING_BUYER',
   /** Allocation gave up (round cap reached) — a human has to look. */
   NEEDS_ADMIN = 'NEEDS_ADMIN',
+  /**
+   * A SPLIT order awaiting the warehouses-manager's review.
+   * The allocator chose the nearest covering set, but per business flow the
+   * split must be presented to مدير المستودعات (warehouses/region manager)
+   * who either approves as-is or swaps the set (A+B → A+C) before any
+   * warehouse manager is offered a part. Prevents race where a warehouse
+   * accepts before admin could modify.
+   */
+  AWAITING_SPLIT_APPROVAL = 'AWAITING_SPLIT_APPROVAL',
   /** Every part accepted. Point of no return: cancellation closes here. */
   PREPARING = 'PREPARING',
   /** Delivery only — goods are on the road. */
@@ -52,6 +61,7 @@ export enum OrderStatus {
 export const ORDER_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
   [OrderStatus.PENDING_ALLOCATION]: [
     OrderStatus.AWAITING_APPROVAL,
+    OrderStatus.AWAITING_SPLIT_APPROVAL,
     OrderStatus.NEEDS_CUSTOMER_DECISION,
     OrderStatus.CANCELLED,
   ],
@@ -61,6 +71,11 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
     OrderStatus.PREPARING,
     OrderStatus.NEEDS_ADMIN,
     // A split refused by the admin goes to the buyer, not back to allocation.
+    OrderStatus.REJECTED_AWAITING_BUYER,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.AWAITING_SPLIT_APPROVAL]: [
+    OrderStatus.AWAITING_APPROVAL,
     OrderStatus.REJECTED_AWAITING_BUYER,
     OrderStatus.CANCELLED,
   ],
@@ -97,6 +112,7 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
 export const BUYER_CANCELLABLE_STATUSES: readonly OrderStatus[] = [
   OrderStatus.PENDING_ALLOCATION,
   OrderStatus.AWAITING_APPROVAL,
+  OrderStatus.AWAITING_SPLIT_APPROVAL,
   OrderStatus.NEEDS_CUSTOMER_DECISION,
   OrderStatus.REJECTED_AWAITING_BUYER,
   OrderStatus.NEEDS_ADMIN,
