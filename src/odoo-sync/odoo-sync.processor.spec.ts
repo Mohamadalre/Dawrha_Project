@@ -40,6 +40,8 @@ describe('OdooSyncProcessor', () => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
     odoo = {
+      // Default: our record is not in Odoo yet → the sync takes the CREATE path.
+      findIdByBackendId: jest.fn().mockResolvedValue(null),
       createProductCategory: jest.fn(),
       updateProductCategory: jest.fn(),
       createRecycleWarehouse: jest.fn(),

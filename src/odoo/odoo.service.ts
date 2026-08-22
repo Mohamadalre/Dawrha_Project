@@ -223,11 +223,27 @@ export class OdooService {
     return response.data?.result as T;
   }
 
+  /**
+   * The Odoo id of the record in `model` whose `backend_id` matches ours, or
+   * null. This is the STABLE identity — the backend matches on its own uuid,
+   * never on the numeric Odoo id — so an Odoo wipe/restore that reassigns ids
+   * cannot make the backend adopt another record. Mirrors how orders already
+   * resolve by `backend_part_id`.
+   */
+  async findIdByBackendId(model: string, backendId: string): Promise<number | null> {
+    if (!backendId) return null;
+    const ids = await this.callKw<number[]>(
+      model, 'search', [[['backend_id', '=', backendId]]], { limit: 1 });
+    return ids?.[0] ?? null;
+  }
+
   // ---------------------------------------------------------------------------
   // Catalogue (category / product)
   // ---------------------------------------------------------------------------
-  async createProductCategory(name: string): Promise<number> {
-    const id = await this.callKw<number>('recycle.product.category', 'create', [{ name }]);
+  async createProductCategory(name: string, backendId?: string): Promise<number> {
+    const payload: Record<string, any> = { name };
+    if (backendId) payload.backend_id = backendId;
+    const id = await this.callKw<number>('recycle.product.category', 'create', [payload]);
     if (!id) throw new InternalServerErrorException('Odoo did not return category id');
     return id;
   }
@@ -246,6 +262,8 @@ export class OdooService {
     price?: number;
     /** Measurement-unit CODE (products.unitType), e.g. 'KG'. */
     unitCode?: string;
+    /** Stable backend uuid — written to `backend_id` for wipe-safe re-linking. */
+    backendId?: string;
   }): Promise<number> {
     // NOTE: no `price` here. `recycle.product` has no single price field — it
     // holds per-tier prices (price_factory / price_free_facility) which are
@@ -261,6 +279,7 @@ export class OdooService {
     // material can only ever carry a unit this backend actually defines.
     // Omitted → Odoo falls back to its default unit rather than failing.
     if (values.unitCode) payload.unit_code = values.unitCode;
+    if (values.backendId) payload.backend_id = values.backendId;
     const id = await this.callKw<number>('recycle.product', 'create', [payload]);
     if (!id) throw new InternalServerErrorException('Odoo did not return product id');
     return id;
@@ -305,11 +324,13 @@ export class OdooService {
     /** Odoo requires one on creation now — see `_assert_location_given`. */
     address?: string;
     zones?: { name: string; type: string }[];
+    backendId?: string;
   }): Promise<number> {
     const payload: Record<string, any> = {
       name: values.name,
       code: values.code,
     };
+    if (values.backendId) payload.backend_id = values.backendId;
     if (values.address) payload.address = values.address;
     if (values.latitude != null) payload.latitude = values.latitude;
     if (values.longitude != null) payload.longitude = values.longitude;
@@ -680,10 +701,13 @@ export class OdooService {
     name: string;
     code: string;
     allowsTolerance: boolean;
+    backendId?: string;
   }): Promise<number> {
-    const id = await this.callKw<number>('recycle.measurement.unit', 'create', [
-      { name: values.name, code: values.code, allows_tolerance: values.allowsTolerance },
-    ]);
+    const payload: Record<string, any> = {
+      name: values.name, code: values.code, allows_tolerance: values.allowsTolerance,
+    };
+    if (values.backendId) payload.backend_id = values.backendId;
+    const id = await this.callKw<number>('recycle.measurement.unit', 'create', [payload]);
     if (!id) throw new InternalServerErrorException('Odoo did not return unit id');
     return id;
   }
@@ -929,15 +953,16 @@ export class OdooService {
     code: string;
     sortOrder: number;
     productOdooId: number;
+    backendId?: string;
   }): Promise<number> {
-    const id = await this.callKw<number>('recycle.material.condition', 'create', [
-      {
-        name: values.name,
-        code: values.code,
-        sort_order: values.sortOrder,
-        product_id: values.productOdooId,
-      },
-    ]);
+    const payload: Record<string, any> = {
+      name: values.name,
+      code: values.code,
+      sort_order: values.sortOrder,
+      product_id: values.productOdooId,
+    };
+    if (values.backendId) payload.backend_id = values.backendId;
+    const id = await this.callKw<number>('recycle.material.condition', 'create', [payload]);
     if (!id) throw new InternalServerErrorException('Odoo did not return condition id');
     return id;
   }

@@ -2,11 +2,8 @@ import { DeviceType } from '@src/user/enums/deviec-type.enum';
 import { IsEnum, IsNotEmpty, IsOptional, IsString ,IsBoolean } from 'class-validator';
 
 
-export class RefreshTokenDto {
-  @IsString()
-  @IsNotEmpty({ message: 'The Device ID is required' })
-  deviceId: string;
-}
+// RefreshTokenDto removed: the refresh route takes no body — the device id is
+// read from the refresh token's verified payload by RefreshTokenGuard.
 
 export class RefreshTokenTemporaryDto {
   @IsString()

@@ -5,15 +5,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { MaterialCondition } from '../entities/material-condition.entity';
 import { Product } from '../entities/product.entity';
 import { ProductPricing } from '../entities/product-pricing.entity';
 import { ProductPricingHistory } from '../entities/product-pricing-history.entity';
 import { PricingArchiveReason } from '../enums/pricing-archive-reason.enum';
+import { PricingTier } from '../enums/pricing-tier.enum';
 import { WarehouseInventory } from '@src/warehouse/entities/warehouse-inventory.entity';
 import { Offer } from '../entities/offer.entity';
 import { OdooSyncStatus } from '../enums/odoo-sync-status.enum';
+import { OfferAudience } from '../enums/offer-audience.enum';
 import { OdooSyncService } from '@src/odoo-sync/odoo-sync.service';
 import { AuditService } from '../common/providers/audit.service';
 import { CatalogCacheService } from '../common/providers/catalog-cache.service';
@@ -84,7 +86,7 @@ export class ProductConditionsService {
     productId: string,
     dto: { code: string; name_en: string; name_ar: string },
   ) {
-    await this.productOrThrow(productId);
+    const product = await this.productOrThrow(productId);
 
     const clash = await this.conditionRepo.findOne({
       where: { productId, code: dto.code },
@@ -129,16 +131,139 @@ export class ProductConditionsService {
       }),
     );
 
+    // Adding a grade turns an ungraded material into a graded one, and a graded
+    // material is priced PER GRADE for the factory / free-facility tiers (the
+    // BUYERS audience). Two things set while the material had no grades are now
+    // invalid and are swept out here:
+    //
+    //   • the CONDITIONLESS (base) factory / free-facility PRICE — a factory
+    //     would otherwise keep being quoted one figure for a material the system
+    //     now expects a price per grade for; and
+    //   • any CONDITIONLESS BUYERS OFFER — it discounted that base price, which
+    //     is gone, and a BUYERS offer never reached the sellers, so it now has
+    //     no price to apply to for anyone and would show as an empty offer card.
+    //
+    // Individual / company (SELLERS) prices and offers are left ALONE: sellers
+    // are never graded, so their conditionless price still stands and their
+    // conditionless offer still applies. The admin re-prices — and re-offers —
+    // each grade. Self-gating: once the first grade cleared these, later grade
+    // adds find nothing to do.
+    const graded = await this.demoteConditionlessGradedPricingAndOffers(
+      adminId,
+      productId,
+    );
+
     await this.afterChange(adminId, 'ADD_PRODUCT_CONDITION', condition.id, {
       productId,
       code: condition.code,
     });
     await this.odooSync.enqueueSyncCondition({ conditionId: condition.id });
+    // Rewrite Odoo's price sheet (it mirrors the offer-adjusted prices) when a
+    // base price OR a conditionless buyers offer actually left it.
+    if (graded) {
+      await this.odooSync.enqueueUpdatePricing({ productId });
+    }
+
+    // Non-blocking warning: physical stock that is still UNGRADED does not
+    // belong to any grade, so once the material is graded that stock is neither
+    // visible under a grade nor sellable until a warehouse SORTS it into the new
+    // grades. Adding the grade is NOT refused for it — the grade has to exist
+    // before the warehouse can sort into it — but the admin is told, so the
+    // stranded quantity is not silently forgotten.
+    const ungradedQty = await this.ungradedStockQuantity(product);
 
     return {
       message: 'Condition added successfully',
       condition: this.map(condition),
+      ...(ungradedQty > 0
+        ? {
+            warning:
+              'This material still holds ungraded warehouse stock. It must be sorted into grades (in the warehouse) before it can be sold.',
+            ungraded_stock_quantity: ungradedQty,
+          }
+        : {}),
     };
+  }
+
+  /**
+   * Total PHYSICAL quantity of a material that is still UNGRADED — held under no
+   * real grade (a null/empty code, or the `UNGRADED` bucket). Summed across
+   * every warehouse. Zero for a material never synced to Odoo (no stock lines).
+   */
+  private async ungradedStockQuantity(product: Product): Promise<number> {
+    if (!product.odooProductId) return 0;
+    const row = await this.inventoryRepo
+      .createQueryBuilder('i')
+      .select('COALESCE(SUM(i.quantity), 0)', 'total')
+      .where('i.odooProductId = :odooProductId', {
+        odooProductId: product.odooProductId,
+      })
+      .andWhere(
+        "(i.conditionCode IS NULL OR i.conditionCode = '' OR UPPER(i.conditionCode) = 'UNGRADED')",
+      )
+      .andWhere('i.quantity > 0')
+      .getRawOne<{ total: string }>();
+    return Number(row?.total ?? 0);
+  }
+
+  /**
+   * When a material becomes graded, removes the now-invalid CONDITIONLESS
+   * factory / free-facility base PRICE (archived first) AND any CONDITIONLESS
+   * BUYERS OFFER (which discounted that gone price). Returns true when anything
+   * was actually removed, so the caller knows whether Odoo needs a rewrite.
+   *
+   * SELLERS prices and offers (citizen / institution) are untouched — those
+   * tiers are never priced per grade, so their conditionless rows stay valid.
+   */
+  private async demoteConditionlessGradedPricingAndOffers(
+    adminId: string,
+    productId: string,
+  ): Promise<boolean> {
+    return this.dataSource.transaction(async (manager) => {
+      const pricingRepo = manager.getRepository(ProductPricing);
+      const historyRepo = manager.getRepository(ProductPricingHistory);
+      const offerRepo = manager.getRepository(Offer);
+
+      const baseRows = await pricingRepo.find({
+        where: [
+          { productId, conditionId: IsNull(), tier: PricingTier.FACTORY },
+          { productId, conditionId: IsNull(), tier: PricingTier.FREE_FACILITY },
+        ],
+      });
+      if (baseRows.length) {
+        await historyRepo.save(
+          baseRows.map((p) =>
+            historyRepo.create({
+              productId: p.productId,
+              tier: p.tier,
+              conditionCode: p.conditionCode,
+              price: p.price,
+              currency: p.currency,
+              effectiveFrom: p.effectiveFrom,
+              archivedReason: PricingArchiveReason.GRADED,
+              archivedBy: adminId,
+            }),
+          ),
+        );
+        await pricingRepo.remove(baseRows);
+      }
+
+      // Conditionless BUYERS offers only. A cart line that used one has its
+      // offer_id nulled by the FK; SELLERS offers are never conditionless-graded
+      // so they are not matched here.
+      const baselessOffers = await offerRepo.find({
+        where: {
+          productId,
+          conditionId: IsNull(),
+          audience: OfferAudience.BUYERS,
+        },
+      });
+      if (baselessOffers.length) {
+        await offerRepo.remove(baselessOffers);
+      }
+
+      return baseRows.length > 0 || baselessOffers.length > 0;
+    });
   }
 
   /**

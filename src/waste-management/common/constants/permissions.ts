@@ -50,6 +50,16 @@ export const WASTE_PERMISSIONS = {
 
 export type WastePermissionKey = keyof typeof WASTE_PERMISSIONS;
 
+/**
+ * The cart permissions — held ONLY by buyers, never by the admin.
+ *
+ * A cart is a buyer's basket that becomes an order at checkout. The admin
+ * administers the platform; they do not buy, hold a basket, or check out — so
+ * they must not be able to view, add to, or clear a cart. Kept as its own list
+ * so it can be granted to buyers and explicitly WITHHELD from the admin below.
+ */
+const CART_PERMISSIONS: WastePermissionKey[] = ['cart.view', 'cart.manage'];
+
 /** Permissions granted to every commercial buyer role (citizen/company/factory/partner). */
 const BUYER_PERMISSIONS: WastePermissionKey[] = [
   'waste.categories.view',
@@ -60,8 +70,7 @@ const BUYER_PERMISSIONS: WastePermissionKey[] = [
   // what the reader's tier can actually buy, so it is safe for all of them and
   // useful to all of them.
   'waste.products.popular',
-  'cart.view',
-  'cart.manage',
+  ...CART_PERMISSIONS,
 ];
 
 /** Extra permission only institutions hold (they alone are category-restricted). */
@@ -73,6 +82,10 @@ const AVAILABILITY_EXTRA: WastePermissionKey[] = ['waste.products.availability']
 /** "My materials" (onboarding-selected categories): the three commercial roles. */
 const MATERIALS_EXTRA: WastePermissionKey[] = ['waste.materials.view'];
 
+// Every waste permission EXCEPT the cart: the admin runs the catalogue, pricing
+// and orders, but has no basket of their own to view or fill.
+const ADMIN_PERMISSIONS = (Object.keys(WASTE_PERMISSIONS) as WastePermissionKey[])
+  .filter((k) => !CART_PERMISSIONS.includes(k));
 /** All collection-related permissions — granted to every role EXCEPT plans. */
 const ALL_COLLECTION_PERMISSIONS: WastePermissionKey[] = [
   'collection.requests.create',
@@ -85,8 +98,6 @@ const ALL_COLLECTION_PERMISSIONS: WastePermissionKey[] = [
   'collection.coverage.manage',
   'collection.dispatch.manage',
 ];
-
-const ADMIN_PERMISSIONS = Object.keys(WASTE_PERMISSIONS) as WastePermissionKey[];
 
 /**
  * Maps each platform role to the waste permission keys it should hold.

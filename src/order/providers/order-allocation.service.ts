@@ -33,6 +33,7 @@ import {
   shortfallRatio,
 } from './allocation-planner';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
+import { WarehouseState } from '@src/warehouse/enums/warehouse-state.enum';
 import { DistanceService } from './distance.service';
 import {
   BadRequestException,
@@ -505,20 +506,43 @@ export class OrderAllocationService {
   ): Promise<WarehouseSupply[]> {
     if (!order.provinceId) return [];
 
+    const productIds = [...new Set(lines.map((l) => l.odooProductId))];
+
+    // 1) Which ACTIVE warehouses in the buyer's province actually hold FREE
+    //    stock of an ordered material? Only these are worth ranking — an empty
+    //    warehouse must never be MEASURED (a paid Google call spent on a
+    //    warehouse that can give nothing) nor placed BETWEEN real candidates in
+    //    the nearest-first order.
+    const stockRows = await this.inventoryRepo
+      .createQueryBuilder('i')
+      .innerJoin(Warehouse, 'w', 'w.id = i.warehouseId')
+      .select('i.warehouseId', 'warehouseId')
+      .where('w.provinceId = :provinceId', { provinceId: order.provinceId })
+      .andWhere('w.state = :active', { active: WarehouseState.ACTIVE })
+      .andWhere('i.odooProductId IN (:...productIds)', { productIds })
+      .andWhere('(i.quantity - i.reservedQuantity) > 0')
+      .groupBy('i.warehouseId')
+      .getRawMany<{ warehouseId: string }>();
+    const stockWarehouseIds = stockRows.map((r) => r.warehouseId);
+    if (!stockWarehouseIds.length) return [];
+
+    // 2) Drop warehouses that already refused this order.
+    const excluded = await this.disqualifiedWarehouses(order.id);
+    const eligibleIds = stockWarehouseIds.filter((id) => !excluded.has(id));
+    if (!eligibleIds.length) return [];
+
+    // 3) Rank ONLY the stock-holding, eligible warehouses, nearest first.
     const ranked = await this.distance.rankWarehouses({
       buyerProfileId: order.buyerProfileId,
       provinceId: order.provinceId,
+      warehouseIds: eligibleIds,
     });
     if (!ranked.length) return [];
 
-    const excluded = await this.disqualifiedWarehouses(order.id);
-    const candidates = ranked.filter((r) => !excluded.has(r.warehouseId));
-    if (!candidates.length) return [];
-
-    const productIds = [...new Set(lines.map((l) => l.odooProductId))];
+    // 4) The per-warehouse availability map (net of other orders' holds).
     const rows = await this.inventoryRepo.find({
       where: {
-        warehouseId: In(candidates.map((c) => c.warehouseId)),
+        warehouseId: In(ranked.map((r) => r.warehouseId)),
         odooProductId: In(productIds),
       },
     });
@@ -533,7 +557,7 @@ export class OrderAllocationService {
       availableByWarehouse.set(row.warehouseId, bucket);
     }
 
-    return candidates.map((c) => ({
+    return ranked.map((c) => ({
       warehouseId: c.warehouseId,
       distanceKm: c.distanceKm,
       available: availableByWarehouse.get(c.warehouseId) ?? new Map(),
@@ -621,7 +645,14 @@ export function lineKey(
   odooProductId: number,
   conditionCode: string | null | undefined,
 ): string {
-  return `${odooProductId}:${(conditionCode ?? '').toUpperCase()}`;
+  const code = (conditionCode ?? '').toUpperCase();
+  // UNGRADED is UNSORTED stock — it carries no grade. An ungraded material's
+  // order arrives with a NULL condition (there is no grade to pick), so its
+  // stock, which Odoo mirrors as 'UNGRADED', must map to the SAME no-grade
+  // bucket or the order can never be filled from its own stock. A graded order
+  // names a real grade ('GOOD'…) and so never collides with this empty bucket.
+  const normalized = code === 'UNGRADED' ? '' : code;
+  return `${odooProductId}:${normalized}`;
 }
 
 function round3(value: number): number {

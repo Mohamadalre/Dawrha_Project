@@ -22,25 +22,42 @@ export class OrderTasksProcessor extends WorkerHost {
   }
 
   async process(job: Job): Promise<void> {
-    if (job.name !== ORDER_TASKS.PLAN_CONSOLIDATION) return;
-
     const orderId = job.data?.orderId as string | undefined;
     if (!orderId) return;
 
-    try {
-      const result = await this.trips.planConsolidationForOrder(orderId);
-      winstonLogger.info(
-        `Order ${orderId}: consolidation started automatically (${(result as any).trip_count ?? 0} trip(s))`,
-        LOG_META,
-      );
-    } catch (err) {
-      // A race — the buyer cancelled, a part was rejected and re-allocated, or a
-      // trip already exists — is not a failure to retry into a loop; log and let
-      // the next trigger (or the buyer's own action) settle it.
-      winstonLogger.warn(
-        `Order ${orderId}: automatic consolidation did not start — ${(err as Error).message}`,
-        LOG_META,
-      );
+    // A race — the buyer cancelled, a part was rejected and re-allocated, or a
+    // trip already exists — is not a failure to retry into a loop; log and let
+    // the next trigger (or the buyer's own action) settle it.
+    if (job.name === ORDER_TASKS.PLAN_CONSOLIDATION) {
+      try {
+        const result = await this.trips.planConsolidationForOrder(orderId);
+        winstonLogger.info(
+          `Order ${orderId}: consolidation started automatically (${(result as any).trip_count ?? 0} trip(s))`,
+          LOG_META,
+        );
+      } catch (err) {
+        winstonLogger.warn(
+          `Order ${orderId}: automatic consolidation did not start — ${(err as Error).message}`,
+          LOG_META,
+        );
+      }
+      return;
+    }
+
+    if (job.name === ORDER_TASKS.PLAN_DELIVERY) {
+      try {
+        const result = await this.trips.planForOrder(orderId);
+        winstonLogger.info(
+          `Order ${orderId}: delivery planned automatically (${(result as any).trip_count ?? (result as any).trips?.length ?? 0} trip(s)) and pushed to Odoo`,
+          LOG_META,
+        );
+      } catch (err) {
+        winstonLogger.warn(
+          `Order ${orderId}: automatic delivery planning did not start — ${(err as Error).message}`,
+          LOG_META,
+        );
+      }
+      return;
     }
   }
 }

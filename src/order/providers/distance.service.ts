@@ -110,12 +110,21 @@ export class DistanceService {
     buyerProfileId: string;
     provinceId: string;
     limit?: number;
+    /**
+     * Restrict ranking to these warehouses only. The allocator passes the
+     * warehouses that actually HOLD stock of the ordered materials, so an empty
+     * warehouse is never measured (a paid Google call spent on a warehouse that
+     * can contribute nothing) nor ranked between real candidates.
+     */
+    warehouseIds?: string[];
   }): Promise<WarehouseDistance[]> {
+    if (params.warehouseIds && params.warehouseIds.length === 0) return [];
     const limit = params.limit ?? MAX_CANDIDATE_WAREHOUSES;
     const shortlist = await this.shortlistByStraightLine(
       params.buyerProfileId,
       params.provinceId,
       limit,
+      params.warehouseIds,
     );
     if (!shortlist.length) return [];
 
@@ -135,7 +144,12 @@ export class DistanceService {
     buyerProfileId: string,
     provinceId: string,
     limit: number,
+    warehouseIds?: string[],
   ): Promise<WarehouseDistance[]> {
+    // Optional id restriction: when the allocator hands the stock-holding
+    // warehouses, only those are shortlisted — an empty one is never even
+    // measured. `$5 IS NULL` keeps the clause a no-op for other callers.
+    const restrictIds = warehouseIds && warehouseIds.length ? warehouseIds : null;
     const rows = await this.warehouseRepo.query(
       `
       WITH buyer AS (
@@ -151,15 +165,17 @@ export class DistanceService {
              ) / 1000.0 AS distance_km
         FROM warehouses w
        WHERE w.province_id = $2
-         AND w.is_active = true
+         -- state = ACTIVE is the single lifecycle gate (the old is_active
+         -- boolean was dropped); a closing/inactive warehouse takes no new work.
          AND w.state = $3
          AND w.latitude IS NOT NULL
          AND w.longitude IS NOT NULL
+         AND ($5::uuid[] IS NULL OR w.id = ANY($5::uuid[]))
          AND (SELECT coordinates FROM buyer) IS NOT NULL
        ORDER BY distance_km ASC
        LIMIT $4
       `,
-      [buyerProfileId, provinceId, WarehouseState.ACTIVE, limit],
+      [buyerProfileId, provinceId, WarehouseState.ACTIVE, limit, restrictIds],
     );
 
     return rows.map((r: { warehouse_id: string; distance_km: string }) => ({

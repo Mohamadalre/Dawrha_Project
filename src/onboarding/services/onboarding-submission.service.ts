@@ -263,15 +263,27 @@ export class OnboardingSubmissionService {
   // 1) View the submitted application
   // ---------------------------------------------------------------------------
   async getSubmission(accountId: string, role: Role) {
-    const cfg = this.config(role);
     const account = await this.getAccount(accountId);
 
+    // The VIEW route is for an application UNDER REVIEW — a mid-onboarding
+    // applicant (PENDING_PROFILE) has nothing submitted to display. The EDIT
+    // methods, which run while still building the profile, must NOT hit this
+    // gate, so they call `buildSubmission` directly (they already asserted the
+    // account is editable). Folding the shaping into that shared builder is what
+    // fixes the bug where saving an edit succeeded but returning its result 403d.
     if (!VIEWABLE_STATES.includes(account.accountStatus)) {
       throw new ForbiddenException(
         'Your application is not under review, so there is nothing to display',
       );
     }
 
+    return this.buildSubmission(accountId, role);
+  }
+
+  /** Shapes the application from the DB — WITHOUT the view-status gate. */
+  private async buildSubmission(accountId: string, role: Role) {
+    const cfg = this.config(role);
+    const account = await this.getAccount(accountId);
     const profile = await this.getProfile(accountId, role, cfg);
     const documents = cfg.ownerType
       ? await this.mediaRepo.find({
@@ -317,7 +329,10 @@ export class OnboardingSubmissionService {
       // True while at least one document was rejected — the applicant must use
       // the re-upload endpoint for those specific files.
       has_rejected_documents: documents.some((m) => m.status === statusMedia.REJECTED),
-      is_editable: account.accountStatus === AccountStatus.PENDING_APPROVAL,
+      is_editable: [
+        AccountStatus.PENDING_PROFILE,
+        AccountStatus.PENDING_APPROVAL,
+      ].includes(account.accountStatus),
     };
   }
 
@@ -359,7 +374,7 @@ export class OnboardingSubmissionService {
 
     await this.saveInfo(role, profile);
     await this.afterEdit(role, accountId);
-    const fresh = await this.getSubmission(accountId, role);
+    const fresh = await this.buildSubmission(accountId, role);
     return { information: fresh.information };
   }
 
@@ -379,7 +394,7 @@ export class OnboardingSubmissionService {
 
     await this.saveInfo(role, profile);
     await this.afterEdit(role, accountId);
-    const fresh = await this.getSubmission(accountId, role);
+    const fresh = await this.buildSubmission(accountId, role);
     return { information: fresh.information };
   }
 
@@ -396,7 +411,7 @@ export class OnboardingSubmissionService {
 
     await this.saveInfo(role, profile);
     await this.afterEdit(role, accountId);
-    const fresh = await this.getSubmission(accountId, role);
+    const fresh = await this.buildSubmission(accountId, role);
     return { information: fresh.information };
   }
 
@@ -434,7 +449,7 @@ export class OnboardingSubmissionService {
 
     await this.saveInfo(role, profile);
     await this.afterEdit(role, accountId);
-    const fresh = await this.getSubmission(accountId, role);
+    const fresh = await this.buildSubmission(accountId, role);
     return { information: fresh.information };
   }
 
@@ -630,7 +645,7 @@ export class OnboardingSubmissionService {
     await this.resolver.getRepo(role).save(profile);
     await this.afterEdit(role, accountId);
 
-    const fresh = await this.getSubmission(accountId, role);
+    const fresh = await this.buildSubmission(accountId, role);
     return { materials: fresh.materials };
   }
 

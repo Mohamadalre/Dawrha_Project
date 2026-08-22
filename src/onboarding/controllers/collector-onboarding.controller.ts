@@ -64,7 +64,7 @@ export class CollectorOnboardingController {
   /** Correct the submitted information while the application is pending approval. */
   @Patch('information')
   @Roles(Role.COLLECTOR)
-  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
   async updateInformationCollector(@Body() dto: UpdateInformationCollectorDto, @Req() req) {
     const result = await this.submissionService.updateCollectorInformation(
       req.user.id, dto);
@@ -78,7 +78,7 @@ export class CollectorOnboardingController {
    */
   @Patch('location')
   @Roles(Role.COLLECTOR)
-  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
   async updateLocationCollector(@Body() dto: UpdateLocationDto, @Req() req) {
     const result = await this.submissionService.updateLocation(
       req.user.id, Role.COLLECTOR, dto);
@@ -88,7 +88,7 @@ export class CollectorOnboardingController {
   /** Replace a still-pending document while the application is pending approval. */
   @Patch('documents/:mediaId')
   @Roles(Role.COLLECTOR)
-  @AccountsStatus(AccountStatus.PENDING_APPROVAL)
+  @AccountsStatus(AccountStatus.PENDING_PROFILE, AccountStatus.PENDING_APPROVAL)
   @UseInterceptors(FileInterceptor('file', imageMemoryStorage))
   async replaceDocumentCollector(
     @Param('mediaId', ParseUUIDPipe) mediaId: string,

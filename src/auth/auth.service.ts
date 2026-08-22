@@ -7,7 +7,7 @@ import * as argon2 from 'argon2';
 import { randomBytes } from 'crypto';
 import { UserService } from '../user/user.service';
 import { UserDevice } from './entities/user-device.entity';
-import { DeviceDto, RefreshTokenDto, RefreshTokenTemporaryDto } from './dto/auth.dto';
+import { DeviceDto, RefreshTokenTemporaryDto } from './dto/auth.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/forgot-password.dto'
 import { RegisterDto } from './dto/register.dto'
 import {
@@ -567,7 +567,7 @@ export class AuthService {
    * @param accountId current account id
    * @returns new access and refresh tokens if refresh token is valid
    */
-  async refreshTokens({ deviceId }: RefreshTokenDto, token: string, accountId: string) {
+  async refreshTokens(deviceId: string, token: string, accountId: string) {
     try {
 
       const account = await this.userService.findById(accountId);

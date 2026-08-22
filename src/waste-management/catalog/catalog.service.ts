@@ -211,7 +211,11 @@ export class CatalogService {
           base_price: eff?.basePrice ?? null,
           price: eff?.price ?? null,
           currency: 'SYP',
-          offer,
+          // The offer object travels ONLY when this grade actually carries a live
+          // offer — never as a `null` placeholder. A client reads the key's
+          // presence as "there is an offer", so emitting `offer: null` would make
+          // every grade look like it might have one.
+          ...(offer ? { offer } : {}),
         };
       }),
     );
@@ -322,6 +326,9 @@ export class CatalogService {
    * have, and applying it would hide categories they are meant to administer.
    */
   private buyableProductExistsSql(caller: Caller | null, provinceId?: string | null): string {
+    // `provinceId` is no longer part of the emptiness test — it is kept in the
+    // signature because the caller still resolves it for the material listing.
+    void provinceId;
     const priced = `AND EXISTS (
              SELECT 1 FROM product_pricing pp
               WHERE pp.product_id = pr.id
@@ -329,21 +336,17 @@ export class CatalogService {
                 AND pp.effective_from <= NOW()
                 AND (pp.effective_until IS NULL OR pp.effective_until > NOW())
            )`;
-    // For factories & free facilities the category also has to hold a material
-    // with STOCK in their governorate — otherwise it is empty for them.
-    const inStock = `AND EXISTS (
-             SELECT 1 FROM warehouse_inventory wi
-             INNER JOIN warehouses w ON w.id = wi.warehouse_id
-              WHERE wi.odoo_product_id = pr.odoo_product_id
-                AND w.state = 'ACTIVE'
-                ${provinceId ? 'AND w.province_id = :stockProvince' : ''}
-                AND (COALESCE(wi.quantity, 0) - COALESCE(wi.reserved_quantity, 0)) > 0
-           )`;
+    // A category is shown when it holds a PRICED material for the caller's tier
+    // — stock is NOT part of this test. Factories & free facilities are meant to
+    // browse the whole priced range and see prices even for a material that is
+    // momentarily out of stock in their governorate; the per-material
+    // `province_available` (0 when empty) tells them what they can order right
+    // now. An UNPRICED material still hides the category, because a material with
+    // no figure to charge cannot be bought by anyone.
     return `SELECT 1 FROM products pr
               WHERE pr.category_id = c.id
                 AND pr.is_active = true
-                ${this.buyingTier(caller) ? priced : ''}
-                ${this.isStockGated(caller) ? inStock : ''}`;
+                ${this.buyingTier(caller) ? priced : ''}`;
   }
 
   /** The tier a caller buys at, or null when they do not buy at all. */
@@ -402,24 +405,20 @@ export class CatalogService {
       if (cached) return cached;
     }
 
-    const provinceId = this.isStockGated(caller)
-      ? await this.buyerProfiles.provinceForBuyer(caller!.id, caller!.role)
-      : null;
-
     const qb = this.categoryRepo.createQueryBuilder('c');
     if (!isAdmin) {
       qb
         .where('c.isActive = :active', { active: true })
         // An empty category is a dead end: the buyer taps it, gets nothing, and
         // learns only that the catalogue is unfinished. "Empty" means empty FOR
-        // THEM — a category whose materials are all priced for another tier (or,
-        // for a factory / free facility, all out of stock in their governorate)
-        // has nothing in it they could buy, and the emptiness test is the same
-        // one the material list applies, so tapping a category always lands on
-        // the materials that were counted for it.
-        .andWhere(`EXISTS (${this.buyableProductExistsSql(caller, provinceId)})`);
+        // THEM — a category whose materials are all priced for another tier has
+        // nothing in it they could buy. Stock is deliberately NOT part of this:
+        // a factory / free facility sees a category as long as it holds a priced
+        // material, even one out of stock in their governorate right now, so the
+        // emptiness test matches the material list (which now lists priced
+        // materials regardless of stock).
+        .andWhere(`EXISTS (${this.buyableProductExistsSql(caller, null)})`);
       this.applyTierParam(qb, caller);
-      if (provinceId) qb.setParameter('stockProvince', provinceId);
     }
 
     if (query.search) {
@@ -1003,14 +1002,15 @@ export class CatalogService {
    *   • a grade with NO live price for the caller's tier is dropped — an
    *     unpriced grade has no figure to charge and must not be offered;
    *   • a warehouse left with no sellable grade is dropped with it;
-   *   • and if nothing at all survives, the MATERIAL itself is withheld
-   *     (`ProductNotFoundException`) rather than returned as an empty,
-   *     unbuyable shell — a material with no price, or none in stock in the
-   *     buyer's governorate, must not appear.
+   *   • and if nothing at all survives BUT the material is PRICED for the tier,
+   *     the material is still returned — as a zero-stock shell (`in_stock:false`,
+   *     `total_available:0`, empty `warehouses`, but with its `prices`) — so a
+   *     factory browsing sees the material and its price instead of a dead-end
+   *     404; only a material with NO price for the tier is withheld.
    *
-   * This mirrors the rule the product listing already applies (only priced, in-
-   * stock materials appear); the availability view was the one place a zero /
-   * unpriced material could still leak through.
+   * This mirrors the rule the product listing now applies (priced materials
+   * appear regardless of stock, unpriced ones never do), so the availability
+   * view no longer 404s a priced material merely for being out of stock.
    */
   private mapAvailability(
     product: Product,
@@ -1022,6 +1022,22 @@ export class CatalogService {
   ) {
     let totalAvailable = 0;
     const byWarehouse = new Map<string, AvailabilityWarehouseEntry>();
+
+    // The tier's price sheet for this material, by grade — shown WITH the stock
+    // (or the lack of it), so the price is visible even when the shelf is empty.
+    // Sorted by the admin's grade order; the conditionless base (empty key) maps
+    // to a null grade object, exactly like the per-warehouse rows.
+    const prices = [...priceByCondition.entries()]
+      .map(([code, price]) => ({
+        condition: ConditionsService.gradeObject(product.id, code || null, conditionGrades),
+        price,
+        currency: 'SYP',
+      }))
+      .sort(
+        (a, b) =>
+          (a.condition?.sort_order ?? Number.MAX_SAFE_INTEGER) -
+          (b.condition?.sort_order ?? Number.MAX_SAFE_INTEGER),
+      );
 
     for (const r of rows) {
       const quantity = Number(r.quantity);
@@ -1071,8 +1087,11 @@ export class CatalogService {
       });
     }
 
-    // Gate 3: no sellable grade anywhere → the material is not returned at all.
-    if (byWarehouse.size === 0) {
+    // Gate 3: nothing in stock. An UNPRICED material (no tier price at all) is
+    // still withheld — nothing to buy, nothing to charge. A PRICED material is
+    // returned as a zero-stock shell instead of a 404, so a factory browsing the
+    // catalogue lands on the material and its price, not a dead end.
+    if (byWarehouse.size === 0 && prices.length === 0) {
       throw new ProductNotFoundException();
     }
 
@@ -1085,6 +1104,9 @@ export class CatalogService {
       },
       total_available: totalAvailable,
       in_stock: totalAvailable > 0,
+      // The tier's price sheet, present whether or not there is stock — so the
+      // buyer sees the price of an out-of-stock material too.
+      prices,
       // Stated, not implied. A caller reading `total_available` needs to know
       // whether it counts the whole country or one governorate — the two are
       // different promises, and a client cannot tell them apart from the number
@@ -1151,26 +1173,16 @@ export class CatalogService {
       { callerTier: tierForRole(caller.role) },
     );
 
-    // Factories & free facilities buy from WAREHOUSE STOCK: a material with no
-    // available stock in THEIR governorate's active warehouses is unbuyable, so
-    // it must not appear. Available = quantity − reserved > 0. Citizens and
-    // institutions are not stock-gated (they are not buying from a warehouse in
-    // the same way). A material never synced to Odoo has no stock lines, so it
-    // is correctly excluded here too. This is why the graded-buyer catalogue is
-    // NOT cached (see getAllMaterials / getProductsByCategory) — stock is live.
-    if (stockGated) {
-      qb.andWhere(
-        `EXISTS (
-           SELECT 1 FROM warehouse_inventory wi
-           INNER JOIN warehouses w ON w.id = wi.warehouse_id
-           WHERE wi.odoo_product_id = p.odoo_product_id
-             AND w.state = 'ACTIVE'
-             ${provinceId ? 'AND w.province_id = :stockProvince' : ''}
-             AND (COALESCE(wi.quantity, 0) - COALESCE(wi.reserved_quantity, 0)) > 0
-         )`,
-        provinceId ? { stockProvince: provinceId } : {},
-      );
-    }
+    // Factories & free facilities are NOT stock-gated for VISIBILITY: a priced
+    // material is shown even when it has no stock in their governorate right now,
+    // so they can browse the whole range and see the price. What stock DOES drive
+    // is the per-material `province_available` (below): 0 when empty, telling
+    // them the quantity they could order at this moment. Only PRICE gates the
+    // list — an unpriced material never appears, for any role. The listing is
+    // still NOT cached for these buyers (see getAllMaterials /
+    // getProductsByCategory) because that live `province_available` must not be
+    // frozen for the cache TTL. (`stockGated` is still used below to decide
+    // whether to attach `province_available` at all.)
 
     if (allowed) {
       qb.andWhere('p.categoryId IN (:...allowed)', { allowed });
@@ -1571,6 +1583,12 @@ export class CatalogService {
    * price; a graded tier (factory / free facility) is priced per condition, so
    * the headline is the LOWEST condition price ("starting from") and the full
    * breakdown travels in `condition_prices`.
+   *
+   * A graded tier can also be priced with a SINGLE conditionless (base) row —
+   * an ungraded material a factory still buys — in which case there is no
+   * per-condition list and the headline is that base price. Returning 0 there
+   * (as this did) showed a factory a priced material with no price at all, which
+   * is exactly what a buyer must never see; the base row is the fallback.
    */
   private tierHeadlinePrice(prices: ProductPricing[], tier: PricingTier): number {
     const rows = this.liveRows(prices, tier);
@@ -1578,7 +1596,8 @@ export class CatalogService {
       tier === PricingTier.FACTORY || tier === PricingTier.FREE_FACILITY;
     if (graded) {
       const g = rows.filter((p) => p.conditionCode);
-      return g.length ? Math.min(...g.map((r) => Number(r.price))) : 0;
+      if (g.length) return Math.min(...g.map((r) => Number(r.price)));
+      // No per-condition prices → fall through to the conditionless base below.
     }
     const flat = rows
       .filter((p) => !p.conditionCode)
@@ -1869,7 +1888,14 @@ export class CatalogService {
       // is undefined for citizens / institutions), so it never leaks a stock
       // figure to a role that does not buy from a warehouse.
       ...(provinceStock
-        ? { province_available: provinceStock.get(p.odooProductId ?? -1) ?? 0 }
+        ? (() => {
+            const available = provinceStock.get(p.odooProductId ?? -1) ?? 0;
+            // A priced material is now listed even at zero stock, so the buyer
+            // needs the quantity AND an explicit out-of-stock signal: `in_stock`
+            // is the boolean the UI greys the "add to cart" on, `province_available`
+            // the number it shows ("0" reads as "none right now, in your area").
+            return { province_available: available, in_stock: available > 0 };
+          })()
         : {}),
       created_at: p.createdAt,
     };

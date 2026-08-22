@@ -275,12 +275,18 @@ export class OdooSyncProcessor extends WorkerHost {
     const category = await this.categoryRepo.findOne({ where: { id: payload.categoryId } });
     if (!category) return;
 
-    if (category.odooCategoryId) {
-      await this.odoo.updateProductCategory(category.odooCategoryId, { name: category.name });
+    // Resolve OUR record by its stable backend_id, never by the numeric id: a
+    // stored id can dangle (wipe) OR, worse, be reused by a DIFFERENT record
+    // after a restore. Matching on backend_id finds our own row or nothing —
+    // so we update ours or create it, but never adopt someone else's.
+    let odooId = await this.odoo.findIdByBackendId(
+      'recycle.product.category', category.id);
+    if (odooId) {
+      await this.odoo.updateProductCategory(odooId, { name: category.name });
     } else {
-      const odooId = await this.odoo.createProductCategory(category.name);
-      category.odooCategoryId = odooId;
+      odooId = await this.odoo.createProductCategory(category.name, category.id);
     }
+    category.odooCategoryId = odooId;
     category.odooSyncStatus = OdooSyncStatus.SYNCED;
     await this.categoryRepo.save(category);
   }
@@ -297,7 +303,11 @@ export class OdooSyncProcessor extends WorkerHost {
     });
     if (!product) return;
 
-    if (product.odooProductId) {
+    // Resolve OUR product by its stable backend_id, never the numeric id (a
+    // stored id can dangle after a wipe, or be reused by a DIFFERENT product
+    // after a restore). Update ours or create it — never adopt another's.
+    let odooId = await this.odoo.findIdByBackendId('recycle.product', product.id);
+    if (odooId) {
       // Push EVERY mutable field the backend owns, not just the name — an edit
       // to the unit or the category never reached Odoo before, so a renamed
       // material synced but a re-measured one silently did not. `unit_code` is
@@ -305,32 +315,53 @@ export class OdooSyncProcessor extends WorkerHost {
       // sent only once it has an Odoo id to point at.
       const values: Record<string, any> = { name: product.name };
       if (product.unitType) values.unit_code = product.unitType;
-      if (product.category?.odooCategoryId) {
-        values.category_id = product.category.odooCategoryId;
-      }
-      await this.odoo.updateProduct(product.odooProductId, values);
+      const categoryOdooId = await this.ensureCategorySynced(product.category);
+      if (categoryOdooId) values.category_id = categoryOdooId;
+      await this.odoo.updateProduct(odooId, values);
     } else {
-      // recycle.product requires a category — the category must be synced first.
-      if (!product.category?.odooCategoryId) {
-        throw new Error(
-          `Category for product ${product.id} is not synced to Odoo yet`,
-        );
-      }
-      const odooId = await this.odoo.createProduct({
+      // recycle.product requires a category — ensure it exists first, and its
+      // measurement unit, which the create resolves by code.
+      const categoryOdooId = await this.ensureCategorySynced(product.category);
+      await this.ensureUnitSynced(product.unitType);
+      odooId = await this.odoo.createProduct({
         name: product.name,
-        categoryOdooId: product.category.odooCategoryId,
+        categoryOdooId,
         // Odoo only accepts a unit it mirrors from this backend, so the
         // material carries its unit CODE across instead of being given
         // whatever default Odoo happens to hold.
         unitCode: product.unitType,
+        backendId: product.id,
       });
-      product.odooProductId = odooId;
     }
+    product.odooProductId = odooId;
     product.odooSyncStatus = OdooSyncStatus.SYNCED;
     await this.productRepo.save(product);
 
     // Whenever the product is (re)synced, keep its tier prices in Odoo current.
     await this.pushTierPrices(product);
+  }
+
+  /**
+   * Returns a category's live Odoo id, resolving it by the stable backend_id
+   * (creating the Odoo category when ours does not exist there yet). Used by the
+   * product sync so a product create/update after an Odoo wipe cannot point at a
+   * category whose own id dangled or was reused.
+   */
+  private async ensureCategorySynced(
+    category: Product['category'] | null | undefined,
+  ): Promise<number> {
+    if (!category) {
+      throw new Error('Cannot sync a product with no category to Odoo');
+    }
+    let odooId = await this.odoo.findIdByBackendId(
+      'recycle.product.category', category.id);
+    if (!odooId) {
+      odooId = await this.odoo.createProductCategory(category.name, category.id);
+    }
+    category.odooCategoryId = odooId;
+    category.odooSyncStatus = OdooSyncStatus.SYNCED;
+    await this.categoryRepo.save(category);
+    return odooId;
   }
 
   /**
@@ -382,6 +413,22 @@ export class OdooSyncProcessor extends WorkerHost {
   private async updatePricing(payload: UpdatePricingPayload) {
     const product = await this.productRepo.findOne({ where: { id: payload.productId } });
     if (!product?.odooProductId) return;
+
+    // Resolve the product's TRUE Odoo id by its stable backend_id. The stored
+    // numeric id can dangle (Odoo wiped) or, after a restore, be reused by a
+    // DIFFERENT product — pushing the price sheet against that id would price
+    // the wrong material. Matching on backend_id gives our own record or none.
+    const trueId = await this.odoo.findIdByBackendId('recycle.product', product.id);
+    if (!trueId) {
+      // Not in Odoo — re-sync recreates it (with backend_id) AND pushes its tier
+      // prices at the end, so the up-to-date sheet lands with it.
+      await this.syncProduct({ productId: product.id });
+      return;
+    }
+    if (product.odooProductId !== trueId) {
+      product.odooProductId = trueId;
+      await this.productRepo.save(product);
+    }
     await this.pushTierPrices(product);
   }
 
@@ -510,9 +557,15 @@ export class OdooSyncProcessor extends WorkerHost {
     const warehouse = await this.warehouseRepo.findOne({ where: { id: payload.warehouseId } });
     if (!warehouse) return;
 
-    // Idempotent: if a previous attempt already created it in Odoo, just finish.
-    if (warehouse.odooWarehouseId) {
+    // Idempotent AND wipe-safe: resolve OUR warehouse by its stable backend_id
+    // rather than trusting a stored numeric id (which can dangle after a wipe or
+    // be reused by a different warehouse after a restore). Found → just relink.
+    const existing = await this.odoo.findIdByBackendId(
+      'recycle.warehouse', warehouse.id);
+    if (existing) {
+      warehouse.odooWarehouseId = existing;
       warehouse.odooSyncStatus = OdooSyncStatus.SYNCED;
+      warehouse.lastOdooSync = new Date();
       await this.warehouseRepo.save(warehouse);
       return;
     }
@@ -528,6 +581,7 @@ export class OdooSyncProcessor extends WorkerHost {
       // and sit failing in the queue forever.
       address: warehouse.address ?? undefined,
       zones: warehouse.zones ?? undefined,
+      backendId: warehouse.id,
     });
 
     warehouse.odooWarehouseId = odooId;
@@ -546,21 +600,40 @@ export class OdooSyncProcessor extends WorkerHost {
     const unit = await this.unitRepo.findOne({ where: { id: payload.unitId } });
     if (!unit) return;
 
-    if (unit.odooUnitId) {
-      await this.odoo.updateMeasurementUnit(unit.odooUnitId, {
+    // Resolve OUR unit by its stable backend_id, never the numeric id.
+    let odooId = await this.odoo.findIdByBackendId(
+      'recycle.measurement.unit', unit.id);
+    if (odooId) {
+      await this.odoo.updateMeasurementUnit(odooId, {
         name: unit.nameEn,
         code: unit.code,
         allows_tolerance: unit.allowsTolerance,
       });
     } else {
-      unit.odooUnitId = await this.odoo.createMeasurementUnit({
+      odooId = await this.odoo.createMeasurementUnit({
         name: unit.nameEn,
         code: unit.code,
         allowsTolerance: unit.allowsTolerance,
+        backendId: unit.id,
       });
     }
+    unit.odooUnitId = odooId;
     unit.odooSyncStatus = OdooSyncStatus.SYNCED;
     await this.unitRepo.save(unit);
+  }
+
+  /**
+   * Ensures the Odoo `recycle.measurement.unit` for a unit CODE exists before a
+   * product that carries it is created — a product (re)create resolves its
+   * `unit_code`, so a missing/dangling unit fails the whole create. Re-creates
+   * (or refreshes) the unit as needed; a code with no backend row is left to
+   * Odoo's default unit, exactly as when `unit_code` is omitted.
+   */
+  private async ensureUnitSynced(unitCode: string | null | undefined): Promise<void> {
+    if (!unitCode) return;
+    const unit = await this.unitRepo.findOne({ where: { code: unitCode } });
+    if (!unit) return; // unknown code → createProduct omits it (Odoo default)
+    await this.syncUnit({ unitId: unit.id });
   }
 
   private async deleteUnit(payload: DeleteUnitPayload) {
@@ -586,26 +659,29 @@ export class OdooSyncProcessor extends WorkerHost {
       return;
     }
 
-    if (condition.odooConditionId) {
-      await this.odoo.updateMaterialCondition(condition.odooConditionId, {
+    // Resolve OUR grade by its stable backend_id, never the numeric id.
+    let odooId = await this.odoo.findIdByBackendId(
+      'recycle.material.condition', condition.id);
+    if (odooId) {
+      await this.odoo.updateMaterialCondition(odooId, {
         name: condition.nameEn,
         code: condition.code,
         sort_order: condition.sortOrder,
-        // `product_id`, not `product_odoo_id` — the create branch four lines
-        // below always got this right, so conditions could be created and never
-        // updated: Odoo rejected the whole write with "Invalid field
-        // 'product_odoo_id'". Nothing surfaced it, because a failed sync only
-        // stamped the row FAILED and no code path ever read that column back.
+        // `product_id`, not `product_odoo_id` — the create branch always got
+        // this right, so conditions could be created and never updated: Odoo
+        // rejected the whole write with "Invalid field 'product_odoo_id'".
         product_id: productOdooId,
       });
     } else {
-      condition.odooConditionId = await this.odoo.createMaterialCondition({
+      odooId = await this.odoo.createMaterialCondition({
         name: condition.nameEn,
         code: condition.code,
         sortOrder: condition.sortOrder,
         productOdooId,
+        backendId: condition.id,
       });
     }
+    condition.odooConditionId = odooId;
     condition.odooSyncStatus = OdooSyncStatus.SYNCED;
     await this.conditionRepo.save(condition);
   }
@@ -624,12 +700,23 @@ export class OdooSyncProcessor extends WorkerHost {
     const warehouse = await this.warehouseRepo.findOne({
       where: { id: payload.warehouseId },
     });
-    if (!warehouse?.odooWarehouseId) return;
-    await this.odoo.updateRecycleWarehouse(warehouse.odooWarehouseId, {
+    if (!warehouse) return;
+
+    // Resolve OUR warehouse by its stable backend_id — the stored numeric id can
+    // dangle/collide after an Odoo wipe. Missing there → (re)create it instead
+    // of writing against a record that is gone (or someone else's).
+    const odooId = await this.odoo.findIdByBackendId(
+      'recycle.warehouse', warehouse.id);
+    if (!odooId) {
+      await this.createWarehouse({ warehouseId: warehouse.id });
+      return;
+    }
+    await this.odoo.updateRecycleWarehouse(odooId, {
       name: warehouse.name,
       code: warehouse.code,
       capacity: warehouse.capacity,
     });
+    warehouse.odooWarehouseId = odooId;
     // Clears the drift signal the edit raised. Until this existed the column
     // only ever described the CREATE, so a lost edit was invisible.
     warehouse.odooSyncStatus = OdooSyncStatus.SYNCED;
@@ -889,6 +976,42 @@ export class OdooSyncProcessor extends WorkerHost {
     // A consolidation the buyer chose earlier can only run once every warehouse
     // has prepared — which the part just advanced toward. Check, and start it.
     await this.maybeTriggerConsolidation(part.orderId);
+    await this.maybeTriggerDelivery(part.orderId);
+  }
+
+  /**
+   * Plans a DELIVERY order's trip the moment its LAST warehouse finishes
+   * preparing — the SYSTEM does it, no admin. Enqueued onto the order module's
+   * queue (which owns the truck-scoring + milk-run algorithms), keyed by order
+   * id so the many part events of one order do not stack; planForOrder is
+   * idempotent behind that (it refuses a second live trip) anyway.
+   *
+   * Delivery is a FACTORY-only, opt-in mode, so this fires only for orders that
+   * actually chose it. A single-warehouse delivery is planned too (unlike
+   * consolidation, which needs two) — one warehouse still needs a truck.
+   */
+  private async maybeTriggerDelivery(orderId: string): Promise<void> {
+    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    if (order?.fulfilmentMode !== FulfilmentMode.DELIVERY) return;
+
+    const parts = await this.orderPartRepo.find({ where: { orderId } });
+    const live = parts.filter(
+      (p) =>
+        !FAILED_PART_STATUSES.includes(p.status) &&
+        p.status !== OrderPartStatus.CANCELLED,
+    );
+    if (!live.length) return;
+    if (!live.every((p) => p.status === OrderPartStatus.IN_OUTPUT_ZONE)) return;
+
+    await this.orderTasks.add(
+      ORDER_TASKS.PLAN_DELIVERY,
+      { orderId },
+      {
+        jobId: `plan-delivery-${orderId}`,
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
+    );
   }
 
   /**

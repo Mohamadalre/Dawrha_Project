@@ -111,13 +111,23 @@ describe('CatalogService availability gating (mapAvailability)', () => {
     expect(res.warehouses[0].name).toBe('A');
   });
 
-  it('withholds the material entirely when NOTHING is sellable (no stock)', () => {
-    expect(() => call([], new Map([['EXCELLENT', 10]]))).toThrow(
-      ProductNotFoundException,
-    );
+  it('returns a PRICED material with no stock as a zero-stock shell (not a 404)', () => {
+    const res = call([], new Map([['EXCELLENT', 10]]));
+    expect(res.in_stock).toBe(false);
+    expect(res.total_available).toBe(0);
+    expect(res.warehouses).toEqual([]);
+    // The price is still shown even though the shelf is empty.
+    expect(res.prices).toEqual([
+      {
+        condition: { id: null, code: 'EXCELLENT', name: 'EXCELLENT', sort_order: null },
+        price: 10,
+        currency: 'SYP',
+      },
+    ]);
   });
 
   it('withholds the material entirely when it has stock but NO price at all', () => {
+    // Unpriced: nothing to charge, so it stays hidden even with stock on hand.
     expect(() =>
       call([row({ conditionCode: 'EXCELLENT', quantity: 100 })], new Map()),
     ).toThrow(ProductNotFoundException);

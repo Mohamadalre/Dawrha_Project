@@ -49,12 +49,22 @@ export class PermissionSeederService implements OnModuleInit {
       }
     }
 
-    // 2) Ensure each role has its mapped permissions.
+    // 2) Ensure each role has its mapped permissions, and PRUNE any waste
+    //    permission it no longer should hold.
+    //
+    // Pruning matters: without it, a permission granted by an earlier seed
+    // lingers forever, so WITHDRAWING one (e.g. taking the cart away from the
+    // admin) never takes effect for accounts seeded before the change. Only
+    // WASTE keys are ever pruned — a role-permission for a key this seeder does
+    // not own belongs to another module and must be left untouched.
+    const wasteKeys = new Set(keys);
     let created = 0;
+    let removed = 0;
     for (const [role, permKeys] of Object.entries(ROLE_PERMISSIONS_MAP) as [
       Role,
       string[],
     ][]) {
+      const allowed = new Set(permKeys);
       const roleRows = await this.rolePermissionRepo.find({
         where: { role },
         relations: ['permission'],
@@ -71,10 +81,24 @@ export class PermissionSeederService implements OnModuleInit {
           created++;
         }
       }
+
+      // Prune waste permissions this role should no longer hold.
+      const stale = roleRows.filter(
+        (r) =>
+          r.permission &&
+          wasteKeys.has(r.permission.key) &&
+          !allowed.has(r.permission.key),
+      );
+      if (stale.length) {
+        await this.rolePermissionRepo.remove(stale);
+        removed += stale.length;
+      }
     }
 
-    if (created > 0) {
-      this.logger.log(`Seeded ${created} role-permission mapping(s) for waste-management`);
+    if (created > 0 || removed > 0) {
+      this.logger.log(
+        `Waste permissions seeded: ${created} added, ${removed} pruned`,
+      );
     }
   }
 }

@@ -172,6 +172,27 @@ describe('CatalogService', () => {
       expect(effectivePrice.effectivePrice).toHaveBeenCalledWith('p1', Role.FACTORY, 'EXCELLENT');
     });
 
+    it('OMITS the offer object entirely for a grade with no live offer (no null placeholder)', async () => {
+      productRepo.findOne.mockResolvedValue({ id: 'p1', categoryId: 'c1', odooProductId: 5 });
+      assigned.getAssignedCategoryIds.mockResolvedValue(null);
+      conditionsService.activeForProduct.mockResolvedValue([
+        { id: 'ce', code: 'EXCELLENT', nameEn: 'Excellent', nameAr: 'ممتاز', sortOrder: 1 },
+      ]);
+      buyerProfiles.provinceForBuyer.mockResolvedValue('pv1');
+      const invQb = makeQb();
+      invQb.getMany.mockResolvedValue([{ conditionCode: 'EXCELLENT', quantity: '50', reservedQuantity: '0' }]);
+      inventoryRepo.createQueryBuilder.mockReturnValue(invQb);
+      // Priced, but NO offer on this grade.
+      effectivePrice.effectivePrice.mockResolvedValue({ basePrice: 10, offer: null, price: 10 });
+
+      const res: any = await service.getConditions(FACTORY_CALLER, 'p1');
+
+      const c = res.conditions[0];
+      expect(c.price).toBe(10);
+      // The key is absent — not present as `offer: null`.
+      expect(c).not.toHaveProperty('offer');
+    });
+
     it('OMITS a grade that has no price for this tier — an unpriced grade is not offered', async () => {
       productRepo.findOne.mockResolvedValue({ id: 'p1', categoryId: 'c1', odooProductId: 5 });
       assigned.getAssignedCategoryIds.mockResolvedValue(null);
@@ -349,6 +370,51 @@ describe('CatalogService', () => {
     // Scoped to the category AND filtered by the material-name search.
     expect(clauses.some((c: string) => c.includes('p.categoryId = :categoryId'))).toBe(true);
     expect(clauses.some((c: string) => c.includes('p.name ILIKE :search'))).toBe(true);
+  });
+
+  /**
+   * A factory / free facility now sees a PRICED material even when it is out of
+   * stock in their governorate — so the material listing is gated by PRICE only,
+   * never by warehouse stock. The stock figure travels per-material as
+   * `province_available` (0 when empty) instead of removing the row. Asserted on
+   * the SQL because a post-fetch filter would leave the total counting rows the
+   * caller could still page to.
+   */
+  it('lists a factory material by PRICE only — no warehouse-stock gate', async () => {
+    cache.get.mockResolvedValue(null);
+    assigned.getAssignedCategoryIds.mockResolvedValue(null);
+    const qb = makeQb();
+    productRepo.createQueryBuilder.mockReturnValue(qb);
+
+    await service.getAllMaterials(
+      { id: 'f1', role: Role.FACTORY },
+      { page: 1, limit: 10, sort: 'name', order: 'asc' } as any,
+    );
+
+    const clauses = qb.andWhere.mock.calls.map((c: any[]) => String(c[0]));
+    // Price gate kept…
+    expect(clauses.some((c: string) => c.includes('product_pricing'))).toBe(true);
+    // …stock gate gone: no material is dropped for being out of stock.
+    expect(clauses.some((c: string) => c.includes('warehouse_inventory'))).toBe(false);
+  });
+
+  it('shows a factory category holding a PRICED material even with no stock', async () => {
+    cache.get.mockResolvedValue(null);
+    assigned.getAssignedCategoryIds.mockResolvedValue(null);
+    const qb = makeQb();
+    categoryRepo.createQueryBuilder.mockReturnValue(qb);
+
+    await service.getCategories(
+      { id: 'f1', role: Role.FACTORY },
+      { page: 1, limit: 10, sort: 'name', order: 'asc' } as any,
+    );
+
+    const existsClause = qb.andWhere.mock.calls
+      .map((c: any[]) => String(c[0]))
+      .find((c: string) => c.includes('EXISTS'));
+    expect(existsClause).toContain('product_pricing');
+    // The emptiness test no longer consults stock.
+    expect(existsClause).not.toContain('warehouse_inventory');
   });
 
   /**
