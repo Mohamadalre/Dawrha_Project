@@ -2,7 +2,6 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
-  IsDateString,
   IsNumber,
   IsOptional,
   IsString,
@@ -11,6 +10,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { IsIsoDateTimeWithOffset } from '@src/common/validators/is-iso-datetime-with-offset.validator';
 
 /** Uppercases condition codes so 'good' and 'GOOD' hit the same row. */
 const normalizeConditionCode = ({ value }: { value: unknown }) =>
@@ -100,10 +100,10 @@ export class SetPricingDto {
   free_facility: ConditionPriceDto[];
 
   @IsOptional()
-  @IsDateString()
+  @IsIsoDateTimeWithOffset()
   effective_from?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsIsoDateTimeWithOffset()
   effective_until?: string;
 }

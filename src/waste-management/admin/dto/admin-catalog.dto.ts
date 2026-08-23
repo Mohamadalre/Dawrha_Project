@@ -20,6 +20,7 @@ import {
 import { PaginationQueryDto } from '@src/waste-management/common/dto/pagination.dto';
 import { Role } from '@src/user/enums/role.enum';
 import { OfferAudience } from '../../enums/offer-audience.enum';
+import { IsIsoDateTimeWithOffset } from '@src/common/validators/is-iso-datetime-with-offset.validator';
 
 /** Buyer roles an offer may be limited to. */
 export const OFFER_TARGETABLE_ROLES = [
@@ -317,11 +318,11 @@ export class CreateOfferDto {
   description?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsIsoDateTimeWithOffset()
   valid_from?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsIsoDateTimeWithOffset()
   valid_until?: string;
 }
 
@@ -361,12 +362,12 @@ export class UpdateOfferDto {
   percentage?: number;
 
   @IsOptional()
-  @IsDateString()
+  @IsIsoDateTimeWithOffset()
   valid_from?: string;
 
   /** `null` removes the end date — the offer becomes open-ended. */
   @IsOptional()
-  @IsDateString()
+  @IsIsoDateTimeWithOffset()
   valid_until?: string | null;
 
   /**

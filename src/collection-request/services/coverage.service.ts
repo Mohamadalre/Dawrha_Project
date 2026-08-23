@@ -13,6 +13,7 @@ import { CollectionRequest } from '../entities/collection-request.entity';
 import {
   CollectionRequestStatus,
 } from '../enums/collection-request-status.enum';
+import { minutesOfDayInZone } from '@src/common/time/operation-time.util';
 
 /** Statuses on which a driver is busy and NOT parked at a coverage point. */
 const BUSY_STATUSES: CollectionRequestStatus[] = [
@@ -282,7 +283,9 @@ export class CoverageService {
     };
     const start = toMin(startTime);
     const end = toMin(endTime);
-    const current = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+    // Minutes-of-day in the OPERATION timezone (shift times are Damascus
+    // wall-clock) — not the server's, which on UTC would drift the decision.
+    const current = minutesOfDayInZone(now);
 
     if (start === end) return true;
     return start < end
@@ -297,7 +300,8 @@ export class CoverageService {
     };
     const start = toMin(startTime);
     const end = toMin(endTime);
-    const current = now.getHours() * 60 + now.getMinutes();
+    // Minutes-of-day in the OPERATION timezone (see shiftCovers above).
+    const current = minutesOfDayInZone(now);
 
     if (start === end) return 24 * 60;
     if (start < end) {
