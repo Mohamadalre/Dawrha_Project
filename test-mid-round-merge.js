@@ -72,19 +72,6 @@ async function login(email, password, deviceId, endpoint) {
   return token;
 }
 
-async function waitForOffer(driverToken, requestId, maxWait = 20000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    try {
-      return await request('PATCH', `/driver/collection-requests/${requestId}/accept`, {}, driverToken);
-    } catch (e) {
-      if (e.message?.includes('No pending offer') || e.status === 404) { await sleep(1500); continue; }
-      throw e;
-    }
-  }
-  throw new Error(`No offer found for ${requestId} within ${maxWait}ms`);
-}
-
 /** يفتح socket تتبع باسم السائق ويرسل موقعه حتى يُخزن في Redis. */
 function sendDriverFix(driverToken, truckId, pos) {
   return new Promise((resolve, reject) => {
@@ -157,9 +144,8 @@ async function runScenario({ driverToken, prodToken }) {
   }
   assert('REQ1 created + dispatched synchronously', req1._status === 201 && !!req1Id && req1.data.status === 'ASSIGNED', req1);
 
-  const acc1 = await waitForOffer(driverToken, req1Id);
-  assert('Driver accepted REQ1 offer', ['ASSIGNED'].includes(acc1.data?.status), acc1.data);
-  const routeId = acc1.data?.route_id;
+  const routeId = req1.data?.route_id;
+  assert('REQ1 bound to a route synchronously', !!routeId, req1.data);
 
   await sleep(1000);
   const ships1 = await request('GET', '/shipments', null, driverToken);

@@ -12,6 +12,7 @@ import { CollectionRequest } from '../entities/collection-request.entity';
 import { CollectionRequestAssignment } from '../entities/collection-request-assignment.entity';
 import { ShipmentService } from './shipment.service';
 import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
+import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
 import {
   CollectionRequestNotFoundException,
   CollectionRequestInvalidTransitionException,
@@ -86,6 +87,8 @@ export class DispatchEngineService {
     private readonly routeRepo: Repository<CollectionRoute>,
     @InjectRepository(TruckAssignmentEntity)
     private readonly truckAssignmentRepo: Repository<TruckAssignmentEntity>,
+    @InjectRepository(CollectorProfile)
+    private readonly profileRepo: Repository<CollectorProfile>,
     private readonly state: CollectionStateService,
     private readonly configProvider: DispatchConfigProvider,
     private readonly candidates: DispatchCandidatesService,
@@ -431,6 +434,9 @@ export class DispatchEngineService {
         this.statusPayload(request),
       );
       await this.notifyProducerAssigned(request);
+      // The synchronous path has no OFFERED step, so the driver would never
+      // learn about the task until he opens his route list — tell him now.
+      await this.notifyDriverAssigned(assignment.driverId, request);
       winstonLogger.info(
         `Collection request ${request.requestNumber}: assigned to driver ${assignment.driverId}`,
         LOG_META,
@@ -914,6 +920,49 @@ export class DispatchEngineService {
       `تم تعيين سائق لطلب الجمع رقم ${request.requestNumber}.`,
       request,
     );
+  }
+
+  /**
+   * Tells the driver his tour gained a stop: a socket push to his room plus a
+   * notification. Covers the synchronous dispatch and the admin override —
+   * both settle ACCEPTED without ever creating an open offer.
+   */
+  private async notifyDriverAssigned(
+    driverId: string,
+    request: CollectionRequest,
+  ): Promise<void> {
+    try {
+      const profile = await this.profileRepo.findOne({
+        where: { id: driverId },
+        relations: ['account'],
+      });
+      const accountId = profile?.account?.id;
+      if (!accountId) return;
+
+      this.events.announceToDriver(accountId, 'request:assigned', {
+        event: 'ASSIGNED',
+        request_id: request.id,
+        request_number: request.requestNumber,
+        type: request.type,
+        scheduled_at: request.scheduledAt ?? null,
+        address_text: request.addressText,
+        lat: request.lat != null ? Number(request.lat) : null,
+        lng: request.lng != null ? Number(request.lng) : null,
+        estimated_weight_kg: Number(request.estimatedWeightKg),
+        estimated_grand_total: Number(request.estimatedGrandTotal),
+        route_id: request.routeId ?? null,
+        route_sequence: request.routeSequence ?? null,
+      });
+      await this.tryNotify(
+        accountId,
+        'تم إسناد طلب جمع جديد لك',
+        `تم تعيين طلب الجمع ${request.requestNumber} عليك — تفقد جولتك في تطبيق السائق.`,
+        request,
+      );
+    } catch (error) {
+      // A driver-facing push must never break the binding.
+      this.logger.warn('notifyDriverAssigned failed', error as Error);
+    }
   }
 
   private async tryNotify(

@@ -10,10 +10,10 @@ import { DispatchCandidatesService } from './dispatch-candidates.service';
 import { DispatchConfigProvider } from '../providers/dispatch-config.provider';
 import { DispatchGatewayEvents } from '../gateways/dispatch.gateway';
 import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
+import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
 import { CollectionRequest } from '../entities/collection-request.entity';
 import { CollectionRequestAssignment } from '../entities/collection-request-assignment.entity';
 import { CollectionRoute } from '../entities/collection-route.entity';
-import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
 import { CollectionRequestStatus } from '../enums/collection-request-status.enum';
 import { CollectionRequestAssignmentStatus } from '../enums/collection-request-assignment-status.enum';
 import { CollectionRouteStatus } from '../enums/collection-route-status.enum';
@@ -138,6 +138,9 @@ describe('DispatchEngineService', () => {
     const truckAssignmentRepo = {
       findOne: jest.fn().mockResolvedValue(null),
     };
+    const profileRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
     const eventEmitter = { emit: jest.fn() };
     const configProvider = { get: jest.fn().mockResolvedValue(config) };
     const candidates = { findEligible: jest.fn().mockResolvedValue([]) };
@@ -160,6 +163,7 @@ describe('DispatchEngineService', () => {
       assignmentRepo,
       routeRepo,
       truckAssignmentRepo,
+      profileRepo,
       eventEmitter,
       configProvider,
       candidates,
@@ -182,6 +186,7 @@ describe('DispatchEngineService', () => {
         { provide: getRepositoryToken(CollectionRequestAssignment), useValue: m.assignmentRepo },
         { provide: getRepositoryToken(CollectionRoute), useValue: m.routeRepo },
         { provide: getRepositoryToken(TruckAssignmentEntity), useValue: m.truckAssignmentRepo },
+        { provide: getRepositoryToken(CollectorProfile), useValue: m.profileRepo },
         { provide: EventEmitter2, useValue: m.eventEmitter },
         { provide: DispatchConfigProvider, useValue: m.configProvider },
         { provide: DispatchCandidatesService, useValue: m.candidates },
@@ -413,6 +418,10 @@ describe('DispatchEngineService', () => {
       const request = makeRequest();
       m.routeRepo.findOne.mockResolvedValue(null);
       m.requestRepo.maximum.mockResolvedValue(3);
+      m.profileRepo.findOne.mockResolvedValue({
+        id: 'dA',
+        account: { id: 'accA' },
+      });
       const assignment = {
         id: 'as-1',
         requestId: request.id,
@@ -442,6 +451,16 @@ describe('DispatchEngineService', () => {
         request.id,
         'request:status',
         expect.objectContaining({ status: CollectionRequestStatus.ASSIGNED }),
+      );
+      // The driver himself learns about the task in real time.
+      expect(m.events.announceToDriver).toHaveBeenCalledWith(
+        'accA',
+        'request:assigned',
+        expect.objectContaining({
+          event: 'ASSIGNED',
+          request_id: request.id,
+          route_id: 'rt-1',
+        }),
       );
       expect(m.notifications.createNotification).toHaveBeenCalled();
       expect(m.notifications.enqueueNotification).toHaveBeenCalledWith('n-1');
