@@ -8,6 +8,7 @@ import { CollectionRequest } from '../entities/collection-request.entity';
 import { DriverCoverageAssignment } from '../entities/driver-coverage-assignment.entity';
 import { DispatchConfig } from '../entities/dispatch-config.entity';
 import { CollectionRequestStatus } from '../enums/collection-request-status.enum';
+import { minutesOfDayInZone, startOfDayInZone } from '@src/common/time/operation-time.util';
 
 /** The work-in-progress statuses that count as "load" and block a driver. */
 const ACTIVE_TASK_STATUSES: CollectionRequestStatus[] = [
@@ -159,7 +160,9 @@ export class DispatchCandidatesService {
     };
     const start = toMin(startTime);
     const end = toMin(endTime);
-    const current = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+    // Minutes-of-day in the OPERATION timezone (shift times are Damascus
+    // wall-clock) — not the server's, which on UTC would drift the decision.
+    const current = minutesOfDayInZone(now);
 
     if (start === end) return true; // 24h shift
     return start < end
@@ -208,8 +211,9 @@ export class DispatchCandidatesService {
 
   /** Per-driver COMPLETED count since local midnight (the fairness factor). */
   private async completedTodayByDriver(driverIds: string[]): Promise<Map<string, number>> {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    // Local midnight in the OPERATION timezone (not the server's) — so "today"
+    // for the fairness counter matches the driver's day, not UTC's.
+    const startOfDay = startOfDayInZone(new Date());
 
     const rows = await this.requestRepo
       .createQueryBuilder('r')

@@ -12,7 +12,7 @@ import { LoggerExceptionsFilter } from './common/filters/logger-exception.filter
 
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-// import helmet from 'helmet';
+import helmet from 'helmet';
 
 
 

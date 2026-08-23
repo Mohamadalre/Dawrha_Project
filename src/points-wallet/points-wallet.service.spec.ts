@@ -129,12 +129,13 @@ describe('PointsWalletService', () => {
       expect(repo.save).not.toHaveBeenCalled();
     });
 
-    it('awards no points when the order is too small to earn one', async () => {
+    it('awards FRACTIONAL points for an order smaller than one point (never floored)', async () => {
       const repo = makeRepo();
       repo.findOne.mockResolvedValue({ id: 'w1', accountId: 'acc1', points: 2 });
       const rates = { forRole: jest.fn().mockResolvedValue({ amountPerPoint: '1000' }) };
+      // 500 / 1000 = 0.5 — credited, not dropped to 0.
       const res = await build(repo, rates).awardForOrder('acc1', Role.FACTORY, 500, 'ORD-1');
-      expect(res).toEqual({ points: 0, balance: 2 });
+      expect(res).toEqual({ points: 0.5, balance: 2.5 });
     });
   });
 

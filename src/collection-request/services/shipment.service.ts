@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -14,6 +15,7 @@ import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.enti
 import { TruckHandover } from '@src/truck/entities/truck-handover.entity';
 import { HandoverStatus } from '@src/truck/enums/handover-status.enum';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
+import { Product } from '@src/waste-management/entities/product.entity';
 import { ShipmentStatus } from '../enums/shipment-status.enum';
 import { CollectionRequestStatus } from '../enums/collection-request-status.enum';
 import { DispatchGatewayEvents } from '../gateways/dispatch.gateway';
@@ -22,7 +24,12 @@ import {
 } from '../enums/shipment-status.enum';
 import { DeliverShipmentDto } from '../dto/shipment.dto';
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const LOG_META = { context: 'SHIPMENT_SERVICE', channel: 'collection' } as const;
+
+/** A shipment id is a UUID; anything else off a QR is treated as not-found. */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class ShipmentService {
@@ -41,7 +48,11 @@ export class ShipmentService {
     private readonly handoverRepo: Repository<TruckHandover>,
     @InjectRepository(Warehouse)
     private readonly warehouseRepo: Repository<Warehouse>,
+    @InjectRepository(Product)
+    private readonly productRepo: Repository<Product>,
+
     private readonly events: DispatchGatewayEvents,
+
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -183,49 +194,206 @@ export class ShipmentService {
   }
 
   // ---------------------------------------------------------------------------
-  // Driver: deliver (IN_TRANSIT → DELIVERED)
+  // Reception (Odoo → backend): the receiving employee scanned the shipment QR
   // ---------------------------------------------------------------------------
-  async deliver(accountId: string, shipmentId: string, dto: DeliverShipmentDto) {
-    const driver = await this.getDriver(accountId);
-    const shipment = await this.getOwned(shipmentId, driver.id);
-    this.guardTransition(shipment.status, ShipmentStatus.DELIVERED);
+  /**
+   * The RECEPTION employee (in Odoo) scanned this shipment's QR. Called
+   * server-to-server from Odoo (shared-secret authed), never by a JWT client.
+   *
+   * Enforces warehouse ISOLATION — a warehouse may only receive its OWN trucks,
+   * never another warehouse's — then flips the backend shipment to DELIVERED so
+   * the driver sees it received, completes its requests, and RETURNS the load
+   * (materials + quantities + unit + total weight + driver + truck) so Odoo can
+   * mirror it as one `recycle.shipment` that enters the normal reception/sorting
+   * flow. Materials travel AGGREGATED per product — reception, sorting and
+   * storage only ever work off the shipment totals; the per-request breakdown is
+   * returned too, for the admin alone.
+   *
+   * Idempotent: a second scan of an already-received shipment returns the same
+   * load without erroring.
+   */
+  /**
+   * Load a shipment for the reception scan and enforce warehouse ISOLATION —
+   * the one hard rule: the shipment's warehouse must be the receiving
+   * employee's own, or the truck is not theirs to receive. Shared by the scan
+   * (fetch) and the confirm steps so both apply the exact same guard. Returns
+   * the shipment (with relations) and its ordered requests. Does NOT change any
+   * status — that is the confirm step's job alone.
+   */
+  private async loadShipmentForReception(
+    backendShipmentId: string,
+    warehouseBackendId: string,
+  ): Promise<{ shipment: Shipment; requests: CollectionRequest[] }> {
+    // The id must be a shipment UUID. A QR that carries something else — a
+    // label like "DAWRHA-DRIVER:…", a driver code, or a typo — must read as a
+    // clean "not found", never a raw Postgres "invalid uuid" 500 that looks
+    // like a bug in the reception screen.
+    if (!UUID_RE.test((backendShipmentId ?? '').trim())) {
+      throw new NotFoundException('Shipment not found');
+    }
+    const shipment = await this.shipmentRepo.findOne({
+      where: { id: backendShipmentId.trim() },
+      relations: ['warehouse', 'truck', 'driver', 'driver.account'],
+    });
+    if (!shipment) throw new NotFoundException('Shipment not found');
+
+    // The destination warehouse: set at pickup, or resolved from the driver's
+    // handover when it was never stamped.
+    if (!shipment.warehouseId) {
+      const wid = await this.resolveWarehouseId(shipment.driverId);
+      if (wid) shipment.warehouseId = wid;
+    }
+    if (!shipment.warehouseId || shipment.warehouseId !== warehouseBackendId) {
+      throw new ForbiddenException(
+        'This shipment does not belong to your warehouse',
+      );
+    }
+
+    const requests = await this.requestRepo.find({
+      where: { shipmentId: shipment.id },
+      relations: ['lines'],
+      order: { routeSequence: 'ASC' },
+    });
+    return { shipment, requests };
+  }
+
+  /**
+   * RECEPTION SCAN — read only. Fetch the shipment's load (materials +
+   * quantities + unit + weight + driver + truck) for the reception screen and
+   * mirror into Odoo. Enforces warehouse isolation but leaves the backend
+   * status UNTOUCHED: scanning is a look, not a receipt. The status flips only
+   * when the employee CONFIRMS — see {@link confirmShipmentReceipt}.
+   */
+  async getShipmentForReception(
+    backendShipmentId: string,
+    warehouseBackendId: string,
+  ) {
+    const { shipment, requests } = await this.loadShipmentForReception(
+      backendShipmentId,
+      warehouseBackendId,
+    );
+    return this.buildReceptionPayload(shipment, requests, warehouseBackendId);
+  }
+
+  /**
+   * RECEPTION CONFIRM — the receiving employee accepts the truck in Odoo. NOW
+   * the backend shipment moves to RECEIVED and its requests complete, so the
+   * driver sees the receipt. Re-confirming is idempotent: an already-RECEIVED
+   * shipment just returns its load. (DELIVERED — the driver's drop — may
+   * already be set by the auto route-complete step; RECEIVED is the reception's
+   * own, later, transition.)
+   */
+  async confirmShipmentReceipt(
+    backendShipmentId: string,
+    warehouseBackendId: string,
+  ) {
+    const { shipment, requests } = await this.loadShipmentForReception(
+      backendShipmentId,
+      warehouseBackendId,
+    );
 
     const now = new Date();
+    if (shipment.status !== ShipmentStatus.RECEIVED) {
+      this.guardTransition(shipment.status, ShipmentStatus.RECEIVED);
+      shipment.status = ShipmentStatus.RECEIVED;
+      shipment.deliveredAt = shipment.deliveredAt || now;
+      shipment.totalRequests = requests.length;
+      shipment.totalWeightKg = String(
+        requests.reduce(
+          (s, r) => s + (parseFloat(r.actualWeightKg || r.estimatedWeightKg) || 0),
+          0,
+        ),
+      );
+      await this.shipmentRepo.save(shipment);
+      for (const r of requests) {
+        if (r.status !== CollectionRequestStatus.COMPLETED) {
+          r.status = CollectionRequestStatus.COMPLETED;
+          r.completedAt = now;
+          r.deliveredAt = r.deliveredAt || now;
+        }
+      }
+      if (requests.length) await this.requestRepo.save(requests);
+    }
 
-    // Resolve warehouse if not set
-    if (!shipment.warehouseId) {
-      const warehouseId = await this.resolveWarehouseId(driver.id);
-      if (warehouseId) {
-        shipment.warehouseId = warehouseId;
+    return this.buildReceptionPayload(shipment, requests, warehouseBackendId);
+  }
+
+  /**
+   * Shape the reception response: correlation ids, the driver/truck/weight
+   * header, the AGGREGATED per-material lines (what reception/sorting/storage
+   * work off) and the per-request breakdown (for the ADMIN only).
+   */
+  private async buildReceptionPayload(
+    shipment: Shipment,
+    requests: CollectionRequest[],
+    warehouseBackendId: string,
+  ) {
+    // Resolve backend product uuid → Odoo product id (the sort sheet keys on it).
+    const productIds = [
+      ...new Set(
+        requests.flatMap((r) => (r.lines || []).map((l) => l.productId)),
+      ),
+    ];
+    const products = productIds.length
+      ? await this.productRepo.find({ where: { id: In(productIds) } })
+      : [];
+    const odooByProduct = new Map(
+      products.map((p) => [p.id, p.odooProductId ?? null]),
+    );
+
+    // AGGREGATE per material — the totals reception/sorting/storage work off.
+    const agg = new Map<
+      string,
+      { odoo_product_id: number | null; product_name: string; unit: string; quantity: number }
+    >();
+    for (const r of requests) {
+      for (const l of r.lines || []) {
+        const qty = Number(l.actualQuantity ?? l.quantity) || 0;
+        const cur = agg.get(l.productId);
+        if (cur) cur.quantity += qty;
+        else
+          agg.set(l.productId, {
+            odoo_product_id: odooByProduct.get(l.productId) ?? null,
+            product_name: l.productName,
+            unit: l.unitType,
+            quantity: qty,
+          });
       }
     }
 
-    // Recalculate totals
-    const requests = await this.requestRepo.find({
-      where: { shipmentId: shipment.id },
-    });
-
-    shipment.status = ShipmentStatus.DELIVERED;
-    shipment.deliveredAt = now;
-    shipment.totalRequests = requests.length;
-    shipment.totalWeightKg = String(
-      requests.reduce(
-        (sum, r) => sum + (parseFloat(r.actualWeightKg || r.estimatedWeightKg) || 0),
-        0,
-      ),
+    const totalWeight = requests.reduce(
+      (s, r) => s + (parseFloat(r.actualWeightKg || r.estimatedWeightKg) || 0),
+      0,
     );
-    if (dto.notes) shipment.notes = dto.notes;
-    await this.shipmentRepo.save(shipment);
 
-    // Mark all linked requests as COMPLETED
-    for (const r of requests) {
-      r.status = CollectionRequestStatus.COMPLETED;
-      r.completedAt = now;
-      r.deliveredAt = r.deliveredAt || now;
-    }
-    await this.requestRepo.save(requests);
-
-    return this.serialize(shipment);
+    return {
+      // Correlation + the values Odoo's `backend_upsert_shipment` consumes.
+      backend_shipment_id: shipment.id,
+      warehouse_backend_id: warehouseBackendId,
+      shipment_number: shipment.shipmentNumber,
+      status: shipment.status,
+      driver_name: shipment.driver?.account?.name ?? null,
+      truck_info: shipment.truck?.plateNumber ?? null,
+      dispatch_date: shipment.departedAt ? shipment.departedAt.toISOString() : null,
+      total_weight_kg: +totalWeight.toFixed(3),
+      // Materials + quantities + unit — reception shows these; Odoo maps the
+      // priced ones to `expected_line_ids`.
+      expected_lines: [...agg.values()].map((m) => ({
+        odoo_product_id: m.odoo_product_id,
+        product_name: m.product_name,
+        unit: m.unit,
+        quantity: +m.quantity.toFixed(3),
+      })),
+      // Per-request breakdown — for the ADMIN only; the reception/sorting ignore it.
+      requests: requests.map((r) => ({
+        request_number: r.requestNumber,
+        lines: (r.lines || []).map((l) => ({
+          product_name: l.productName,
+          quantity: Number(l.actualQuantity ?? l.quantity) || 0,
+          unit: l.unitType,
+        })),
+      })),
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -375,6 +543,7 @@ export class ShipmentService {
   // ---------------------------------------------------------------------------
   private async createShipment(
     driverId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     firstRequest: CollectionRequest,
   ): Promise<Shipment> {
     const assignment = await this.assignmentRepo.findOne({

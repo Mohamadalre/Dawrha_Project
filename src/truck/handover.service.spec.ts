@@ -22,9 +22,11 @@ describe('HandoverService', () => {
   let odooSync: any;
   let tracking: any;
 
-  // Pin the clock to a fixed noon so shift-window math is deterministic
-  // (anchoring HH:MM to "today" is otherwise ambiguous near midnight).
-  const FIXED = new Date('2026-06-15T12:00:00');
+  // Pin the clock to a fixed noon DAMASCUS time so shift-window math is
+  // deterministic regardless of the test runner's timezone (the window is
+  // resolved in Asia/Damascus, so the anchor must be too). Shift times below are
+  // Damascus wall-clock, so noon sits inside the 11:00–13:00 active window.
+  const FIXED = new Date('2026-06-15T12:00:00+03:00');
 
   const activeShift = { id: 's1', name: 'Test', tolerance: 0, startTime: '11:00:00', endTime: '13:00:00' };
   const futureShift = { ...activeShift, startTime: '13:00:00', endTime: '14:00:00' };

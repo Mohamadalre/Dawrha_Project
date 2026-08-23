@@ -7,6 +7,7 @@ import { OrderSpendingCap } from '../entities/order-spending-cap.entity';
 import { SpendingCapPeriod } from '../enums/spending-cap-period.enum';
 import { Order } from '../entities/order.entity';
 import { OrderStatus } from '../enums/order-status.enum';
+import { startOfDayInZone, startOfMonthInZone } from '@src/common/time/operation-time.util';
 
 /** Outcome of the spending-cap check, with the numbers the buyer needs. */
 export interface SpendingCapCheck {
@@ -96,15 +97,12 @@ export class OrderSpendingCapService {
     };
   }
 
-  /** Local start of the cap's window. */
+  /** Start of the cap's window, in the operation timezone (not the server's). */
   private windowStart(period: SpendingCapPeriod): Date {
     const now = new Date();
-    if (period === SpendingCapPeriod.DAILY) {
-      now.setHours(0, 0, 0, 0);
-      return now;
-    }
-    // MONTHLY: first of the current month, local time.
-    return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    return period === SpendingCapPeriod.DAILY
+      ? startOfDayInZone(now)
+      : startOfMonthInZone(now);
   }
 
   // ── Admin write side ──────────────────────────────────────────────

@@ -45,7 +45,9 @@ export class LeaderboardSnapshotService {
   /**
    * Capture the CURRENT standings as the trend baseline: rank every ACTIVE
    * CITIZEN exactly as the leaderboard orders them (points DESC, then oldest
-   * wallet first) and UPSERT one row per account.
+   * wallet first, then wallet id — the SAME three keys the live board uses, so
+   * a row's rank and the baseline its trend is measured against cannot disagree)
+   * and UPSERT one row per account.
    *
    * Called the moment BEFORE points are awarded, so the baseline is "where
    * everyone stood just before this change" — then the live leaderboard compares
@@ -62,7 +64,7 @@ export class LeaderboardSnapshotService {
       await this.walletRepo.query(
         `SELECT w.account_id,
                 w.points,
-                ROW_NUMBER() OVER (ORDER BY w.points DESC, w.created_at ASC) AS rank
+                ROW_NUMBER() OVER (ORDER BY w.points DESC, w.created_at ASC, w.id ASC) AS rank
            FROM points_wallets w
            JOIN accounts a ON a.id = w.account_id
           WHERE a.account_status = $1 AND a.role = $2`,

@@ -2,13 +2,13 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
-  IsDateString,
   IsNumber,
   IsOptional,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { ConditionPriceDto } from './set-pricing.dto';
+import { IsIsoDateTimeWithOffset } from '@src/common/validators/is-iso-datetime-with-offset.validator';
 
 /**
  * Edits a material's price table — any subset of roles, in one call.
@@ -55,6 +55,6 @@ export class UpdatePricingTableDto {
   free_facility?: ConditionPriceDto[];
 
   @IsOptional()
-  @IsDateString()
+  @IsIsoDateTimeWithOffset()
   effective_from?: string;
 }

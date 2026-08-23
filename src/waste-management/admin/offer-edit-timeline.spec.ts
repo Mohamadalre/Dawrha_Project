@@ -78,6 +78,7 @@ describe('offer edit — amount vs percentage', () => {
       pricingRepo as any, offerRepo as any, odooSync as any,
       noop as any, noop as any, {} as any, { gradeMapFor: jest.fn(async () => new Map()) } as any, {} as any, {} as any,
       { count: jest.fn().mockResolvedValue(0) } as any,
+        { find: jest.fn().mockResolvedValue([]) } as any, { createNotification: jest.fn().mockResolvedValue({ id: 'n' }), enqueueNotification: jest.fn() } as any,
     );
   });
 
@@ -159,6 +160,7 @@ describe('offer timeline — a material’s offers over time', () => {
       {} as any, offerRepo as any, {} as any,
       {} as any, {} as any, {} as any, { gradeMapFor: jest.fn(async () => new Map()) } as any, {} as any, {} as any,
       { count: jest.fn().mockResolvedValue(0) } as any,
+        { find: jest.fn().mockResolvedValue([]) } as any, { createNotification: jest.fn().mockResolvedValue({ id: 'n' }), enqueueNotification: jest.fn() } as any,
     );
   };
 

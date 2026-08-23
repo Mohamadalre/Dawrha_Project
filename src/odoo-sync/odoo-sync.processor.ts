@@ -33,6 +33,7 @@ import { latestRoundWasSplit } from '@src/order/latest-round-split';
 import { FulfilmentMode } from '@src/order/enums/fulfilment-mode.enum';
 import { DeliveryRateService } from '@src/warehouse/providers/delivery-rate.service';
 import { CatalogCacheService } from '@src/waste-management/common/providers/catalog-cache.service';
+import { DeadLetterJob } from './entities/dead-letter-job.entity';
 import {
   OrderStatus,
   canTransition,
@@ -199,6 +200,9 @@ export class OdooSyncProcessor extends WorkerHost {
     // Drops cached catalogue pages when a reverse product edit lands, so the
     // mirrored name is visible at once instead of at the next TTL.
     private readonly cache: CatalogCacheService,
+    // Durable landing spot for jobs that exhausted every retry (the DLQ).
+    @InjectRepository(DeadLetterJob)
+    private readonly deadLetterRepo: Repository<DeadLetterJob>,
   ) {
     super();
   }
@@ -265,9 +269,51 @@ export class OdooSyncProcessor extends WorkerHost {
             stack: (e as Error).stack,
           }),
         );
+        // The job is out of retries — dead-letter it: a durable record + a
+        // structured ERROR alert an external monitor can turn into email/Slack.
+        await this.deadLetter(job, error as Error);
       }
       throw error;
     }
+  }
+
+  /**
+   * Record a permanently-failed job and RAISE THE ALERT.
+   *
+   * Best-effort by design: dead-lettering must never itself throw and mask the
+   * original error (which BullMQ still needs to mark the job failed). The alert
+   * is the ERROR log with the `SYNC_JOB_DEAD_LETTERED` marker — an external
+   * monitor matches that marker; the row is the durable evidence behind it.
+   */
+  private async deadLetter(job: Job, error: Error): Promise<void> {
+    try {
+      await this.deadLetterRepo.save(
+        this.deadLetterRepo.create({
+          queue: ODOO_SYNC_QUEUE,
+          jobId: job.id ? String(job.id) : null,
+          jobName: job.name,
+          payload: job.data ?? null,
+          error: error?.message ?? null,
+          attempts: job.attemptsMade + 1,
+        }),
+      );
+    } catch (e) {
+      winstonLogger.error(
+        `Dead-letter record could not be written for ${job.name}: ${(e as Error).message}`,
+        { ...LOG_META, stack: (e as Error).stack },
+      );
+    }
+    // The alert — always emitted even if the row could not be written.
+    winstonLogger.error(
+      `Sync job dead-lettered: ${job.name} gave up after ${job.attemptsMade + 1} attempt(s): ${error?.message}`,
+      {
+        ...LOG_META,
+        alert: 'SYNC_JOB_DEAD_LETTERED',
+        queue: ODOO_SYNC_QUEUE,
+        jobName: job.name,
+        jobId: job.id ? String(job.id) : null,
+      },
+    );
   }
 
   // --- Categories -----------------------------------------------------------

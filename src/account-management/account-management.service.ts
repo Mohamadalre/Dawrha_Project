@@ -487,7 +487,19 @@ export class AccountManagementService {
 
   /** The caller's own location. */
   async getOwnLocation(accountId: string, role: Role) {
-    return this.getProfileLocation(await this.ownProfileId(accountId, role));
+    const location = await this.getProfileLocation(
+      await this.ownProfileId(accountId, role),
+    );
+    // A DRIVER's coordinates are the app-captured GPS point that drives dispatch
+    // — not something to echo back on his own location screen, where only the
+    // written address is his to read. Strip the raw point (and its lat/lng) for
+    // the collector; every other self-service role keeps them.
+    if (role === Role.COLLECTOR) {
+      const { coordinates, latitude, longitude, ...rest } = location;
+      void coordinates; void latitude; void longitude;
+      return rest;
+    }
+    return location;
   }
 
   /** The caller's own uploaded documents / images. */

@@ -1,5 +1,4 @@
 import {
-  Body,
   Controller,
   Get,
   Param,
@@ -7,14 +6,15 @@ import {
   Patch,
   Query,
   UseGuards,
+  Body
 } from '@nestjs/common';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { ShipmentService } from '../services/shipment.service';
-import { DeliverShipmentDto } from '../dto/shipment.dto';
 import { ShipmentStatus } from '../enums/shipment-status.enum';
+import { DeliverShipmentDto } from '../dto/shipment.dto';
 
 /**
  * Driver shipment APIs: list, detail, deliver, cancel.
@@ -38,6 +38,7 @@ export class ShipmentController {
     return { message: 'Shipment fetched', result };
   }
 
+
   /** Public: deliver to warehouse (no auth). */
   @Patch(':id/deliver')
   async deliver(
@@ -47,6 +48,7 @@ export class ShipmentController {
     const result = await this.shipmentService.publicDeliver(id, dto);
     return { message: 'Shipment delivered — all requests completed', result };
   }
+
 
   // ---------------------------------------------------------------------------
   // Driver (authenticated)

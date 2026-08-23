@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { PricingTier } from '@src/waste-management/enums/pricing-tier.enum';
 import { MAX_PAGE_LIMIT } from '@src/waste-management/common/dto/pagination.dto';
+import { IsIsoDateTimeWithOffset } from '@src/common/validators/is-iso-datetime-with-offset.validator';
 
 /**
  * Give the live price list an end date.
@@ -21,7 +22,7 @@ import { MAX_PAGE_LIMIT } from '@src/waste-management/common/dto/pagination.dto'
  * actually is.
  */
 export class SetPricingExpiryDto {
-  @IsDateString()
+  @IsIsoDateTimeWithOffset()
   effective_until: string;
 
   /**

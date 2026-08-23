@@ -25,10 +25,11 @@ function builderOf(rows: unknown[]) {
 }
 
 describe('DispatchCandidatesService', () => {
-  // Fixed "now" so the shift-coverage math is deterministic — constructed in
-  // LOCAL time so getHours() in the service matches regardless of timezone.
+  // Fixed "now" so the shift-coverage math is deterministic — pinned to 14:00
+  // DAMASCUS (the operation timezone the service resolves shift windows in), so
+  // the 08:00–16:00 shift contains it regardless of the test runner's timezone.
   beforeAll(() =>
-    jest.useFakeTimers({ now: new Date(2026, 7, 17, 14, 0, 0) }),
+    jest.useFakeTimers({ now: new Date('2026-08-17T14:00:00+03:00') }),
   );
 
   const config = {

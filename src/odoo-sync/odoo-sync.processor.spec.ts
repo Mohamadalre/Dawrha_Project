@@ -12,6 +12,7 @@ describe('OdooSyncProcessor', () => {
   let processor: OdooSyncProcessor;
   let odoo: any;
   let notifications: any;
+  let deadLetterRepo: any;
   let categoryRepo: any;
   let productRepo: any;
   let pricingRepo: any;
@@ -114,6 +115,10 @@ describe('OdooSyncProcessor', () => {
     const userDeviceRepo: any = { ...mkRepo(), update: jest.fn().mockResolvedValue({ affected: 1 }) };
     mediaRepo = { ...mkRepo(), update: jest.fn().mockResolvedValue({ affected: 1 }) };
     offerRepo = mkRepo();
+    deadLetterRepo = {
+      create: jest.fn((v: any) => v),
+      save: jest.fn().mockResolvedValue(undefined),
+    };
     rates = {
       quote: jest.fn().mockResolvedValue({ cost: 0, currency: 'JOD' }),
     };
@@ -149,6 +154,7 @@ describe('OdooSyncProcessor', () => {
       mediaRepo,
       rates,
       { invalidate: jest.fn().mockResolvedValue(undefined) } as any, // catalog cache
+      deadLetterRepo,
     );
   });
 
@@ -416,6 +422,39 @@ describe('OdooSyncProcessor', () => {
       await processor.process(reassignJob(999));
 
       expect(orderPartRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('dead-letter queue', () => {
+    const failingJob = (attemptsMade: number): any => ({
+      name: ODOO_JOBS.SYNC_CATEGORY,
+      data: { categoryId: 'c1' },
+      id: 'job-1',
+      attemptsMade,
+      opts: { attempts: 3 },
+    });
+
+    it('dead-letters a job that fails on its LAST attempt', async () => {
+      categoryRepo.findOne.mockRejectedValue(new Error('odoo unreachable'));
+
+      // attemptsMade 2 (+1 = 3) === attempts 3 → the last try.
+      await expect(processor.process(failingJob(2))).rejects.toThrow('odoo unreachable');
+
+      expect(deadLetterRepo.save).toHaveBeenCalledTimes(1);
+      const rec = deadLetterRepo.create.mock.calls[0][0];
+      expect(rec.jobName).toBe(ODOO_JOBS.SYNC_CATEGORY);
+      expect(rec.attempts).toBe(3);
+      expect(rec.error).toContain('odoo unreachable');
+      expect(rec.payload).toEqual({ categoryId: 'c1' });
+    });
+
+    it('does NOT dead-letter while retries remain', async () => {
+      categoryRepo.findOne.mockRejectedValue(new Error('transient'));
+
+      // attemptsMade 0 (+1 = 1) < attempts 3 → BullMQ will retry.
+      await expect(processor.process(failingJob(0))).rejects.toThrow('transient');
+
+      expect(deadLetterRepo.save).not.toHaveBeenCalled();
     });
   });
 });

@@ -13,6 +13,7 @@ import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.enti
 import { CollectionRequest } from '../entities/collection-request.entity';
 import { CollectionRequestAssignment } from '../entities/collection-request-assignment.entity';
 import { CollectionRoute } from '../entities/collection-route.entity';
+import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
 import { CollectionRequestStatus } from '../enums/collection-request-status.enum';
 import { CollectionRequestAssignmentStatus } from '../enums/collection-request-assignment-status.enum';
 import { CollectionRouteStatus } from '../enums/collection-route-status.enum';
@@ -187,6 +188,10 @@ describe('DispatchEngineService', () => {
         { provide: DispatchGatewayEvents, useValue: m.events },
         { provide: NotificationService, useValue: m.notifications },
         { provide: ShipmentService, useValue: m.shipmentService },
+        // The merge from main added an EventEmitter2 dependency to the engine
+        // (it emits 'collection.request.assigned'); the real app provides it via
+        // EventEmitterModule — the test supplies a stub so DI can resolve.
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 

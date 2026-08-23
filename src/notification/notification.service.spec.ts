@@ -50,7 +50,11 @@ describe('NotificationService', () => {
   });
 
   it('countUnread returns the repository count', async () => {
-    await expect(service.countUnread('u1')).resolves.toBe(3);
+    // countUnread returns the count wrapped with a (translatable) message, not
+    // a bare number — the shape the controller returns to the client.
+    await expect(service.countUnread('u1')).resolves.toEqual(
+      expect.objectContaining({ unread_count: 3 }),
+    );
   });
 
   it('localises notification content to the reader language on display', async () => {

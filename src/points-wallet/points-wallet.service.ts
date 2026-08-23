@@ -27,6 +27,15 @@ export function isWalletEligible(role: Role): boolean {
   return WALLET_ELIGIBLE_ROLES.includes(role);
 }
 
+/**
+ * Points carry two decimals — the order/collection value ÷ the per-point rate,
+ * rounded (never floored), so 3500 at 1000-per-point is 3.5. Rounding at each
+ * step keeps the stored balance from drifting on binary-float remainders.
+ */
+export function roundPoints(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 @Injectable()
 export class PointsWalletService {
   private readonly logger = new Logger('PointsWallet');
@@ -63,7 +72,9 @@ export class PointsWalletService {
       const per = Number(rate.amountPerPoint);
       if (!(per > 0) || !(orderValue > 0)) return null;
 
-      const points = Math.floor(orderValue / per);
+      // The value converted at the rate, kept to 2 decimals — NOT floored: a
+      // 3500 order at 1000-per-point earns 3.5 points, not 3.
+      const points = roundPoints(orderValue / per);
       if (points <= 0) return { points: 0, balance: (await this.view(accountId, role)).points };
 
       const wallet = await this.ensureForAccount(accountId, role);
@@ -75,7 +86,7 @@ export class PointsWalletService {
       // later. Best-effort: it must never hold up (or fail) the actual award.
       await this.snapshots.refreshBaseline().catch(() => undefined);
 
-      wallet.points += points;
+      wallet.points = roundPoints(Number(wallet.points) + points);
       await this.walletRepo.save(wallet);
 
       await this.notifications
@@ -124,12 +135,20 @@ export class PointsWalletService {
       const per = Number(rate.amountPerPoint);
       if (!(per > 0) || !(value > 0)) return null;
 
-      const points = Math.floor(value / per);
+      // Same conversion as an order — kept to 2 decimals, never floored.
+      const points = roundPoints(value / per);
       if (points <= 0) return { points: 0, balance: (await this.view(accountId, role)).points };
 
       const wallet = await this.ensureForAccount(accountId, role);
       if (!wallet) return null;
-      wallet.points += points;
+
+      // Capture the standings BEFORE this award so the leaderboard trend reflects
+      // the movement it causes — exactly as awardForOrder does. Without this a
+      // collection-earned climb showed no trend/rank_change at all, because the
+      // baseline was only ever refreshed by ORDER awards. Best-effort.
+      await this.snapshots.refreshBaseline().catch(() => undefined);
+
+      wallet.points = roundPoints(Number(wallet.points) + points);
       await this.walletRepo.save(wallet);
 
       await this.notifications
@@ -244,6 +263,14 @@ export class PointsWalletService {
       .andWhere('a.role = :role', { role: Role.CITIZEN })
       .orderBy('w.points', 'DESC')
       .addOrderBy('w.createdAt', 'ASC')
+      // Final, fully-deterministic tie-break: two wallets can share BOTH the
+      // same points AND the same createdAt (bulk seeds, or two awards in the
+      // same instant), and without this their order is left to the database and
+      // flips between refreshes — the "ranking keeps reshuffling" bug. The wallet
+      // id is unique, so this pins every tie to one stable order. The snapshot
+      // ROW_NUMBER and the caller's own-rank rule use the SAME three keys, so the
+      // rank a row shows and the rank its trend is measured against never differ.
+      .addOrderBy('w.id', 'ASC')
       .skip(offset)
       .take(l)
       .getMany();
@@ -296,14 +323,20 @@ export class PointsWalletService {
         .andWhere('a.role = :role', { role: Role.CITIZEN })
         .getOne();
       if (mine) {
-        // Same positional rule as the list: everyone strictly ahead on points,
-        // plus everyone tied who reached the balance earlier, plus one.
+        // Same positional rule as the list, with the SAME three-key ordering
+        // (points DESC, createdAt ASC, id ASC): everyone strictly ahead on
+        // points, plus everyone tied who is ahead by the createdAt/id tie-break,
+        // plus one. The id half is what keeps this rank identical to the row's
+        // rank in the list when points AND createdAt both collide.
         const ahead = await active()
           .andWhere('w.points > :pts', { pts: mine.points })
           .getCount();
         const tiedAhead = await active()
           .andWhere('w.points = :pts', { pts: mine.points })
-          .andWhere('w.createdAt < :createdAt', { createdAt: mine.createdAt })
+          .andWhere(
+            '(w.createdAt < :createdAt OR (w.createdAt = :createdAt AND w.id < :wid))',
+            { createdAt: mine.createdAt, wid: mine.id },
+          )
           .getCount();
         const myRank = ahead + tiedAhead + 1;
         const myTrend = deriveTrend(myRank, previousRanks.get(callerAccountId));

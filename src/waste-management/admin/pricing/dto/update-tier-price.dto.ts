@@ -1,6 +1,5 @@
 import { Transform, Type } from 'class-transformer';
 import {
-  IsDateString,
   IsNumber,
   IsOptional,
   IsString,
@@ -8,6 +7,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsIsoDateTimeWithOffset } from '@src/common/validators/is-iso-datetime-with-offset.validator';
 
 const normalizeConditionCode = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim().toUpperCase() : value;
@@ -50,7 +50,7 @@ export class UpdateTierPriceDto {
   // setting (PATCH /v1/admin/platform-settings), never per row.
 
   @IsOptional()
-  @IsDateString()
+  @IsIsoDateTimeWithOffset()
   effective_from?: string;
 
   /**
@@ -63,6 +63,6 @@ export class UpdateTierPriceDto {
    * dead on arrival.
    */
   @IsOptional()
-  @IsDateString()
+  @IsIsoDateTimeWithOffset()
   effective_until?: string;
 }
