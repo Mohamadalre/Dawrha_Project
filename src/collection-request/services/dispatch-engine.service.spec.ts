@@ -9,6 +9,7 @@ import { DispatchEngineService } from './dispatch-engine.service';
 import { DispatchCandidatesService } from './dispatch-candidates.service';
 import { DispatchConfigProvider } from '../providers/dispatch-config.provider';
 import { DispatchGatewayEvents } from '../gateways/dispatch.gateway';
+import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
 import { CollectionRequest } from '../entities/collection-request.entity';
 import { CollectionRequestAssignment } from '../entities/collection-request-assignment.entity';
 import { CollectionRoute } from '../entities/collection-route.entity';
@@ -86,13 +87,27 @@ describe('DispatchEngineService', () => {
     requestSaves.length = 0;
     assignmentSaves.length = 0;
     const redis = {
+      get: jest.fn().mockResolvedValue(null),
       mget: jest.fn().mockResolvedValue([]),
       set: jest.fn().mockResolvedValue('OK'),
-      multi: jest.fn(() => ({
-        set: jest.fn().mockReturnThis(),
-        del: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([]),
-      })),
+      multi: jest.fn(() => {
+        const chain: Record<string, jest.Mock> = {};
+        const add = (name: string) => {
+          chain[name] = jest.fn().mockReturnValue(chainProxy);
+        };
+        const chainProxy: any = new Proxy(
+          {},
+          {
+            get: (_t, prop: string) => {
+              if (prop === 'exec') return chain.exec;
+              if (!chain[prop]) add(prop);
+              return chain[prop];
+            },
+          },
+        );
+        chain.exec = jest.fn().mockResolvedValue([]);
+        return chainProxy;
+      }),
     };
     const requestRepo = {
       findOne: jest.fn(),
@@ -123,6 +138,7 @@ describe('DispatchEngineService', () => {
     const truckAssignmentRepo = {
       findOne: jest.fn().mockResolvedValue(null),
     };
+    const eventEmitter = { emit: jest.fn() };
     const configProvider = { get: jest.fn().mockResolvedValue(config) };
     const candidates = { findEligible: jest.fn().mockResolvedValue([]) };
     const events = {
@@ -144,6 +160,7 @@ describe('DispatchEngineService', () => {
       assignmentRepo,
       routeRepo,
       truckAssignmentRepo,
+      eventEmitter,
       configProvider,
       candidates,
       events,
@@ -165,6 +182,7 @@ describe('DispatchEngineService', () => {
         { provide: getRepositoryToken(CollectionRequestAssignment), useValue: m.assignmentRepo },
         { provide: getRepositoryToken(CollectionRoute), useValue: m.routeRepo },
         { provide: getRepositoryToken(TruckAssignmentEntity), useValue: m.truckAssignmentRepo },
+        { provide: EventEmitter2, useValue: m.eventEmitter },
         { provide: DispatchConfigProvider, useValue: m.configProvider },
         { provide: DispatchCandidatesService, useValue: m.candidates },
         { provide: DispatchGatewayEvents, useValue: m.events },
@@ -272,6 +290,120 @@ describe('DispatchEngineService', () => {
       await engine.elect('req-1');
 
       expect(m.candidates.findEligible).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('mid-round merging', () => {
+    /** A tour running with its single stop already weighed (PICKING). */
+    function runningRoute() {
+      const pickedStop = makeRequest({
+        id: 'req-1',
+        requestNumber: 'CR-202608-00001',
+        status: CollectionRequestStatus.PICKING,
+        lat: '33.51',
+        lng: '36.21',
+        routeSequence: 1,
+      }) as any;
+      pickedStop.routeId = 'rt-live';
+      return {
+        id: 'rt-live',
+        routeNumber: 'RTE-20260824-001',
+        driverId: 'dTour',
+        status: CollectionRouteStatus.IN_PROGRESS,
+        requests: [pickedStop],
+      };
+    }
+
+    it('merges a nearby queued request into a running tour anchored at the live GPS fix', async () => {
+      const m = mocks();
+      const incoming = makeRequest({
+        id: 'req-2',
+        requestNumber: 'CR-202608-00002',
+      });
+      m.requestRepo.findOne.mockResolvedValue(incoming);
+      const route = runningRoute();
+      m.routeRepo.find.mockResolvedValue([route]);
+      // The touring driver passes the eligibility + capacity gates even busy.
+      m.candidates.findEligible.mockResolvedValue([
+        makeCandidate({ driverId: 'dTour', accountId: 'accTour', truckId: 'truckTour' }),
+      ]);
+      // His truck reports a live position right next to the incoming pickup.
+      m.truckAssignmentRepo.findOne.mockResolvedValue({
+        driverId: 'dTour',
+        truckId: 'truckTour',
+      });
+      m.redis.get.mockResolvedValue(
+        JSON.stringify({ lat: 33.502, lng: 36.201, heading: 10 }),
+      );
+
+      const engine = await makeEngine(m);
+      await engine.elect('req-2');
+
+      // Bound directly into the running tour — no offer, no queue job.
+      expect(m.assignmentRepo.save).not.toHaveBeenCalled();
+      expect(m.queue.add).not.toHaveBeenCalled();
+      expect(m.requestRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'req-2',
+          routeId: 'rt-live',
+          routeSequence: 1,
+          status: CollectionRequestStatus.ASSIGNED,
+        }),
+      );
+      // The weighed stop shifted to sequence 2.
+      expect(m.requestRepo.save).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'req-1', routeSequence: 2 }),
+        ]),
+      );
+      // Same shipment: the merged request joins the driver's active shipment.
+      expect(m.shipmentService.autoCreateOrAddToShipment).toHaveBeenCalledWith(
+        'dTour',
+        expect.objectContaining({ id: 'req-2' }),
+      );
+      expect(m.events.announceToDriver).toHaveBeenCalledWith(
+        'accTour',
+        'request:assigned',
+        expect.objectContaining({ event: 'MERGED', request_id: 'req-2' }),
+      );
+    });
+
+    it('falls through to scoring when there is neither a served stop nor a live fix', async () => {
+      const m = mocks();
+      const incoming = makeRequest({
+        id: 'req-2',
+        requestNumber: 'CR-202608-00002',
+      });
+      m.requestRepo.findOne.mockResolvedValue(incoming);
+      m.routeRepo.find.mockResolvedValue([runningRoute()]);
+      // No truck fix anywhere: the merge cannot be anchored honestly.
+      m.redis.get.mockResolvedValue(null);
+      m.truckAssignmentRepo.findOne.mockResolvedValue({
+        driverId: 'dTour',
+        truckId: 'truckTour',
+      });
+      m.candidates.findEligible.mockResolvedValue([
+        makeCandidate({ driverId: 'dNear', accountId: 'accNear', truckId: 'truckNear' }),
+      ]);
+      m.redis.mget.mockResolvedValue([]);
+
+      const engine = await makeEngine(m);
+      await engine.elect('req-2');
+
+      // The anchor was honestly attempted, then refused — the election fell
+      // through to the normal scored pool (no allowBusy pass happened).
+      expect(m.redis.get).toHaveBeenCalledWith('truck:location:truckTour');
+      expect(
+        m.candidates.findEligible.mock.calls.every((c) => c.length === 2),
+      ).toBe(true);
+      expect(m.shipmentService.autoCreateOrAddToShipment).not.toHaveBeenCalled();
+      expect(m.assignmentRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: 'req-2',
+          driverId: 'dNear',
+          status: CollectionRequestAssignmentStatus.OFFERED,
+        }),
+      );
     });
   });
 

@@ -25,7 +25,7 @@ export interface RouteConstraints {
 
 export const DEFAULT_ROUTE_CONSTRAINTS: RouteConstraints = {
   mergeMaxMinutes: 15,
-  mergeMaxKm: 2,
+  mergeMaxKm: 5,
   institutionToleranceMin: 20,
   avgSpeedKmh: 25,
 };

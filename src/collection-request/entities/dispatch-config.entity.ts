@@ -61,7 +61,7 @@ export class DispatchConfig {
   routeMergeMaxMin: number;
 
   /** Max distance between stops for two requests to share one route. */
-  @Column({ name: 'route_merge_max_km', type: 'decimal', precision: 8, scale: 2, default: 2 })
+  @Column({ name: 'route_merge_max_km', type: 'decimal', precision: 8, scale: 2, default: 5 })
   routeMergeMaxKm: string;
 
   /** ± minutes a plan-generated request tolerates around its scheduled time. */
