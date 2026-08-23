@@ -76,6 +76,14 @@
     "handoverLateDropoff": {
       "title": "لم تسلّم سيارتك بعد",
       "body": "انتهت وردية \"{shift}\" منذ {minutes} دقيقة ولم تسلّم السيارة بعد."
+    },
+    "orderStatusChanged": {
+      "title": "تحديث حالة الطلبية",
+      "body": "طلبيتك {order} أصبحت الآن {status}."
+    },
+    "newOffer": {
+      "title": "عرض جديد",
+      "body": "يتوفّر عرض جديد على {product}."
     }
   },
   "You will be assigned to a truck soon": "سيتم إسنادك لسيارة قريباً",
@@ -158,7 +166,8 @@
   "Last stop fetched successfully": "تم جلب آخر توقف بنجاح",
   "Truck handovers fetched successfully": "تم جلب رحلات الشاحنة بنجاح",
   "Shipment received": "تم استلام الشحنة",
-  "Shipment fetched": "تم جلب الشحنة",
+  "Shipment fetched": "تم جلب الحمولة",
+  "lat and lng must be numbers within valid geo ranges": "يجب أن يكون خطّا الطول والعرض أرقاماً ضمن النطاقات الجغرافية الصحيحة",
   "Modification options fetched": "تم جلب خيارات التعديل",
   "Modification applied": "تم تطبيق التعديل",
   "This shipment does not belong to your warehouse": "هذه الشحنة لا تتبع مستودعك",
@@ -180,7 +189,6 @@
   "No truck assigned — cannot create shipment": "لا توجد شاحنة مُسندة — لا يمكن إنشاء حمولة",
   "Shipment cancelled": "تم إلغاء الحمولة",
   "Shipment delivered — all requests completed": "تم تسليم الحمولة — اكتملت جميع الطلبات",
-  "Shipment fetched": "تم جلب الحمولة",
   "Shipment not found": "الحمولة غير موجودة",
   "Shipments fetched": "تم جلب الحمولات",
   "The number of unread notifications has been retrieved": "تم جلب عدد الإشعارات غير المقروءة",
@@ -780,8 +788,6 @@
   "An admin account cannot be deleted": "لا يمكن حذف حساب المدير",
   "You cannot delete your own account": "لا يمكنك حذف حسابك الخاص",
   "This email belongs to a deleted account and cannot be reused": "هذا البريد الإلكتروني يخص حسابًا محذوفًا ولا يمكن إعادة استخدامه",
-  "Account not found": "الحساب غير موجود",
-  "My categories fetched successfully": "تم جلب تصنيفاتك بنجاح",
   "Categories added to your list successfully": "تمت إضافة التصنيفات إلى قائمتك بنجاح",
   "Some of these waste categories do not exist or are no longer available": "بعض هذه التصنيفات غير موجودة أو لم تعد متاحة",
   "Odoo admin account fetched successfully": "تم جلب حساب مدير أودو بنجاح",
@@ -799,7 +805,6 @@
   "The first point must not be greater than the last point": "يجب ألا تكون النقطة الأولى أكبر من النقطة الأخيرة",
   "Odoo credentials were changed but the new ones could not authenticate": "تم تغيير بيانات اعتماد أودو لكن تعذّر تسجيل الدخول بها",
   "Category fetched successfully": "تم جلب التصنيف بنجاح",
-  "Product fetched successfully": "تم جلب المادة بنجاح",
   "Collection request created": "تم إنشاء طلب الجمع بنجاح",
   "Collection request cancelled": "تم إلغاء طلب الجمع بنجاح",
   "Collection request fetched successfully": "تم جلب طلب الجمع بنجاح",
@@ -827,7 +832,6 @@
   "Weight recorded": "تم تسجيل الوزن",
   "Delivery recorded": "تم تسجيل التسليم",
   "Your tour": "جولتك",
-  "Driver profile not found": "ملف السائق غير موجود",
   "This stop is not on your active tour": "هذه المحطة ليست في جولتك النشطة",
   "A positive actual weight is required": "الوزن الفعلي الموجب مطلوب",
   "Delivery warehouse not found": "مستودع التسليم غير موجود",

@@ -6,6 +6,7 @@ import {
   Patch,
   Query,
   UseGuards,
+  Body
 } from '@nestjs/common';
 import { JwtAuthGuard } from '@src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
@@ -13,6 +14,7 @@ import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { ShipmentService } from '../services/shipment.service';
 import { ShipmentStatus } from '../enums/shipment-status.enum';
+import { DeliverShipmentDto } from '../dto/shipment.dto';
 
 /**
  * Driver shipment APIs: list, detail, deliver, cancel.
@@ -21,16 +23,39 @@ import { ShipmentStatus } from '../enums/shipment-status.enum';
  * Shipments are auto-created when a driver accepts a collection request —
  * no manual creation endpoint.
  */
-@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller({ path: 'shipments', version: '1' })
 export class ShipmentController {
   constructor(private readonly shipmentService: ShipmentService) {}
 
   // ---------------------------------------------------------------------------
-  // Driver
+  // Public — no auth required
+  // ---------------------------------------------------------------------------
+
+  /** Public: shipment detail with linked requests (no auth). */
+  @Get(':id')
+  async detail(@Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.shipmentService.publicDetail(id);
+    return { message: 'Shipment fetched', result };
+  }
+
+
+  /** Public: deliver to warehouse (no auth). */
+  @Patch(':id/deliver')
+  async deliver(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DeliverShipmentDto,
+  ) {
+    const result = await this.shipmentService.publicDeliver(id, dto);
+    return { message: 'Shipment delivered — all requests completed', result };
+  }
+
+
+  // ---------------------------------------------------------------------------
+  // Driver (authenticated)
   // ---------------------------------------------------------------------------
 
   /** List my shipments. */
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Get()
   @Permissions('collection.driver.view')
   async myShipments(@CurrentUser() user: any) {
@@ -38,26 +63,8 @@ export class ShipmentController {
     return { message: 'Shipments fetched', result };
   }
 
-  /** Shipment detail with linked requests. */
-  @Get(':id')
-  @Permissions('collection.driver.view')
-  async detail(
-    @CurrentUser() user: any,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
-    const result = await this.shipmentService.detail(user.id, id);
-    return { message: 'Shipment fetched', result };
-  }
-
-  // NOTE: the driver no longer marks a shipment delivered by hand. A shipment
-  // becomes DELIVERED automatically when the driver's tour completes (he dropped
-  // the load), and RECEIVED when the RECEPTION employee CONFIRMS its receipt in
-  // Odoo — scanning the QR only fetches the load (getShipmentForReception); the
-  // confirm step flips the status (confirmShipmentReceipt). See
-  // OdooReceptionController. Receipt is the warehouse's confirmation, not the
-  // driver's claim.
-
   /** Cancel shipment and unlink requests. */
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Patch(':id/cancel')
   @Permissions('collection.driver.manage')
   async cancel(
@@ -73,6 +80,7 @@ export class ShipmentController {
   // ---------------------------------------------------------------------------
 
   /** Admin: list all shipments with filters. */
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Get('admin/all')
   @Permissions('collection.admin.view')
   async adminList(

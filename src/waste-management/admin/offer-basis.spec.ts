@@ -97,6 +97,7 @@ describe('offer basis — amount vs percentage', () => {
         {} as any, {} as any, {} as any, {} as any, pricingRepo as any,
         offerRepo as any, { enqueueUpdatePricing: jest.fn() } as any,
         noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any, { count: jest.fn().mockResolvedValue(0) } as any,
+        { find: jest.fn().mockResolvedValue([]) } as any, { createNotification: jest.fn().mockResolvedValue({ id: 'n' }), enqueueNotification: jest.fn() } as any,
       );
     });
 
@@ -238,6 +239,7 @@ describe('offer basis — amount vs percentage', () => {
         {} as any, {} as any, {} as any, {} as any, pricingRepo as any,
         offerRepo as any, { enqueueUpdatePricing: jest.fn() } as any,
         noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any, { count: jest.fn().mockResolvedValue(0) } as any,
+        { find: jest.fn().mockResolvedValue([]) } as any, { createNotification: jest.fn().mockResolvedValue({ id: 'n' }), enqueueNotification: jest.fn() } as any,
       );
     });
 
@@ -429,6 +431,7 @@ describe('offer edges — withdrawn materials and the buyer ceiling', () => {
       {} as any, {} as any, {} as any, {} as any, pricingRepo as any,
       offerRepo as any, { enqueueUpdatePricing: jest.fn() } as any,
       noop as any, noop as any, {} as any, conditions as any, {} as any, dataSource as any, { count: jest.fn().mockResolvedValue(0) } as any,
+        { find: jest.fn().mockResolvedValue([]) } as any, { createNotification: jest.fn().mockResolvedValue({ id: 'n' }), enqueueNotification: jest.fn() } as any,
     );
   });
 
@@ -519,6 +522,7 @@ describe('a withdrawn material', () => {
       {} as any, productRepo as any, {} as any, {} as any, {} as any, {} as any,
       {} as any, {} as any, {} as any, noop as any, noop as any, {} as any,
       {} as any, {} as any, {} as any, { count: jest.fn().mockResolvedValue(0) } as any,
+        { find: jest.fn().mockResolvedValue([]) } as any, { createNotification: jest.fn().mockResolvedValue({ id: 'n' }), enqueueNotification: jest.fn() } as any,
     );
 
     await expect(

@@ -121,6 +121,7 @@ describe('AdminCatalogService', () => {
         ),
       } as any,
       orderLineRepo,
+        { find: jest.fn().mockResolvedValue([]) } as any, { createNotification: jest.fn().mockResolvedValue({ id: 'n' }), enqueueNotification: jest.fn() } as any,
     );
   });
 

@@ -50,6 +50,9 @@ import { ORDER_TASKS_QUEUE } from './order-tasks.constants';
 import { PermissionsModule } from '@src/permission/permissions.module';
 import { WasteCommonModule } from '@src/waste-management/common/waste-common.module';
 import { PointsWalletModule } from '@src/points-wallet/points-wallet.module';
+import { NotificationModule } from '@src/notification/notification.module';
+import { OrderStatusSubscriber } from './subscribers/order-status.subscriber';
+import { OrderStatusNotifier } from './providers/order-status-notifier.service';
 
 /**
  * Ordering for factories and free facilities.
@@ -107,8 +110,12 @@ import { PointsWalletModule } from '@src/points-wallet/points-wallet.module';
     // Confirming receipt rewards the buyer with points at the admin's per-role
     // rate.
     PointsWalletModule,
+    // The buyer is notified on every order status change (subscriber + listener).
+    NotificationModule,
   ],
   providers: [
+    OrderStatusSubscriber,
+    OrderStatusNotifier,
     OrderStateService,
     OrderMinimumService,
     OrderSpendingCapService,

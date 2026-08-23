@@ -1071,7 +1071,7 @@ this.server.to('truck:' + truckId).emit('truck:location', stored);
 }</pre></div>
 </div></td></tr>
 
-<tr><td><code>user:nearby_drivers</code></td><td><span class="m m-post">← مستخدم</span></td><td>طلب السائقين القريبين — يرسل الموقع ويحصل على مناطق التغطية وال sürücüler المتاحين + تحديثات تلقائية عند تغير الحالة</td><td><span class="body-toggle">▼</span></td></tr>
+  <tr><td><code>user:nearby_drivers</code><br><small>alias: <code>nearby_drivers</code></small></td><td><span class="m m-post">← مستخدم</span></td><td>طلب السائقين القريبين — يرسل الموقع ويحصل على مناطق التغطية والسائقين المتاحين + تحديثات تلقائية عند تغير الحالة. يُقبل الاسم المختصر <code>nearby_drivers</code> أيضاً. القيود: <code>lat</code> ضمن <b>-90..90</b>، <code>lng</code> ضمن <b>-180..180</b>، و<code>radius_km</code> محدود بـ <b>1..50</b> (افتراضي 10).</td><td><span class="body-toggle">▼</span></td></tr>
 <tr><td colspan="4"><div class="body-block">
 <div class="body-section"><div class="body-label">📤 Payload</div>
 <pre class="body-code">{
@@ -1104,7 +1104,7 @@ this.server.to('truck:' + truckId).emit('truck:location', stored);
     }]
   }]
 }</pre></div>
-<div class="body-section"><div class="body-label">📡 Server → client (-push)</div>
+  <div class="body-section"><div class="body-label">📡 Server → client (-push: <code>user:nearby_update</code> / <code>nearby_update</code>)</div>
 <pre class="body-code"><span class="c">// تحديث تلقائي عند تغير حالة السائقين (قبول/رفض/إنهاء جولة)</span>
 <span class="c">// نفس الهيكل أعلاه:</span>
 {
@@ -1112,7 +1112,7 @@ this.server.to('truck:' + truckId).emit('truck:location', stored);
 }</pre></div>
 </div></td></tr>
 
-<tr><td><code>user:unsubscribe_nearby</code></td><td><span class="m m-post">← مستخدم</span></td><td>إيقاف متابعة السائقين القريبين</td><td>—</td></tr>
+  <tr><td><code>user:unsubscribe_nearby</code><br><small>alias: <code>unsubscribe_nearby</code></small></td><td><span class="m m-post">← مستخدم</span></td><td>إيقاف متابعة السائقين القريبين. يُقبل الاسم المختصر <code>unsubscribe_nearby</code> أيضاً.</td><td>—</td></tr>
 
       </table>
     </div>
@@ -1172,7 +1172,7 @@ coll.emit('user:nearby_drivers', { lat: 33.51, lng: 36.27 }, function (res) {
   console.log('السائقين القريبين:', res.zones);
 });
 coll.on('user:nearby_update', function (data) {
-  console.log('تحديث السائقين:', data.zones);  <span class="c">// pushes تلقائي عند تغير حالة السائقين</span>
+  console.log('تحديث السائقين:', data.zones);  <span class="c">// يُرسل على user:nearby_update و nearby_update — تحديث تلقائي عند تغير حالة السائقين (قبول/رفض/إنهاء جولة)</span>
 });</pre>
     </div>
   </div>

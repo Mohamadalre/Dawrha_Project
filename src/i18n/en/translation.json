@@ -76,6 +76,14 @@
     "handoverLateDropoff": {
       "title": "You have not handed your truck back",
       "body": "Your shift \"{shift}\" ended {minutes} minute(s) ago and you have not handed the truck back."
+    },
+    "orderStatusChanged": {
+      "title": "Order status updated",
+      "body": "Order {order} is now {status}."
+    },
+    "newOffer": {
+      "title": "New offer",
+      "body": "A new offer is available on {product}."
     }
   },
   "content": {
@@ -176,6 +184,7 @@
   "Truck handovers fetched successfully": "Truck handovers fetched successfully",
   "Shipment received": "Shipment received",
   "Shipment fetched": "Shipment fetched",
+  "lat and lng must be numbers within valid geo ranges": "lat and lng must be numbers within valid geo ranges",
   "Modification options fetched": "Modification options fetched",
   "Modification applied": "Modification applied",
   "This shipment does not belong to your warehouse": "This shipment does not belong to your warehouse",
@@ -197,7 +206,6 @@
   "No truck assigned — cannot create shipment": "No truck assigned — cannot create shipment",
   "Shipment cancelled": "Shipment cancelled",
   "Shipment delivered — all requests completed": "Shipment delivered — all requests completed",
-  "Shipment fetched": "Shipment fetched",
   "Shipment not found": "Shipment not found",
   "Shipments fetched": "Shipments fetched",
   "The number of unread notifications has been retrieved": "The number of unread notifications has been retrieved",
@@ -780,8 +788,6 @@
   "An admin account cannot be deleted": "An admin account cannot be deleted",
   "You cannot delete your own account": "You cannot delete your own account",
   "This email belongs to a deleted account and cannot be reused": "This email belongs to a deleted account and cannot be reused",
-  "Account not found": "Account not found",
-  "My categories fetched successfully": "My categories fetched successfully",
   "Categories added to your list successfully": "Categories added to your list successfully",
   "Some of these waste categories do not exist or are no longer available": "Some of these waste categories do not exist or are no longer available",
   "Odoo admin account fetched successfully": "Odoo admin account fetched successfully",
@@ -799,7 +805,6 @@
   "The first point must not be greater than the last point": "The first point must not be greater than the last point",
   "Odoo credentials were changed but the new ones could not authenticate": "تم تغيير بيانات اعتماد أودو لكن تعذّر تسجيل الدخول بها",
   "Category fetched successfully": "Category fetched successfully",
-  "Product fetched successfully": "Product fetched successfully",
   "Collection request created": "Collection request created",
   "Collection request cancelled": "Collection request cancelled",
   "Collection request fetched successfully": "Collection request fetched successfully",
@@ -827,7 +832,6 @@
   "Weight recorded": "Weight recorded",
   "Delivery recorded": "Delivery recorded",
   "Your tour": "Your tour",
-  "Driver profile not found": "Driver profile not found",
   "This stop is not on your active tour": "This stop is not on your active tour",
   "A positive actual weight is required": "A positive actual weight is required",
   "Delivery warehouse not found": "Delivery warehouse not found",

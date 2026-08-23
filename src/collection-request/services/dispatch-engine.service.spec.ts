@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { getQueueToken } from '@nestjs/bullmq';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationService } from '@src/notification/notification.service';
 import { ShipmentService } from './shipment.service';
 import { CollectionStateService } from '../providers/collection-state.service';
@@ -169,6 +170,10 @@ describe('DispatchEngineService', () => {
         { provide: DispatchGatewayEvents, useValue: m.events },
         { provide: NotificationService, useValue: m.notifications },
         { provide: ShipmentService, useValue: m.shipmentService },
+        // The merge from main added an EventEmitter2 dependency to the engine
+        // (it emits 'collection.request.assigned'); the real app provides it via
+        // EventEmitterModule — the test supplies a stub so DI can resolve.
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 

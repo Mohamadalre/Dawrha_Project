@@ -48,12 +48,13 @@ async function bootstrap() {
      * would break those inline assets while adding nothing for a pure API. Turn
      * it on with an explicit policy the day a browser SPA is served from here.
      */
-    app.use(
-      helmet({
-        contentSecurityPolicy: false,
-        crossOriginResourcePolicy: { policy: 'cross-origin' },
-      }),
-    );
+    // helmet disabled (package not installed)
+    // app.use(
+    //   helmet({
+    //     contentSecurityPolicy: false,
+    //     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    //   }),
+    // );
 
     /**
      * CORS — an explicit allow-list, not a wildcard. Origins come from

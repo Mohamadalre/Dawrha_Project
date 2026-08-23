@@ -130,6 +130,7 @@ describe('offer rules — audience, percentage, grades and the derived amount', 
       pricingRepo, offerRepo, odooSync as any, noop as any, noop as any,
       {} as any, conditions, {} as any, dataSource as any,
       { count: jest.fn().mockResolvedValue(0) } as any,
+        { find: jest.fn().mockResolvedValue([]) } as any, { createNotification: jest.fn().mockResolvedValue({ id: 'n' }), enqueueNotification: jest.fn() } as any,
     );
   };
 
@@ -420,6 +421,7 @@ describe('offer validity and percentage edits', () => {
       pricingRepo, offerRepo, odooSync as any, { record: jest.fn() } as any,
       cache as any, {} as any, { gradeMapFor: jest.fn(async () => new Map()) } as any, {} as any, {} as any,
       { count: jest.fn().mockResolvedValue(0) } as any,
+        { find: jest.fn().mockResolvedValue([]) } as any, { createNotification: jest.fn().mockResolvedValue({ id: 'n' }), enqueueNotification: jest.fn() } as any,
     );
   });
 

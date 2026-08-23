@@ -17,6 +17,11 @@ import { ProductPricingHistory } from '../entities/product-pricing-history.entit
 import { PricingArchiveReason } from '../enums/pricing-archive-reason.enum';
 import { Offer } from '../entities/offer.entity';
 import { Role } from '@src/user/enums/role.enum';
+import { Account } from '@src/user/entities/account.entity';
+import { AccountStatus } from '@src/user/enums/account-status.enum';
+import { NotificationService } from '@src/notification/notification.service';
+import { NotificationType } from '@src/notification/enums/notification-type.enum';
+import { winstonLogger } from '@src/core/logger-config/winston.config';
 import { OdooSyncStatus } from '../enums/odoo-sync-status.enum';
 import { PricingTier, tierForRole } from '../enums/pricing-tier.enum';
 import {
@@ -149,6 +154,10 @@ export class AdminCatalogService {
     // history can only be deactivated, never erased.
     @InjectRepository(OrderPartLine)
     private readonly orderLineRepo: Repository<OrderPartLine>,
+    // A new offer notifies every ACTIVE account in its target audience.
+    @InjectRepository(Account)
+    private readonly accountRepo: Repository<Account>,
+    private readonly notifications: NotificationService,
   ) {}
 
   // --- Categories -----------------------------------------------------------
@@ -973,6 +982,10 @@ export class AdminCatalogService {
       })),
     });
 
+    // Tell every account the offer is aimed at. Fire-and-forget: notifying a
+    // few hundred buyers must not slow (or fail) the admin's create call.
+    void this.notifyOfferAudience(product, created);
+
     const createdGradeMap = await this.conditionsService.gradeMapFor([product.id]);
     return {
       // The material the offer is on, named — the client no longer has to hold
@@ -984,6 +997,64 @@ export class AdminCatalogService {
           ? `Offer created successfully across ${created.length} lines`
           : 'Offer created successfully',
     };
+  }
+
+  /**
+   * Notify every account an offer is aimed at that a new offer landed.
+   *
+   * The target roles come from each created row: its explicit `targetRoles`,
+   * or — when the row applies to the whole audience — every role of that
+   * audience (`AUDIENCE_ROLES`). Only ACTIVE accounts are told, and each is
+   * given the in-app record plus a queued push.
+   *
+   * Best-effort throughout, and called fire-and-forget: one bad recipient never
+   * stops the rest, and a failure here is logged, never surfaced to the admin
+   * who created the offer.
+   */
+  private async notifyOfferAudience(
+    product: Product,
+    offers: Offer[],
+  ): Promise<void> {
+    try {
+      const roles = new Set<Role>();
+      for (const o of offers) {
+        const rs =
+          o.targetRoles && o.targetRoles.length
+            ? (o.targetRoles as Role[])
+            : AUDIENCE_ROLES[o.audience as OfferAudience] ?? [];
+        for (const r of rs) roles.add(r as Role);
+      }
+      if (!roles.size) return;
+
+      const accounts = await this.accountRepo.find({
+        where: { role: In([...roles]), accountStatus: AccountStatus.ACTIVE },
+        select: ['id'],
+      });
+
+      for (const acc of accounts) {
+        try {
+          const notification = await this.notifications.createNotification({
+            userId: acc.id,
+            type: NotificationType.GENERAL,
+            title: 'New offer',
+            body: `A new offer is available on ${product.name}.`,
+            titleKey: 'notifications.newOffer.title',
+            bodyKey: 'notifications.newOffer.body',
+            args: { product: product.name },
+          });
+          await this.notifications.enqueueNotification(notification.id);
+        } catch {
+          /* one recipient failing must not stop the rest */
+        }
+      }
+    } catch (err) {
+      winstonLogger.warn(
+        `Offer-audience notification failed for product ${product.id}: ${
+          (err as Error).message
+        }`,
+        { context: 'ADMIN_CATALOG', channel: 'catalog' },
+      );
+    }
   }
 
   /**
