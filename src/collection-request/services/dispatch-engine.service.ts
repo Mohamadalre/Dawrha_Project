@@ -179,7 +179,7 @@ export class DispatchEngineService {
 
     if (await this.tryMergeRequest(request, config)) {
       const route = await this.routeRepo.findOne({
-        where: { id: request.routeId! },
+        where: { id: request.routeId },
       });
       return route ? { merged: true, driverId: route.driverId } : null;
     }
@@ -256,7 +256,7 @@ export class DispatchEngineService {
     const now = new Date();
     const constraints = {
       mergeMaxMinutes: config.routeMergeMaxMin,
-      mergeMaxKm: Number(config.routeMergeMaxKm) || 2,
+      mergeMaxKm: Number(config.routeMergeMaxKm) || 5,
       institutionToleranceMin: config.institutionToleranceMin,
     };
 
@@ -289,9 +289,17 @@ export class DispatchEngineService {
         );
       if (open.some((s) => s.lat == null || s.lng == null)) continue;
 
+      // Mid-round there is no served stop yet — anchor the merge at the
+      // driver's live truck fix instead, so a nearby request can still join
+      // the running tour (and its shipment) while he works.
+      const anchor =
+        done != null
+          ? this.wrapStop(done)
+          : await this.liveAnchor(route.driverId);
+
       const verdict = canMergeInto({
         stops: open.map((s) => this.wrapStop(s)),
-        lastServed: done ? this.wrapStop(done) : null,
+        lastServed: anchor,
         incoming: this.wrapStop(request),
         now,
         constraints,
@@ -742,6 +750,38 @@ export class DispatchEngineService {
       lng: Number(request.lng),
       scheduledAt: request.scheduledAt ?? null,
     };
+  }
+
+  /**
+   * The driver's live truck fix as a merge anchor, for tours that have not
+   * served a stop yet. Null when the driver has no assignment or no fresh
+   * position — the merge then honestly refuses rather than guessing.
+   */
+  private async liveAnchor(driverId: string): Promise<RouteStop | null> {
+    try {
+      const assignment = await this.truckAssignmentRepo.findOne({
+        where: { driverId },
+        select: ['truckId'],
+      });
+      if (!assignment?.truckId) return null;
+
+      const raw = await this.redis.get(
+        `truck:location:${assignment.truckId}`,
+      );
+      if (!raw) return null;
+      const fix = JSON.parse(raw) as LiveLocation;
+      if (fix.lat == null || fix.lng == null) return null;
+
+      return {
+        requestId: '__live_anchor__',
+        lat: Number(fix.lat),
+        lng: Number(fix.lng),
+        scheduledAt: null,
+      };
+    } catch {
+      // A corrupt frame or a tracking hiccup must not sink the election.
+      return null;
+    }
   }
 
   /** Binds an accepted request to the driver's open route (or creates one). */

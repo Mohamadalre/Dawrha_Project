@@ -3,229 +3,232 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>توثيق وحدة الطلبات — Dawrha</title>
+<title>API وحدة الطلبات — دورها</title>
+<link rel="stylesheet" href="interface/assets/style.css">
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{--green:#16a34a;--orange:#ea580c;--blue:#2563eb;--red:#dc2626;--purple:#7c3aed;--gray:#64748b;--bg:#f8fafc;--card:#ffffff;--border:#e2e8f0;--text:#0f172a;--muted:#64748b;--nav:#1e293b}
-body{font-family:'Segoe UI',Tahoma,system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;font-size:14px}
-a{color:var(--blue);text-decoration:none}
-a:hover{text-decoration:underline}
-.header{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);color:#fff;padding:28px 32px;position:sticky;top:0;z-index:10}
-.header h1{font-size:22px;margin-bottom:6px}
-.header p{opacity:.8;font-size:13px}
-.header .meta{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
-.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;color:#fff}
-.badge-green{background:var(--green)}.badge-orange{background:var(--orange)}.badge-blue{background:var(--blue)}.badge-red{background:var(--red)}.badge-purple{background:var(--purple)}.badge-gray{background:var(--gray)}
-.badge-light{background:#f1f5f9;color:#334155;border:1px solid var(--border)}
-.layout{display:flex;min-height:calc(100vh - 110px)}
-.nav{width:250px;background:var(--nav);color:#cbd5e1;padding:18px 0;position:sticky;top:110px;align-self:flex-start;max-height:calc(100vh - 110px);overflow:auto}
-.nav h3{font-size:11px;letter-spacing:.08em;color:#94a3b8;padding:10px 18px 4px}
-.nav a{display:block;padding:6px 18px;color:#cbd5e1;font-size:13px;border-right:3px solid transparent}
-.nav a:hover{background:#334155;color:#fff;text-decoration:none}
-.nav a.active{background:#334155;color:#fff;border-right-color:var(--blue)}
-.main{flex:1;padding:24px 28px;max-width:1100px}
-.section{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:22px;margin-bottom:20px}
-.section h2{font-size:17px;margin-bottom:4px;display:flex;align-items:center;gap:8px}
-.section h2 .count{background:#f1f5f9;border:1px solid var(--border);padding:1px 7px;border-radius:20px;font-size:11px;color:var(--muted)}
-.section-desc{color:var(--muted);font-size:13px;margin-bottom:16px}
-.divider{height:1px;background:var(--border);margin:16px 0}
+/* ===== نمط الأقسام القابلة للطي (من api-collection-requests.html) ===== */
+.body-toggle{cursor:pointer;color:#2563eb;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:4px;user-select:none}
+.body-toggle:hover{text-decoration:underline}
+.body-block{margin-top:6px;display:none;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden}
+.body-block.open{display:block}
+.body-section{padding:10px 12px;border-bottom:1px solid #f1f5f9}
+.body-section:last-child{border-bottom:none}
+.body-label{font-size:11px;font-weight:700;color:#6b7280;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+pre.body-code{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;font-size:11.5px;line-height:1.6;overflow-x:auto;direction:ltr;text-align:left;margin:0;white-space:pre;font-family:Consolas,monospace}
+.body-code .k{color:#7dd3fc}.body-code .s{color:#86efac}.body-code .n{color:#fbbf24}.body-code .c{color:#64748b}
+.no-body{color:#9ca3af;font-size:12px;font-style:italic}
+@media(max-width:720px){.body-block pre.body-code{font-size:10.5px}}
+.role-section{margin:28px 0 18px;padding-bottom:8px;border-bottom:3px solid var(--admin-accent,#2563eb)}
+.role-section h2{margin:0;font-size:20px;display:flex;align-items:center;gap:8px}
+
+/* ===== أنماط مخصّصة للأقسام التوضيحية (سيناريو/خوارزمية/فجوات/مرجع) ===== */
+.kbd{font-family:monospace;background:#f1f5f9;border:1px solid #e2e8f0;padding:1px 5px;border-radius:3px;font-size:11px;direction:ltr;display:inline-block}
 .flow{display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;margin:12px 0}
-.flow-step{flex:1;min-width:180px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center}
+.flow-step{flex:1;min-width:180px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;text-align:center}
 .flow-step .icon{font-size:22px;margin-bottom:6px}
 .flow-step h4{font-size:13px;margin-bottom:4px}
-.flow-step p{font-size:12px;color:var(--muted)}
-.flow-arrow{display:flex;align-items:center;color:var(--blue);font-size:20px;font-weight:700}
+.flow-step p{font-size:12px;color:#64748b}
+.flow-arrow{display:flex;align-items:center;color:#2563eb;font-size:20px;font-weight:700}
 .diagram{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:8px;align-items:center;margin:14px 0}
-.diag-box{background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center}
+.diag-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center}
 .diag-box h4{font-size:12px}
-.diag-box p{font-size:11px;color:var(--muted)}
-.diag-arrow{color:var(--blue);font-weight:700}
-.endpoint{border:1px solid var(--border);border-radius:8px;margin-bottom:14px;overflow:hidden}
-.ep-head{display:flex;align-items:center;gap:10px;padding:12px 14px;background:#f8fafc;border-bottom:1px solid var(--border);flex-wrap:wrap}
-.ep-head code{font-size:13px;font-weight:700;direction:ltr}
-.ep-body{padding:14px}
-.ep-body h4{font-size:12px;color:var(--muted);letter-spacing:.04em;margin:12px 0 6px}
-.ep-body h4:first-child{margin-top:0}
-.tbl{width:100%;border-collapse:collapse;font-size:12px}
-.tbl th{background:#f8fafc;text-align:right;padding:6px 8px;border:1px solid var(--border);font-size:11px;color:var(--muted)}
-.tbl td{padding:6px 8px;border:1px solid var(--border);vertical-align:top}
+.diag-box p{font-size:11px;color:#64748b}
+.diag-arrow{color:#2563eb;font-weight:700}
+.divider{height:1px;background:#e2e8f0;margin:16px 0}
+.tbl{width:100%;border-collapse:collapse;font-size:12px;margin:6px 0}
+.tbl th{background:#f8fafc;text-align:right;padding:6px 8px;border:1px solid #e2e8f0;font-size:11px;color:#64748b}
+.tbl td{padding:6px 8px;border:1px solid #e2e8f0;vertical-align:top}
 .tbl td:first-child{font-family:monospace;direction:ltr;text-align:left}
-.code-block{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;font-family:Consolas,monospace;font-size:12px;direction:ltr;text-align:left;overflow:auto;white-space:pre}
-.code-label{font-size:11px;color:var(--muted);margin-bottom:4px;display:flex;justify-content:space-between}
 .status-list{display:flex;gap:6px;flex-wrap:wrap}
 .status-chip{padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600}
 .s-200{background:#dcfce7;color:#166534}.s-201{background:#dbeafe;color:#1e40af}.s-202{background:#fef9c3;color:#854d0e}.s-400{background:#fee2e2;color:#991b1b}.s-403{background:#fee2e2;color:#991b1b}.s-404{background:#fee2e2;color:#991b1b}.s-409{background:#ffedd5;color:#9a3412}
 .enum-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-@media(max-width:900px){.layout{flex-direction:column}.nav{width:100%;position:static;max-height:none}.enum-grid{grid-template-columns:1fr}.diagram{grid-template-columns:1fr}}
-.tag{font-size:11px;padding:2px 6px;border-radius:4px;background:#f1f5f9;border:1px solid var(--border)}
+@media(max-width:900px){.enum-grid{grid-template-columns:1fr}.diagram{grid-template-columns:1fr}}
+.gap{border-right:4px solid #ea580c;background:#fffbeb}
+.gap.ok{border-right-color:#16a34a;background:#f0fdf4}
+.tag{font-size:11px;padding:2px 6px;border-radius:4px;background:#f1f5f9;border:1px solid #e2e8f0}
 .filter-bar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
-.filter-bar input,.filter-bar select{padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px}
-.gap{border-right:4px solid var(--orange);background:#fffbeb}
-.gap.ok{border-right-color:var(--green);background:#f0fdf4}
-.kbd{font-family:monospace;background:#f1f5f9;border:1px solid var(--border);padding:1px 5px;border-radius:3px;font-size:11px;direction:ltr;display:inline-block}
+.filter-bar input,.filter-bar select{padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px}
 </style>
 </head>
 <body>
-<div class="header">
-<h1>📦 توثيق وحدة الطلبات — Dawrha Order Module</h1>
-<p>كل مسارات <span class="kbd">src/order</span> — السيناريو الصوتي + الخوارزمية + 32 endpoint مع أمثلة JSON</p>
-<div class="meta">
-<span class="badge badge-light">البادئة ‎ /api/v1</span>
-<span class="badge badge-light">JWT + Roles + Permissions</span>
-<span class="badge badge-light">33 endpoint</span>
-<span class="badge badge-light">6 وحدات تحكم</span>
-<span class="badge badge-light">آخر تحديث 2026-08-22</span>
-</div>
-</div>
-<div class="layout">
-<nav class="nav">
-<h3>المحتوى</h3>
-<a href="#overview" class="active">نظرة عامة</a>
-<a href="#scenario">السيناريو — حالات التوصيل</a>
-<a href="#algorithm">الخوارزمية — الإسناد</a>
-<a href="#buyer">المشتري — /orders (11)</a>
-<a href="#admin-orders">الإدارة — /admin/orders (6)</a>
-<a href="#delivery">التوصيل — رحلة التوصيل</a>
-<a href="#receipt-points">تأكيد الاستلام والنقاط</a>
-<a href="#complaints">الشكاوى — Complaints (3)</a>
-<a href="#constraints">القيود — Constraints (6)</a>
-<a href="#webhook">Webhook — Odoo (1)</a>
-<a href="#enums">مرجع الحالات</a>
-<a href="#gaps">الفجوات الملاحظة</a>
-<h3 style="margin-top:14px">فلترة</h3>
-<div style="padding:8px 14px">
-<input id="search" placeholder="ابحث في endpoints..." style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-size:12px">
-<select id="methodFilter" style="width:100%;margin-top:6px;padding:6px;border-radius:6px;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-size:12px">
-<option value="">كل الطرق</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option>
-</select>
-</div>
-</nav>
-<main class="main">
+<header class="topbar">
+  <div class="inner">
+    <div class="logo"><span class="dot">د</span> دورها <span class="badge blue" style="font-size:11px">API وحدة الطلبات</span></div>
+    <div class="grow"></div>
+    <a href="interface/api-collection-requests.html" class="btn ghost" style="padding:6px 14px">طلبات التجميع</a>
+    <a href="index.html" class="btn ghost" style="padding:6px 14px">الفهرس</a>
+  </div>
+</header>
+<main class="container wide">
+  <h1 style="font-size:24px;margin:22px 0 6px">📦 API وحدة الطلبات — توثيق موحّد</h1>
+  <p class="muted" style="max-width:920px">مرجع شامل لـ <b>37 endpoint</b> تخص وحدة <code>src/order</code>، مقسومة حسب الدور: <b>المشتري</b> (FACTORY / EXTERNAL_PARTNER)، <b>الأدمن</b> (الباك اند — إدارة الطلبات والشكاوى والقيود والنقاط)، <b>Odoo / التوصيل</b> (محذوفة من الباك اند، تُنفَّذ في Odoo)، و<b>Webhook</b> (أحداث الرحلة القادمة من Odoo). كل المسارات تبدأ بـ <code>/api/v1</code>. ⚠️ رحلة التوصيل مخفية عن ادمن الباك اند — التتبع عبر الـ Webhook فقط.</p>
 
-<section id="overview" class="section">
-<h2>نظرة عامة</h2>
-<p class="section-desc">وحدة الطلبات تخدم دورين للمشتري — <b>المعمل FACTORY</b> و<b>المنشأة الحرة EXTERNAL_PARTNER</b> — وسلوكهما متطابق إلا في التوصيل. كلاهما يجب أن يكون <span class="kbd">ACTIVE</span>. الإدارة ترى كل الطلبات وتعدل التقسيم وتخطط التوصيل.</p>
-<table class="tbl">
-<tr><th>البند</th><th>القيمة</th></tr>
-<tr><td>البادئة</td><td><span class="kbd">/api/v1</span></td></tr>
-<tr><td>مصادقة المشتري</td><td><span class="kbd">JwtAuthGuard + RolesGuard + AccountStatusGuard</span> — الرتبتان + <span class="kbd">ACTIVE</span></td></tr>
-<tr><td>مصادقة الإدارة</td><td><span class="kbd">JwtAuthGuard + PermissionsGuard</span> — صلاحيات <span class="kbd">admin.orders.view / manage</span> و <span class="kbd">admin.pricing.manage</span></td></tr>
-<tr><td>Webhook التوصيل</td><td>سر مشترك في الهيدر <span class="kbd">x-odoo-webhook-secret</span> — مقارنة آمنة زمنياً</td></tr>
-<tr><td>الطلب منشأ في الـ backend فقط</td><td>Odoo ينفذ فقط — لا ينشئ طلبات</td></tr>
-</table>
-</section>
+  <div class="card">
+    <h3>ملخص</h3>
+    <div class="flow-legend" style="flex-wrap:wrap;gap:10px">
+      <span class="chip">👤 المشتري <small>11</small></span>
+      <span class="chip">🔧 الأدمن — الطلبات <small>6</small></span>
+      <span class="chip">🔧 الأدمن — الشكاوى <small>3</small></span>
+      <span class="chip">🔧 الأدمن — القيود <small>6</small></span>
+      <span class="chip">🔧 الأدمن — النقاط <small>4</small></span>
+      <span class="chip">🚚 Odoo / التوصيل <small>6</small></span>
+      <span class="chip">📡 Webhook <small>1</small></span>
+      <span class="chip"><span class="m m-post">POST</span> 18</span>
+      <span class="chip"><span class="m m-get">GET</span> 12</span>
+      <span class="chip"><span class="m m-patch">PATCH</span> 3</span>
+      <span class="chip"><span class="m m-put">PUT</span> 2</span>
+      <span class="chip"><span class="m m-delete">DELETE</span> 2</span>
+    </div>
+    <div class="sub" style="margin-top:8px">الرموز: <code>:orderId</code> / <code>:partId</code> معرّفات UUID · <code>:role</code> = FACTORY | EXTERNAL_PARTNER · القيد <code>AWAITING_SPLIT_APPROVAL</code> جديد (إصلاح الفجوة 1).</div>
+  </div>
 
-<section id="scenario" class="section">
-<h2>السيناريو — حالات التوصيل الثلاث + التجميع</h2>
-<p class="section-desc">مستخرج من التفريغ الصوتي الأول — كل حالة وخريطتها إلى الـ endpoint</p>
-<div class="flow">
-<div class="flow-step"><div class="icon">🏭</div><h4>1 — بدون توصيل</h4><p>المعمل يختار <span class="kbd">PICKUP</span><br>يستلم بنفسه من المستودع/المستودعات<br><span class="kbd">fulfilment_mode: PICKUP</span></p></div>
-<div class="flow-arrow">←</div>
-<div class="flow-step"><div class="icon">🚚</div><h4>2 — توصيل مباشر</h4><p>من المستودع المجهز<br>حسب حالة التجهيز<br><span class="kbd">fulfilment_mode: DELIVERY</span> (للمعمل فقط)</p></div>
-<div class="flow-arrow">←</div>
-<div class="flow-step"><div class="icon">🧩</div><h4>3 — طلب مقسوم</h4><p>مقسوم على مستودعين+<br>يحدد المستودع/المستودعات التي يُستلم منها<br>كل جزء يظهر منفصلاً</p></div>
-</div>
-<div class="divider"></div>
-<h3 style="font-size:13px;margin-bottom:8px">حالة التجميع — Consolidation (طلب مقسوم + بدون توصيل)</h3>
-<div class="diagram">
-<div class="diag-box"><h4>المستودع الأبعد</h4><p>يرسل حصته</p></div>
-<div class="diag-arrow">→</div>
-<div class="diag-box"><h4>المستودع الأقرب للمشتري</h4><p>نقطة التجميع<br><span class="kbd">consolidationWarehouseId</span></p></div>
-<div class="diag-arrow">→</div>
-<div class="diag-box"><h4>المشتري</h4><p>يرسل سيارة واحدة<br>يستلم الشحنة كاملة<br><span class="kbd">POST /orders/:id/consolidate</span></p></div>
-</div>
-<p style="font-size:12px;color:var(--muted)">يُعرض فقط للطلب المقسوم غير التوصيل. إذا اكتمل تجهيز كل المستودعات يبدأ التجميع فوراً، وإلا يبدأ عند تجهيز آخر مستودع (مهمة <span class="kbd">PLAN_CONSOLIDATION</span>).</p>
-<div class="divider"></div>
-<h3 style="font-size:13px;margin-bottom:8px">التوصيل للطلب المقسوم — Milk-run</h3>
-<div class="diagram">
-<div class="diag-box"><h4>شاحنة واحدة</h4><p>تنطلق من الأبعد</p></div>
-<div class="diag-arrow">→</div>
-<div class="diag-box"><h4>تمر بالأقرب</h4><p>تحمل كل الحصص<br>بترتيب تنازلي للمسافة</p></div>
-<div class="diag-arrow">→</div>
-<div class="diag-box"><h4>المشتري</h4><p>تصل محملة<br><span class="kbd">POST /admin/orders/:id/delivery/plan</span></p></div>
-</div>
-<p style="font-size:12px;color:var(--muted)">طلب التوصيل المقسوم لا يُجمع — يُنفذ كـ milk-run. انظر الفجوة 2 أدناه.</p>
-</section>
+  <div class="filter-bar">
+    <input id="search" placeholder="ابحث في endpoints..." style="padding:7px 10px;border-radius:8px;border:1px solid #e2e8f0;font-size:13px;min-width:220px">
+    <select id="methodFilter" style="padding:7px 10px;border-radius:8px;border:1px solid #e2e8f0;font-size:13px">
+      <option value="">كل الطرق</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option>
+    </select>
+  </div>
 
-<section id="algorithm" class="section">
-<h2>الخوارزمية — تدفق الإسناد</h2>
-<p class="section-desc">من التفريغ الصوتي الثاني — مطابقة للكود <span class="kbd">allocation-planner.ts:planAllocation</span></p>
-<div class="flow">
-<div class="flow-step" style="border-color:var(--green)"><h4>1) مستودع واحد يغطي؟</h4><p>يُسند مباشرة<br><b>لأقرب</b> مستودع يغطي كامل الطلب<br><span class="kbd">planSingleWarehouse</span></p></div>
-<div class="flow-arrow">لا ←</div>
-<div class="flow-step" style="border-color:var(--orange)"><h4>2) تقسيم بأقل عدد</h4><p>أقل عدد مستودعات يغطي الطلب<br>ومن بينها <b>أقل مسافة إجمالية</b><br><span class="kbd">planFewestParts</span></p></div>
-<div class="flow-arrow">لا ←</div>
-<div class="flow-step" style="border-color:var(--red)"><h4>3) لا تغطية كاملة</h4><p>أفضل تعبئة جزئية (الأقرب أولاً)<br>يُعرض للمشتري ليقرر<br><span class="kbd">PARTIAL_NEEDS_BUYER / NO_STOCK</span></p></div>
-</div>
-<div class="divider"></div>
-<h3 style="font-size:13px;margin-bottom:6px">مراجعة مدير المستودعات</h3>
-<p style="font-size:12px;color:var(--muted)">الطلب المقسوم يصل كـ parts معروضة. الإدارة تستعرض البدائل بنفس الحجم مرتبة بالأقرب ثم تطبق اختيارها:</p>
-<div class="code-block">GET  /admin/orders/:orderId/modification-options  → كل مجموعات نفس الحجم تغطي الطلب، الأقرب أولاً
-POST /admin/orders/:orderId/modify  { warehouseIds: ["A","C"] }  → يلغي الحالية ويعيد التخصيص (نفس الحجم + تغطية كاملة)</div>
-<p style="font-size:12px;color:var(--muted);margin-top:8px">مثال: الطلب على A+B — إذا كان B مضغوطاً، المدير يختار A+C من قائمة البدائل.</p>
-<h4 style="font-size:12px;margin-top:12px">القدرة الاستيعابية</h4>
-<p style="font-size:12px;color:var(--muted)">تقسيم الشاحنات لا يُخمن — <span class="kbd">truck_groups: string[][]</span> يحددها المشرف يدوياً لأن بعض المواد بالكيلو وبعضها بالقطعة.</p>
-</section>
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- نظرة عامة + السيناريو + الخوارزمية                                            -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
 
-<!-- ============ BUYER ============ -->
-<section id="buyer" class="section">
-<h2>المشتري — <span class="kbd">/orders</span> <span class="count">11 endpoints</span></h2>
-<p class="section-desc">الحماية: <span class="kbd">JwtAuthGuard + RolesGuard (FACTORY, EXTERNAL_PARTNER) + AccountStatusGuard (ACTIVE)</span></p>
+  <div class="card" id="overview">
+    <h3>نظرة عامة</h3>
+    <p class="muted" style="font-size:13px">وحدة الطلبات تخدم دورين للمشتري — <b>المعمل FACTORY</b> و<b>المنشأة الحرة EXTERNAL_PARTNER</b> — وسلوكهما متطابق إلا في التوصيل. كلاهما يجب أن يكون <span class="kbd">ACTIVE</span>. الإدارة ترى كل الطلبات وتعدل التقسيم وتخطط التوصيل.</p>
+    <table class="tbl">
+      <tr><th>البند</th><th>القيمة</th></tr>
+      <tr><td>البادئة</td><td><span class="kbd">/api/v1</span></td></tr>
+      <tr><td>مصادقة المشتري</td><td><span class="kbd">JwtAuthGuard + RolesGuard + AccountStatusGuard</span> — الرتبتان + <span class="kbd">ACTIVE</span></td></tr>
+      <tr><td>مصادقة الإدارة</td><td><span class="kbd">JwtAuthGuard + PermissionsGuard</span> — صلاحيات <span class="kbd">admin.orders.view / manage</span> و <span class="kbd">admin.pricing.manage</span></td></tr>
+      <tr><td>Webhook التوصيل</td><td>سر مشترك في الهيدر <span class="kbd">x-odoo-webhook-secret</span> — مقارنة آمنة زمنياً</td></tr>
+      <tr><td>الطلب منشأ في الـ backend فقط</td><td>Odoo ينفذ فقط — لا ينشئ طلبات</td></tr>
+    </table>
+  </div>
 
-<div class="endpoint" data-method="GET">
-<div class="ep-head"><span class="badge badge-green">GET</span><code>/api/v1/orders/delivery-estimate</code><span class="tag">FACTORY / EXTERNAL_PARTNER</span></div>
-<div class="ep-body">
-<p style="font-size:13px">نطاق تكلفة التوصيل (أفضل/أسوأ حالة) دون إنشاء طلب — يحتاج موقع المشتري (provinceId).</p>
-<h4>الاستجابة 200</h4><div class="code-block">{
+  <div class="card" id="scenario">
+    <h3>السيناريو — حالات التوصيل الثلاث + التجميع</h3>
+    <p class="muted" style="font-size:13px">مستخرج من التفريغ الصوتي الأول — كل حالة وخريطتها إلى الـ endpoint</p>
+    <div class="flow">
+      <div class="flow-step"><div class="icon">🏭</div><h4>1 — بدون توصيل</h4><p>المعمل يختار <span class="kbd">PICKUP</span><br>يستلم بنفسه من المستودع/المستودعات<br><span class="kbd">fulfilment_mode: PICKUP</span></p></div>
+      <div class="flow-arrow">←</div>
+      <div class="flow-step"><div class="icon">🚚</div><h4>2 — توصيل مباشر</h4><p>من المستودع المجهز<br>حسب حالة التجهيز<br><span class="kbd">fulfilment_mode: DELIVERY</span> (للمعمل فقط)</p></div>
+      <div class="flow-arrow">←</div>
+      <div class="flow-step"><div class="icon">🧩</div><h4>3 — طلب مقسوم</h4><p>مقسوم على مستودعين+<br>يحدد المستودع/المستودعات التي يُستلم منها<br>كل جزء يظهر منفصلاً</p></div>
+    </div>
+    <div class="divider"></div>
+    <h4 style="font-size:13px;margin-bottom:8px">حالة التجميع — Consolidation (طلب مقسوم + بدون توصيل)</h4>
+    <div class="diagram">
+      <div class="diag-box"><h4>المستودع الأبعد</h4><p>يرسل حصته</p></div>
+      <div class="diag-arrow">→</div>
+      <div class="diag-box"><h4>المستودع الأقرب للمشتري</h4><p>نقطة التجميع<br><span class="kbd">consolidationWarehouseId</span></p></div>
+      <div class="diag-arrow">→</div>
+      <div class="diag-box"><h4>المشتري</h4><p>يرسل سيارة واحدة<br>يستلم الشحنة كاملة<br><span class="kbd">POST /orders/:id/consolidate</span></p></div>
+    </div>
+    <p style="font-size:12px;color:#64748b">يُعرض فقط للطلب المقسوم غير التوصيل. إذا اكتمل تجهيز كل المستودعات يبدأ التجميع فوراً، وإلا يبدأ عند تجهيز آخر مستودع (مهمة <span class="kbd">PLAN_CONSOLIDATION</span>).</p>
+    <div class="divider"></div>
+    <h4 style="font-size:13px;margin-bottom:8px">التوصيل للطلب المقسوم — Milk-run</h4>
+    <div class="diagram">
+      <div class="diag-box"><h4>شاحنة واحدة</h4><p>تنطلق من الأبعد</p></div>
+      <div class="diag-arrow">→</div>
+      <div class="diag-box"><h4>تمر بالأقرب</h4><p>تحمل كل الحصص<br>بترتيب تنازلي للمسافة</p></div>
+      <div class="diag-arrow">→</div>
+      <div class="diag-box"><h4>المشتري</h4><p>تصل محملة<br><span class="kbd">POST /admin/orders/:id/delivery/plan</span></p></div>
+    </div>
+    <p style="font-size:12px;color:#64748b">طلب التوصيل المقسوم لا يُجمع — يُنفذ كـ milk-run. انظر الفجوة 2 أدناه.</p>
+  </div>
+
+  <div class="card" id="algorithm">
+    <h3>الخوارزمية — تدفق الإسناد</h3>
+    <p class="muted" style="font-size:13px">من التفريغ الصوتي الثاني — مطابقة للكود <span class="kbd">allocation-planner.ts:planAllocation</span></p>
+    <div class="flow">
+      <div class="flow-step" style="border-color:#16a34a"><h4>1) مستودع واحد يغطي؟</h4><p>يُسند مباشرة<br><b>لأقرب</b> مستودع يغطي كامل الطلب<br><span class="kbd">planSingleWarehouse</span></p></div>
+      <div class="flow-arrow">لا ←</div>
+      <div class="flow-step" style="border-color:#ea580c"><h4>2) تقسيم بأقل عدد</h4><p>أقل عدد مستودعات يغطي الطلب<br>ومن بينها <b>أقل مسافة إجمالية</b><br><span class="kbd">planFewestParts</span></p></div>
+      <div class="flow-arrow">لا ←</div>
+      <div class="flow-step" style="border-color:#dc2626"><h4>3) لا تغطية كاملة</h4><p>أفضل تعبئة جزئية (الأقرب أولاً)<br>يُعرض للمشتري ليقرر<br><span class="kbd">PARTIAL_NEEDS_BUYER / NO_STOCK</span></p></div>
+    </div>
+    <div class="divider"></div>
+    <h4 style="font-size:13px;margin-bottom:6px">مراجعة مدير المستودعات</h4>
+    <p style="font-size:12px;color:#64748b">الطلب المقسوم يصل كـ parts معروضة. الإدارة تستعرض البدائل بنفس الحجم مرتبة بالأقرب ثم تطبق اختيارها:</p>
+    <pre class="body-code" style="direction:ltr;text-align:left">GET  /admin/orders/:orderId/modification-options  → كل مجموعات نفس الحجم تغطي الطلب، الأقرب أولاً
+POST /admin/orders/:orderId/modify  { warehouseIds: ["A","C"] }  → يلغي الحالية ويعيد التخصيص (نفس الحجم + تغطية كاملة)</pre>
+    <p style="font-size:12px;color:#64748b;margin-top:8px">مثال: الطلب على A+B — إذا كان B مضغوطاً، المدير يختار A+C من قائمة البدائل.</p>
+    <h4 style="font-size:12px;margin-top:12px">القدرة الاستيعابية</h4>
+    <p style="font-size:12px;color:#64748b">تقسيم الشاحنات لا يُخمن — <span class="kbd">truck_groups: string[][]</span> يحددها المشرف يدوياً لأن بعض المواد بالكيلو وبعضها بالقطعة.</p>
+  </div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- 👤 المشتري (FACTORY / EXTERNAL_PARTNER) — 11 endpoints                      -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+  <div class="role-section" id="role-buyer">
+    <h2>👤 المشتري (المعمل / المنشأة الحرة) <span class="badge gray">11 endpoint</span></h2>
+    <div class="sub">إنشاء الطلب والدفع للتخصيص، قرارات التقسيم/التجميع، تأكيد الاستلام والتقييم والشكاوى. الحماية: <code>JwtAuthGuard + RolesGuard (FACTORY, EXTERNAL_PARTNER) + AccountStatusGuard (ACTIVE)</code>. المنشأة الحرة تُجبر على <code>PICKUP</code>.</div>
+  </div>
+
+  <div class="flow-box">
+    <h3>واجهة المشتري — /orders</h3>
+    <div class="table-wrap">
+      <table class="api-table">
+        <tr><th style="width:74px">الطريقة</th><th style="width:34%">المسار</th><th>الشرح</th><th style="width:80px">الدالة</th><th style="width:50px">Body</th></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/orders/delivery-estimate</td><td>نطاق تكلفة التوصيل (أفضل/أسوأ حالة) دون إنشاء طلب</td><td><span class="hint">estimateDelivery()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">{
   "best_case": { "cost": "12.500", "currency": "JOD" },
   "worst_case": { "cost": "28.000", "currency": "JOD" }
-}</div>
-<h4>الأخطاء</h4><div class="status-list"><span class="status-chip s-400">400 موقع غير محدد</span><span class="status-chip s-403">403 دور غير مسموح</span></div>
-</div></div>
+}</pre></div>
+<div class="body-section"><div class="body-label">⚠️ الأخطاء</div>
+<pre class="body-code">400 موقع غير محدد (يحتاج provinceId)
+403 دور غير مسموح</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/orders/checkout</code><span class="tag">FACTORY / EXTERNAL_PARTNER</span><span class="status-chip s-201">201</span></div>
-<div class="ep-body">
-<p style="font-size:13px">ينشئ الطلب: فحص الحد الأدنى، تجميد الأسعار، إفراغ السلة، تمريره للتخصيص.</p>
-<h4>Body — CheckoutDto</h4>
-<table class="tbl"><tr><th>الحقل</th><th>النوع</th><th>ملاحظة</th></tr>
-<tr><td>fulfilment_mode</td><td>DELIVERY | PICKUP</td><td>اختياري — المنشأة الحرة تُجبر على PICKUP</td></tr>
-<tr><td>accept_partial_fulfilment</td><td>boolean</td><td>الموافقة المسبقة على الشحن الجزئي ضمن التسامح</td></tr></table>
-<div class="code-label"><span>مثال طلب</span></div><div class="code-block">POST /api/v1/orders/checkout
-{
-  "fulfilment_mode": "DELIVERY",
-  "accept_partial_fulfilment": false
-}</div>
-<div class="code-label"><span>استجابة 201 — تم التخصيص</span></div><div class="code-block">{
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/orders/checkout</td><td>ينشئ الطلب: فحص الحد الأدنى، تجميد الأسعار، إفراغ السلة، تمريره للتخصيص</td><td><span class="hint">checkout()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body — CheckoutDto</div>
+<pre class="body-code">{
+  "fulfilment_mode": "DELIVERY",        // DELIVERY | PICKUP — اختياري (المنشأة الحرة تُجبر PICKUP)
+  "accept_partial_fulfilment": false     // boolean — الموافقة المسبقة على الشحن الجزئي ضمن التسامح
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (201) — تم التخصيص</div>
+<pre class="body-code">{
   "message": "Your order was placed and sent to the warehouse(s) for approval.",
   "order_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "order_number": "ORD-2026-0042",
   "result": "ALLOCATED",
   "parts": 2
-}</div>
-<div class="code-label"><span>استجابة — يحتاج قرار المشتري</span></div><div class="code-block">{
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response — يحتاج قرار المشتري</div>
+<pre class="body-code">{
   "message": "Only part of your order is available ...",
   "result": "PARTIAL_NEEDS_BUYER",
   "missingRatio": 0.35
-}</div>
-<div class="status-list"><span class="status-chip s-400">400 حد أدنى غير مستوفى</span><span class="status-chip s-409">409 سلة فارغة</span></div>
-</div></div>
+}</pre></div>
+<div class="body-section"><div class="body-label">⚠️ الأخطاء</div>
+<pre class="body-code">400 حد أدنى غير مستوفى
+409 سلة فارغة</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="GET">
-<div class="ep-head"><span class="badge badge-green">GET</span><code>/api/v1/orders?status=&amp;page=&amp;limit=</code></div>
-<div class="ep-body">
-<p style="font-size:13px">طلبات المشتري، الأحدث أولاً — فلترة اختيارية بالحالة.</p>
-<table class="tbl"><tr><th>Query</th><th>النوع</th><th>افتراضي</th></tr>
-<tr><td>status</td><td>OrderStatus</td><td>الكل</td></tr><tr><td>page</td><td>int ≥1</td><td>1</td></tr><tr><td>limit</td><td>int 1..100</td><td>10</td></tr></table>
-<div class="code-block">GET /api/v1/orders?status=PREPARING&page=1&limit=10
-→ { "data": [ { "order_number": "ORD-...", "status": "PREPARING", "grandTotal": "142.300" } ], "total": 18 }</div>
-</div></div>
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/orders?status=&amp;page=&amp;limit=</td><td>طلبات المشتري، الأحدث أولاً — فلترة اختيارية بالحالة</td><td><span class="hint">listMine()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 Query Params</div>
+<pre class="body-code">status : OrderStatus   // اختياري — أي حالة
+page   : int ≥ 1       // افتراضي 1
+limit  : int 1..100    // افتراضي 10</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">GET /api/v1/orders?status=PREPARING&page=1&limit=10
+→ { "data": [ { "order_number": "ORD-...", "status": "PREPARING", "grandTotal": "142.300" } ], "total": 18 }</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="GET">
-<div class="ep-head"><span class="badge badge-green">GET</span><code>/api/v1/orders/:orderId</code></div>
-<div class="ep-body">
-<p style="font-size:13px">تفاصيل طلب واحد مع كل أجزائه — هنا يظهر التقسيم بوضوح.</p>
-<div class="code-block">GET /api/v1/orders/3fa85f64-5717-4562-b3fc-2c963f66afa6
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/orders/:orderId</td><td>تفاصيل طلب واحد مع كل أجزائه — هنا يظهر التقسيم بوضوح</td><td><span class="hint">detailMine()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 Path Params</div>
+<pre class="body-code">:orderId = UUID  // معرّف الطلب — يجب أن يملكه المشتري</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">GET /api/v1/orders/3fa85f64-5717-4562-b3fc-2c963f66afa6
 → {
   "order_number": "ORD-2026-0042",
   "status": "AWAITING_APPROVAL",
@@ -235,153 +238,171 @@ POST /admin/orders/:orderId/modify  { warehouseIds: ["A","C"] }  → يلغي ا
     { "sequence": 2, "warehouseId": "wh-b", "status": "OFFERED", "goodsTotal": "62.300" }
   ],
   "consolidation": { "can_choose": true, "chosen": false, "consolidation_warehouse_id": "wh-a" }
-}</div>
-</div></div>
+}</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/orders/:orderId/cancel</code><span class="status-chip s-200">200</span></div>
-<div class="ep-body">
-<p style="font-size:13px">إلغاء ما دام ممكناً — 409 إذا بدأ التحضير (نقطة اللاعودة).</p>
-<div class="code-block">POST /api/v1/orders/:orderId/cancel
-{ "reason": "طلبت بالخطأ" }
-→ { "message": "Order cancelled" }</div>
-<div class="status-list"><span class="status-chip s-409">409 بدأ التحضير</span><span class="status-chip s-404">404 ليس طلبك</span></div>
-</div></div>
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/orders/:orderId/cancel</td><td>إلغاء ما دام ممكناً — 409 إذا بدأ التحضير (نقطة اللاعودة)</td><td><span class="hint">cancel()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{ "reason": "طلبت بالخطأ" }</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">POST /api/v1/orders/:orderId/cancel
+→ { "message": "Order cancelled" }</pre></div>
+<div class="body-section"><div class="body-label">⚠️ الأخطاء</div>
+<pre class="body-code">409 بدأ التحضير (نقطة اللاعودة)
+404 ليس طلبك</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/orders/:orderId/partial-decision</code><span class="status-chip s-200">200</span></div>
-<div class="ep-body">
-<p style="font-size:13px">قرار المشتري عند عدم التغطية الكاملة: شحن المتاح أو إلغاء.</p>
-<div class="code-block">POST /api/v1/orders/:orderId/partial-decision
-{ "accept": true }   // أو false للإلغاء
-→ { "message": "Proceeding with available quantity", "result": "ALLOCATED" }</div>
-<div class="status-list"><span class="status-chip s-409">409 لم يعد بانتظار القرار</span></div>
-</div></div>
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/orders/:orderId/partial-decision</td><td>قرار المشتري عند عدم التغطية الكاملة: شحن المتاح أو إلغاء</td><td><span class="hint">decidePartial()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{ "accept": true }   // أو false للإلغاء</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">POST /api/v1/orders/:orderId/partial-decision
+→ { "message": "Proceeding with available quantity", "result": "ALLOCATED" }</pre></div>
+<div class="body-section"><div class="body-label">⚠️ الأخطاء</div>
+<pre class="body-code">409 لم يعد بانتظار القرار</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/orders/:orderId/confirm-rejection</code><span class="status-chip s-200">200</span></div>
-<div class="ep-body">
-<p style="font-size:13px">المشتري يؤكد إغلاق طلب مقسوم رفضته الإدارة — حكم واحد لكل الأجزاء.</p>
-<div class="code-block">POST /api/v1/orders/:orderId/confirm-rejection
-→ { "message": "Rejection confirmed — order closed" }</div>
-<div class="status-list"><span class="status-chip s-409">409 ليس في حالة REJECTED_AWAITING_BUYER</span></div>
-</div></div>
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/orders/:orderId/confirm-rejection</td><td>المشتري يؤكد إغلاق طلب مقسوم رفضته الإدارة — حكم واحد لكل الأجزاء</td><td><span class="hint">confirmRejection()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">POST /api/v1/orders/:orderId/confirm-rejection
+→ { "message": "Rejection confirmed — order closed" }</pre></div>
+<div class="body-section"><div class="body-label">⚠️ الأخطاء</div>
+<pre class="body-code">409 ليس في حالة REJECTED_AWAITING_BUYER</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/orders/:orderId/consolidate</code><span class="status-chip s-200">200</span></div>
-<div class="ep-body">
-<p style="font-size:13px">اختيار التجميع: المستودع الأبعد يرسل حصته إلى الأقرب، المشتري يستلم الكل من مكان واحد. للطلب المقسوم غير التوصيل فقط.</p>
-<div class="code-block">POST /api/v1/orders/:orderId/consolidate
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/orders/:orderId/consolidate</td><td>اختيار التجميع: الأبعد يرسل حصته للأقرب، المشتري يستلم الكل من مكان واحد (للطلب المقسوم غير التوصيل فقط)</td><td><span class="hint">consolidate()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200) — يبدأ التجميع لاحقاً</div>
+<pre class="body-code">POST /api/v1/orders/:orderId/consolidate
 → { "message": "Consolidation chosen — gathering will begin once every warehouse has prepared its part",
-    "consolidation_warehouse_id": "wh-a", "estimated_cost": 8.2, "currency": "JOD" }
-// أو إذا كان كل شيء جاهزاً:
-→ { "message": "Consolidation planned", "trip_count": 1, "trips": [...] }</div>
-<div class="status-list"><span class="status-chip s-400">400 طلب توصيل / ليس مقسوماً</span><span class="status-chip s-409">409 نافذة التجميع انتهت</span></div>
-</div></div>
+    "consolidation_warehouse_id": "wh-a", "estimated_cost": 8.2, "currency": "JOD" }</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200) — كل شيء جاهز</div>
+<pre class="body-code">→ { "message": "Consolidation planned", "trip_count": 1, "trips": [...] }</pre></div>
+<div class="body-section"><div class="body-label">⚠️ الأخطاء</div>
+<pre class="body-code">400 طلب توصيل / ليس مقسوماً
+409 نافذة التجميع انتهت</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/orders/:orderId/confirm-receipt</code><span class="status-chip s-200">200</span></div>
-<div class="ep-body">
-<p style="font-size:13px">المشتري يؤكد وصول البضاعة — الكلمة الأخيرة التي لا يمكن للبائع إعطاؤها نيابة عنه.</p>
-<div class="code-block">POST /api/v1/orders/:orderId/confirm-receipt
-→ { "message": "Receipt confirmed", "status": "DELIVERED" }</div>
-</div></div>
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/orders/:orderId/confirm-receipt</td><td>المشتري يؤكد وصول البضاعة — الكلمة الأخيرة، ثم تُضاف النقاط</td><td><span class="hint">confirmReceipt()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">POST /api/v1/orders/:orderId/confirm-receipt
+→ { "message": "Receipt confirmed", "status": "DELIVERED" }</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/orders/parts/:partId/rating</code><span class="status-chip s-200">200</span></div>
-<div class="ep-body">
-<p style="font-size:13px">تقييم حصة مستودع واحد — لكل جزء على حدة، إعادة التقييم تستبدل السابق.</p>
-<table class="tbl"><tr><th>الحقل</th><th>النوع</th></tr><tr><td>stars</td><td>int 1..5</td></tr><tr><td>note</td><td>string ≤1000 (اختياري)</td></tr></table>
-<div class="code-block">POST /api/v1/orders/parts/abc-123/rating
-{ "stars": 5, "note": "تغليف ممتاز" }
-→ { "message": "Rating saved" }</div>
-</div></div>
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/orders/parts/:partId/rating</td><td>تقييم حصة مستودع واحد — لكل جزء على حدة، إعادة التقييم تستبدل السابق</td><td><span class="hint">ratePart()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{
+  "stars": 5,            // int 1..5، مطلوب
+  "note": "تغليف ممتاز"   // string ≤1000، اختياري
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">POST /api/v1/orders/parts/abc-123/rating
+→ { "message": "Rating saved" }</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/orders/parts/:partId/complaints</code><span class="status-chip s-201">201</span></div>
-<div class="ep-body">
-<p style="font-size:13px">شكوى على جزء — النوع يحدد المسار: نقص/جودة → المستودع، توصيل/فاتورة → الإدارة.</p>
-<table class="tbl"><tr><th>الحقل</th><th>النوع</th></tr>
-<tr><td>kind</td><td>SHORTAGE | QUALITY | DELIVERY | BILLING | OTHER</td></tr>
-<tr><td>description</td><td>string ≤2000</td></tr>
-<tr><td>claimed_shortfall</td><td>number ≥0 (للنقص)</td></tr></table>
-<div class="code-block">POST /api/v1/orders/parts/abc-123/complaints
-{
-  "kind": "SHORTAGE",
-  "description": "وصل 80 كغ بدل 100 كغ",
-  "claimed_shortfall": 20
-}
-→ { "id": "cmp-001", "route": "WAREHOUSE", "status": "OPEN" }</div>
-</div></div>
-</section>
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/orders/parts/:partId/complaints</td><td>شكوى على جزء — النوع يحدد المسار: نقص/جودة → المستودع، توصيل/فاتورة → الإدارة</td><td><span class="hint">createComplaint()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{
+  "kind": "SHORTAGE",             // SHORTAGE | QUALITY | DELIVERY | BILLING | OTHER
+  "description": "وصل 80 كغ بدل 100 كغ",  // string ≤2000
+  "claimed_shortfall": 20          // number ≥0 — للنقص فقط
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (201)</div>
+<pre class="body-code">POST /api/v1/orders/parts/abc-123/complaints
+→ { "id": "cmp-001", "route": "WAREHOUSE", "status": "OPEN" }</pre></div>
+</div></td></tr>
 
-<!-- ============ ADMIN ORDERS ============ -->
-<section id="admin-orders" class="section">
-<h2>الإدارة — <span class="kbd">/admin/orders</span> <span class="count">6 endpoints</span></h2>
-<p class="section-desc">الحماية: <span class="kbd">JwtAuthGuard + PermissionsGuard</span></p>
+      </table>
+    </div>
+  </div>
 
-<div class="endpoint" data-method="GET">
-<div class="ep-head"><span class="badge badge-green">GET</span><code>/api/v1/admin/orders/:orderId/modification-options</code><span class="tag">admin.orders.view</span></div>
-<div class="ep-body">
-<p style="font-size:13px">البدائل التي يمكن للإدارة تحويل الطلب المقسوم إليها — كل مجموعة بنفس عدد مستودعات التقسيم الحالي، الأقرب أولاً، الحالية مستبعدة.</p>
-<div class="code-block">GET /api/v1/admin/orders/3fa85.../modification-options
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- 🔧 الأدمن — الطلبات (6) + الشكاوى (3) + القيود (6) + النقاط (4)            -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+  <div class="role-section" id="role-admin" style="border-color:#f59e0b">
+    <h2>🔧 الأدمن (لوحة الباك اند) <span class="badge gray">19 endpoint</span></h2>
+    <div class="sub">عرض وإدارة الطلبات، اعتماد/رفض/تعديل التقسيم، الشكاوى، القيود التجارية، وقيمة النقطة. الحماية: <code>JwtAuthGuard + PermissionsGuard</code> — صلاحيات <code>admin.orders.view / manage</code> و <code>admin.pricing.manage</code>. ملاحظة: رحلة التوصيل نفسها (Odoo) ليست ضمن صلاحيات ادمن الباك اند — انظر قسم Odoo.</div>
+  </div>
+
+  <div class="flow-box">
+    <h3>إدارة الطلبات — /admin/orders</h3>
+    <div class="table-wrap">
+      <table class="api-table">
+        <tr><th style="width:74px">الطريقة</th><th style="width:34%">المسار</th><th>الشرح</th><th style="width:80px">الدالة</th><th style="width:50px">Body</th></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/admin/orders/:orderId/modification-options</td><td>البدائل التي يمكن للإدارة تحويل الطلب المقسوم إليها — بنفس حجم التقسيم، الأقرب أولاً</td><td><span class="hint">getModificationOptions()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 Path Params</div>
+<pre class="body-code">:orderId = UUID  // معرّف الطلب</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">GET /api/v1/admin/orders/3fa85.../modification-options
 → {
-  "order_id": "3fa85...",
-  "order_number": "ORD-2026-0042",
-  "split_size": 2,
-  "is_split": true,
+  "order_id": "3fa85...", "order_number": "ORD-2026-0042",
+  "split_size": 2, "is_split": true,
   "current": [{ "id": "wh-a", "name": "عمّان 1", "odoo_warehouse_id": 5 }],
   "options": [
     { "warehouses": [{ "id": "wh-a" }, { "id": "wh-c" }], "total_distance_km": 18.4 },
     { "warehouses": [{ "id": "wh-b" }, { "id": "wh-c" }], "total_distance_km": 22.1 }
   ]
-}</div>
-</div></div>
+}</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/admin/orders/:orderId/approve-split</code><span class="tag">admin.orders.manage</span><span class="status-chip s-200">200</span> <span class="badge badge-green" style="font-size:10px">جديد — إصلاح الفجوة 1</span></div>
-<div class="ep-body">
-<p style="font-size:13px">اعتماد التقسيم كما هو: مدير المستودعات (مدير المنطقة) يؤكد مجموعة المستودعات التي اختارتها الخوارزمية (مثلاً A+B) دون تعديل. فقط أثناء <span class="kbd">AWAITING_SPLIT_APPROVAL</span> — لا parts موجودة بعد. بعد الاعتماد تُنشأ الـ parts بحالة <span class="kbd">OFFERED</span> وتُدفع إلى Odoo.</p>
-<div class="code-block">POST /api/v1/admin/orders/3fa85.../approve-split
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/admin/orders/:orderId/approve-split</td><td>اعتماد التقسيم كما هو (أثناء AWAITING_SPLIT_APPROVAL) — تُنشأ الـ parts بحالة OFFERED وتُدفع لـ Odoo</td><td><span class="hint">approveSplit()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200) — إصلاح الفجوة 1</div>
+<pre class="body-code">POST /api/v1/admin/orders/3fa85.../approve-split
 → { "message": "Split approved — order sent to warehouses",
-    "warehouses": [{ "id": "wh-a" }, { "id": "wh-b" }], "parts": 2 }</div>
-<div class="status-list"><span class="status-chip s-409">409 ليس في حالة AWAITING_SPLIT_APPROVAL</span><span class="status-chip s-400">400 لا تغطية</span></div>
-</div></div>
+    "warehouses": [{ "id": "wh-a" }, { "id": "wh-b" }], "parts": 2 }</pre></div>
+<div class="body-section"><div class="body-label">⚠️ الأخطاء</div>
+<pre class="body-code">409 ليس في حالة AWAITING_SPLIT_APPROVAL
+400 لا تغطية</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/admin/orders/:orderId/reject-split</code><span class="tag">admin.orders.manage</span><span class="status-chip s-200">200</span> <span class="badge badge-green" style="font-size:10px">جديد — رفض المقسوم</span></div>
-<div class="ep-body">
-<p style="font-size:13px">رفض الطلب المقسوم ككل: مدير المستودعات يرفض التخصيص دون بديل يرضيه. فقط أثناء <span class="kbd">AWAITING_SPLIT_APPROVAL</span> — ينتقل إلى <span class="kbd">REJECTED_AWAITING_BUYER</span> ليؤكده المشتري (نفس حكم رفض مدير المستودع بعد إنشاء الـ parts للطلب المقسوم).</p>
-<div class="code-block">POST /api/v1/admin/orders/3fa85.../reject-split
-{ "reason": "المستودعات المقترحة تحت الضغط" }
-→ { "message": "Split rejected — awaiting buyer confirmation", "status": "REJECTED_AWAITING_BUYER" }</div>
-<div class="status-list"><span class="status-chip s-409">409 ليس في حالة AWAITING_SPLIT_APPROVAL</span></div>
-</div></div>
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/admin/orders/:orderId/reject-split</td><td>رفض الطلب المقسوم ككل (أثناء AWAITING_SPLIT_APPROVAL) → REJECTED_AWAITING_BUYER</td><td><span class="hint">rejectSplit()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{ "reason": "المستودعات المقترحة تحت الضغط" }</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">POST /api/v1/admin/orders/3fa85.../reject-split
+→ { "message": "Split rejected — awaiting buyer confirmation", "status": "REJECTED_AWAITING_BUYER" }</pre></div>
+<div class="body-section"><div class="body-label">⚠️ الأخطاء</div>
+<pre class="body-code">409 ليس في حالة AWAITING_SPLIT_APPROVAL</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/admin/orders/:orderId/modify</code><span class="tag">admin.orders.manage</span><span class="status-chip s-200">200</span></div>
-<div class="ep-body">
-<p style="font-size:13px">تطبيق التعديل: إعادة توجيه الطلب المقسوم إلى المستودعات المختارة. يعمل أثناء <span class="kbd">AWAITING_SPLIT_APPROVAL</span> (قبل إنشاء الـ parts) أو <span class="kbd">AWAITING_APPROVAL</span> (يلغي الحالية ويعيد الإنشاء). يجب أن يكون بنفس الحجم ويغطي الطلب كاملاً.</p>
-<div class="code-block">POST /api/v1/admin/orders/3fa85.../modify
-{ "warehouseIds": ["wh-a", "wh-c"] }
-→ { "message": "Order re-routed to the chosen warehouses", "parts": 2 }</div>
-<div class="status-list"><span class="status-chip s-400">400 حجم مختلف / لا تغطي الطلب</span><span class="status-chip s-409">409 لم يعد قابلاً للتعديل</span></div>
-</div></div>
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/admin/orders/:orderId/modify</td><td>تطبيق التعديل: إعادة توجيه الطلب المقسوم لمستودعات مختارة (نفس الحجم + تغطية كاملة)</td><td><span class="hint">modifySplit()</span></td><td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{ "warehouseIds": ["wh-a", "wh-c"] }</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">POST /api/v1/admin/orders/3fa85.../modify
+→ { "message": "Order re-routed to the chosen warehouses", "parts": 2 }</pre></div>
+<div class="body-section"><div class="body-label">⚠️ الأخطاء</div>
+<pre class="body-code">400 حجم مختلف / لا يغطي الطلب
+409 لم يعد قابلاً للتعديل</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="GET">
-<div class="ep-head"><span class="badge badge-green">GET</span><code>/api/v1/admin/orders?status=&amp;page=&amp;limit=</code><span class="tag">admin.orders.view</span></div>
-<div class="ep-body">
-<p style="font-size:13px">كل طلبات كل المشترين، الأحدث أولاً — فلترة اختيارية بالحالة.</p>
-<div class="code-block">GET /api/v1/admin/orders?status=REJECTED_AWAITING_BUYER
-→ { "data": [...], "total": 4 }</div>
-</div></div>
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/admin/orders?status=&amp;page=&amp;limit=</td><td>كل طلبات كل المشترين، الأحدث أولاً — فلترة اختيارية بالحالة</td><td><span class="hint">listAll()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 Query Params</div>
+<pre class="body-code">status : OrderStatus   // اختياري
+page   : int ≥ 1       // افتراضي 1
+limit  : int 1..100    // افتراضي 10</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">GET /api/v1/admin/orders?status=REJECTED_AWAITING_BUYER
+→ { "data": [...], "total": 4 }</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/admin/orders</code><span class="tag">admin.orders.manage</span><span class="status-chip s-201">201</span></div>
-<div class="ep-body">
-<p style="font-size:13px">إنشاء طلب نيابة عن مشترٍ (مصنع/منشأة حرة) — المسار التعويضي عند فشل طلب المشتري.</p>
-<div class="code-block">POST /api/v1/admin/orders
-{
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/admin/orders</td><td>إنشاء طلب نيابة عن مشترٍ (مصنع/منشأة حرة) — المسار التعويضي</td><td><span class="hint">createForBuyer()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{
   "buyerAccountId": "acc-factory-1",
   "items": [
     { "productId": "prod-xyz", "quantity": 50, "conditionCode": "GOOD" },
@@ -389,349 +410,373 @@ POST /admin/orders/:orderId/modify  { warehouseIds: ["A","C"] }  → يلغي ا
   ],
   "fulfilmentMode": "DELIVERY",
   "acceptPartialFulfilment": false
-}
-→ { "order_id": "...", "order_number": "ORD-2026-0043", "result": "ALLOCATED" }</div>
-<div class="status-list"><span class="status-chip s-404">404 حساب المشتري غير موجود / لا يمكنه الطلب</span></div>
-</div></div>
-</section>
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (201)</div>
+<pre class="body-code">→ { "order_id": "...", "order_number": "ORD-2026-0043", "result": "ALLOCATED" }</pre></div>
+<div class="body-section"><div class="body-label">⚠️ الأخطاء</div>
+<pre class="body-code">404 حساب المشتري غير موجود / لا يمكنه الطلب</pre></div>
+</div></td></tr>
 
-<!-- ============ DELIVERY TRIPS ============ -->
-<section id="delivery" class="section">
-<h2>التوصيل — رحلة التوصيل <span class="badge badge-gray">Odoo + Webhook — غير مرئية لادمن الباك اند</span></h2>
-<p class="section-desc">التوصيل مؤتمت بالكامل + منفذ في Odoo — التخطيط والشاحنة/السائق تُدفع إلى Odoo عند الجاهزية (<span class="kbd">DeliveryTripService → Odoo</span>). رحلة التوصيل تظهر بين <b>واجهة السائق في Odoo</b> و<b>ادمن المستودعات (واجهة Odoo)</b> الذي يتتبع السائق. <b>ادمن الباك اند لا يرى تفاصيل الرحلة</b> — المسارات الستة أدناه كانت لادمن الباك اند وتمت إزالتها؛ التتبع الآن عبر Webhook فقط. Milk-run يبدأ من الأبعد ويمر بالأقرب.</p>
-<div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:10px;font-size:12px;margin-bottom:14px">⚠ المسارات الستة التالية <b>محذوفة من الباك اند</b> (كانت <span class="kbd">admin.orders.view/manage</span>) — موثقة هنا للمرجع وتاريخ الإزالة. التتبع الحالي: السائق يؤكد الاستلام من المستودع عبر Odoo → Webhook <span class="kbd">POST /odoo/webhooks/delivery</span> → المعمل يؤكد الاستلام الكامل عبر <span class="kbd">POST /orders/:id/confirm-receipt</span> → تُضاف النقاط.</div>
+      </table>
+    </div>
+  </div>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/admin/orders/:orderId/delivery/plan</code><span class="tag">admin.orders.manage</span></div>
-<div class="ep-body">
-<p style="font-size:13px">يبني المسار/المسارات ويسعرها بالسعر الساري اليوم.</p>
-<table class="tbl"><tr><th>الحقل</th><th>النوع</th><th>ملاحظة</th></tr>
-<tr><td>truck_groups</td><td>string[][]</td><td>اختياري — كل مصفوفة داخلية = شاحنة. إن لم يُرسل فالكل على شاحنة واحدة</td></tr></table>
-<div class="code-block">POST /api/v1/admin/orders/3fa85.../delivery/plan
-{ "truck_groups": [["part-a","part-b"], ["part-c"]] }  // أو {} لشاحنة واحدة
+  <div class="flow-box">
+    <h3>الشكاوى — /admin/orders/complaints</h3>
+    <div class="table-wrap">
+      <table class="api-table">
+        <tr><th style="width:74px">الطريقة</th><th style="width:34%">المسار</th><th>الشرح</th><th style="width:80px">الدالة</th><th style="width:50px">Body</th></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/admin/orders/complaints?status=&amp;route=&amp;kind=&amp;page=&amp;limit=</td><td>كل الشكاوى — فلترة حسب الحالة/المسار/النوع</td><td><span class="hint">listComplaints()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">🔍 Query Params</div>
+<pre class="body-code">status : OPEN | IN_REVIEW | RESOLVED | REJECTED
+route  : WAREHOUSE | ADMIN
+kind   : SHORTAGE | QUALITY | DELIVERY | BILLING | OTHER</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">GET /api/v1/admin/orders/complaints?route=ADMIN&status=OPEN
+→ { "data": [{ "id": "cmp-001", "kind": "DELIVERY", "route": "ADMIN", "status": "OPEN" }], "total": 12 }</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/admin/orders/complaints/:id</td><td>تفاصيل شكوى واحدة</td><td><span class="hint">getComplaint()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">GET /api/v1/admin/orders/complaints/cmp-001
+→ { "id": "cmp-001", "kind": "SHORTAGE", "description": "...", "claimed_shortfall": 20, "status": "OPEN" }</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-patch">PATCH</span></td><td class="mono">/api/v1/admin/orders/complaints/:id</td><td>حل/رفض/مراجعة شكوى (توصيل/فاتورة/غير مصنف من صلاحية الأدمن)</td><td><span class="hint">resolveComplaint()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{
+  "status": "RESOLVED",       // RESOLVED | REJECTED | IN_REVIEW
+  "resolution": "تم التعويض"   // string ≤2000، اختياري
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">PATCH /api/v1/admin/orders/complaints/cmp-001
+→ { "id": "cmp-001", "status": "RESOLVED" }</pre></div>
+</div></td></tr>
+
+      </table>
+    </div>
+  </div>
+
+  <div class="flow-box">
+    <h3>القيود التجارية — /admin/order-constraints</h3>
+    <div class="table-wrap">
+      <table class="api-table">
+        <tr><th style="width:74px">الطريقة</th><th style="width:34%">المسار</th><th>الشرح</th><th style="width:80px">الدالة</th><th style="width:50px">Body</th></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/admin/order-constraints/minimums</td><td>جلب الحدود الدنيا للطلب لكل دور</td><td><span class="hint">getMinimums()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">GET /api/v1/admin/order-constraints/minimums
+→ { "message": "Order minimums fetched",
+    "result": [{ "role": "FACTORY", "minOrderValue": "100.000", "currency": "JOD", "isActive": true }] }</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-put">PUT</span></td><td class="mono">/api/v1/admin/order-constraints/minimums/:role</td><td>إنشاء/تحديث الحد الأدنى لدور (PUT لأن الدور هو المفتاح)</td><td><span class="hint">saveMinimum()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">PUT /api/v1/admin/order-constraints/minimums/FACTORY
+{ "min_order_value": 150, "currency": "JOD", "is_active": true }</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">→ { "message": "Order minimum saved", "result": { "role": "FACTORY", "minOrderValue": "150.000" } }</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-delete">DELETE</span></td><td class="mono">/api/v1/admin/order-constraints/minimums/:role</td><td>حذف الحد الأدنى لدور</td><td><span class="hint">removeMinimum()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">DELETE /api/v1/admin/order-constraints/minimums/FACTORY
+→ { "message": "Order minimum removed" }</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/admin/order-constraints/spending-caps</td><td>جلب سقوف الإنفاق لكل دور</td><td><span class="hint">getCaps()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">GET /api/v1/admin/order-constraints/spending-caps
+→ { "message": "Spending caps fetched",
+    "result": [{ "role": "FACTORY", "maxAmount": "5000.000", "period": "MONTHLY", "currency": "JOD" }] }</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-put">PUT</span></td><td class="mono">/api/v1/admin/order-constraints/spending-caps/:role</td><td>إنشاء/تحديث سقف الإنفاق لدور</td><td><span class="hint">saveCap()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">PUT /api/v1/admin/order-constraints/spending-caps/FACTORY
+{ "max_amount": 5000, "period": "MONTHLY", "currency": "JOD", "is_active": true }</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">→ { "message": "Spending cap saved", "result": { "role": "FACTORY", "maxAmount": "5000.000" } }</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-delete">DELETE</span></td><td class="mono">/api/v1/admin/order-constraints/spending-caps/:role</td><td>حذف سقف الإنفاق لدور</td><td><span class="hint">removeCap()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">DELETE /api/v1/admin/order-constraints/spending-caps/FACTORY
+→ { "message": "Spending cap removed" }</pre></div>
+</div></td></tr>
+
+      </table>
+    </div>
+  </div>
+
+  <div class="flow-box">
+    <h3>النقاط والعملة — /admin/points-rate · /admin/platform-settings</h3>
+    <div class="table-wrap">
+      <table class="api-table">
+        <tr><th style="width:74px">الطريقة</th><th style="width:34%">المسار</th><th>الشرح</th><th style="width:80px">الدالة</th><th style="width:50px">Body</th></tr>
+
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/admin/points-rate</td><td>جلب قيمة النقطة لكل دور</td><td><span class="hint">getPointsRate()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">GET /api/v1/admin/points-rate
+→ [{ "role": "FACTORY", "amount_per_point": "100.000", "currency": "SYP" }]</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/admin/points-rate</td><td>تعيين قيمة النقطة لدور</td><td><span class="hint">setPointsRate()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">POST /api/v1/admin/points-rate
+{ "role": "FACTORY", "amount_per_point": 100 }   // 1 نقطة = 100 عملة</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-patch">PATCH</span></td><td class="mono">/api/v1/admin/points-rate/:role</td><td>تحديث قيمة النقطة لدور</td><td><span class="hint">updatePointsRate()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">PATCH /api/v1/admin/points-rate/FACTORY
+{ "amount_per_point": 100 }</pre></div>
+</div></td></tr>
+
+<tr><td><span class="m m-patch">PATCH</span></td><td class="mono">/api/v1/admin/platform-settings</td><td>تعيين العملة المركزية (تُستخدم لكل الـ rates)</td><td><span class="hint">updatePlatformSettings()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">PATCH /api/v1/admin/platform-settings
+{ "default_currency": "SYP" }</pre></div>
+<div class="body-section"><div class="body-label">📝 ملاحظة</div>
+<pre class="body-code">العملة من platform-settings.default_currency، لا تُحدد لكل rate.</pre></div>
+</div></td></tr>
+
+      </table>
+    </div>
+  </div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- 🚚 Odoo / التوصيل — 6 endpoints (محذوفة من الباك اند)                      -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+  <div class="role-section" id="role-odoo" style="border-color:#7c3aed">
+    <h2>🚚 Odoo / رحلة التوصيل <span class="badge gray">6 endpoint — محذوفة من الباك اند</span></h2>
+    <div class="sub">التوصيل مؤتمت بالكامل + منفذ في Odoo — التخطيط والشاحنة/السائق تُدفع إلى Odoo عند الجاهزية (<code>DeliveryTripService → Odoo</code>). رحلة التوصيل تظهر بين واجهة السائق في Odoo وادمن المستودعات (واجهة Odoo). <b>ادمن الباك اند لا يرى تفاصيل الرحلة</b> — المسارات الستة أدناه كانت لادمن الباك اند وتمت إزالتها؛ التتبع الآن عبر Webhook فقط. Milk-run يبدأ من الأبعد ويمر بالأقرب.</div>
+  </div>
+
+  <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:10px;font-size:12px;margin:0 0 14px">⚠ المسارات الستة التالية <b>محذوفة من الباك اند</b> (كانت <code>admin.orders.view/manage</code>) — موثقة هنا للمرجع وتاريخ الإزالة. التتبع الحالي: السائق يؤكد الاستلام من المستودع عبر Odoo → Webhook <code>POST /odoo/webhooks/delivery</code> → المعمل يؤكد الاستلام الكامل عبر <code>POST /orders/:id/confirm-receipt</code> → تُضاف النقاط.</div>
+
+  <div class="flow-box">
+    <h3>رحلة التوصيل — /admin/orders (محذوفة)</h3>
+    <div class="table-wrap">
+      <table class="api-table">
+        <tr><th style="width:74px">الطريقة</th><th style="width:34%">المسار</th><th>الشرح</th><th style="width:80px">الدالة</th><th style="width:50px">Body</th></tr>
+
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/admin/orders/:orderId/delivery/plan</td><td>يبني المسار/المسارات ويسعرها بالسعر الساري — محذوف من الباك اند</td><td><span class="hint">planDelivery()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{
+  "truck_groups": [["part-a","part-b"], ["part-c"]]   // string[][] — اختياري؛ إن لم يُرسل فالكل على شاحنة واحدة
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">POST /api/v1/admin/orders/3fa85.../delivery/plan
 → { "message": "Delivery planned", "trip_count": 1,
-    "trips": [{ "tripNumber": "TRIP-001", "status": "PLANNED", "stops": [...] }] }</div>
-</div></div>
+    "trips": [{ "tripNumber": "TRIP-001", "status": "PLANNED", "stops": [...] }] }</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="GET">
-<div class="ep-head"><span class="badge badge-green">GET</span><code>/api/v1/admin/orders/:orderId/delivery</code><span class="tag">admin.orders.view</span></div>
-<div class="ep-body">
-<p style="font-size:13px">ما هو مخطط أو قيد التشغيل لهذا الطلب.</p>
-<div class="code-block">GET /api/v1/admin/orders/3fa85.../delivery
-→ { "trips": [{ "tripNumber": "TRIP-001", "status": "IN_PROGRESS", "stops": [...] }] }</div>
-</div></div>
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/admin/orders/:orderId/delivery</td><td>ما هو مخطط أو قيد التشغيل لهذا الطلب — محذوف من الباك اند</td><td><span class="hint">getDelivery()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">GET /api/v1/admin/orders/3fa85.../delivery
+→ { "trips": [{ "tripNumber": "TRIP-001", "status": "IN_PROGRESS", "stops": [...] }] }</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/admin/orders/delivery/trips/:tripId/assign</code><span class="tag">admin.orders.manage</span></div>
-<div class="ep-body">
-<p style="font-size:13px">تعيين شاحنة وسائق (من Odoo) لرحلة مخططة.</p>
-<div class="code-block">POST /api/v1/admin/orders/delivery/trips/trip-uuid/assign
-{
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/admin/orders/delivery/trips/:tripId/assign</td><td>تعيين شاحنة وسائق (من Odoo) لرحلة مخططة — محذوف من الباك اند</td><td><span class="hint">assignTrip()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{
   "odoo_truck_id": 12,
   "odoo_driver_id": 45,
   "driver_name": "أحمد",
   "driver_phone": "0790000000"
-}
-→ { "tripNumber": "TRIP-001", "status": "ASSIGNED" }</div>
-</div></div>
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">POST /api/v1/admin/orders/delivery/trips/trip-uuid/assign
+→ { "tripNumber": "TRIP-001", "status": "ASSIGNED" }</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="GET">
-<div class="ep-head"><span class="badge badge-green">GET</span><code>/api/v1/admin/orders/delivery/drivers/:odooDriverId/trips</code><span class="tag">admin.orders.view</span></div>
-<div class="ep-body">
-<p style="font-size:13px">قائمة رحلات سائق — بمُعرّف Odoo لأن السائقين لا يملكون حساباً في الـ backend.</p>
-<div class="code-block">GET /api/v1/admin/orders/delivery/drivers/45/trips
-→ { "trips": [{ "tripNumber": "TRIP-001", "stops": [...] }] }</div>
-</div></div>
+<tr><td><span class="m m-get">GET</span></td><td class="mono">/api/v1/admin/orders/delivery/drivers/:odooDriverId/trips</td><td>قائمة رحلات سائق — بمُعرّف Odoo (لا حساب لهم في الباك اند) — محذوف من الباك اند</td><td><span class="hint">driverTrips()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">GET /api/v1/admin/orders/delivery/drivers/45/trips
+→ { "trips": [{ "tripNumber": "TRIP-001", "stops": [...] }] }</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/admin/orders/delivery/trips/:tripId/stops/:stopId/pickup</code><span class="tag">admin.orders.manage</span></div>
-<div class="ep-body">
-<p style="font-size:13px">السائق يؤكد استلام بضاعة مستودع واحد — تسليم العهدة.</p>
-<div class="code-block">POST /api/v1/admin/orders/delivery/trips/trip-uuid/stops/stop-uuid/pickup
-{ "note": "تم الاستلام 10:30" }
-→ { "status": "IN_PROGRESS" }</div>
-</div></div>
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/admin/orders/delivery/trips/:tripId/stops/:stopId/pickup</td><td>السائق يؤكد استلام بضاعة مستودع واحد — محذوف من الباك اند</td><td><span class="hint">confirmPickup()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body</div>
+<pre class="body-code">{ "note": "تم الاستلام 10:30" }</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (200)</div>
+<pre class="body-code">POST /api/v1/admin/orders/delivery/trips/trip-uuid/stops/stop-uuid/pickup
+→ { "status": "IN_PROGRESS" }</pre></div>
+</div></td></tr>
 
-<div class="endpoint" data-method="POST" style="opacity:.55">
-<div class="ep-head"><span class="badge badge-gray">محذوف</span><code>/api/v1/admin/orders/delivery/trips/:tripId/complete</code><span class="tag">كان admin.orders.manage</span></div>
-<div class="ep-body">
-<p style="font-size:13px">كان السائق يسلم الحمولة عند المشتري — الآن <b>السائق يؤكد في Odoo</b> → Webhook <span class="kbd">completed</span>؛ المعمل يؤكد عبر <span class="kbd">POST /orders/:id/confirm-receipt</span>.</p>
-<div class="code-block">POST /api/v1/admin/orders/delivery/trips/trip-uuid/complete
-→ محذوف — استبدل بـ Odoo Webhook</div>
-</div></div>
-</section>
+<tr><td><span class="m m-post" style="opacity:.6">محذوف</span></td><td class="mono">/api/v1/admin/orders/delivery/trips/:tripId/complete</td><td>كان السائق يسلم الحمولة عند المشتري — استبدل بـ Odoo Webhook</td><td><span class="hint">completeTrip()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📥 الحالة</div>
+<pre class="body-code">POST /api/v1/admin/orders/delivery/trips/trip-uuid/complete
+→ محذوف — استبدل بـ Odoo Webhook (event=completed)</pre></div>
+</div></td></tr>
 
-<!-- ============ تأكيد الاستلام والنقاط ============ -->
-<section id="receipt-points" class="section">
-<h2>تأكيد الاستلام والنقاط — السائق + المعمل</h2>
-<p class="section-desc">السائق يؤكد استلام كل مستودع، والمعمل يؤكد الاستلام الكامل فتُضاف النقاط — محقق بالكامل</p>
-<div class="endpoint gap ok">
-<div class="ep-head"><span class="badge badge-green">محقق ✓</span> السائق يؤكد من المستودع</div>
-<div class="ep-body">
-<p style="font-size:13px">السائق (في Odoo) يؤكد استلام كل مستودع على حدة — يصل للباك اند كـ <span class="kbd">POST /odoo/webhooks/delivery event=picked_up</span> → القطعة <span class="kbd">DISPATCHED</span>. يتبعها ادمن المستودعات في واجهة Odoo، لا يراها ادمن الباك اند.</p>
-<div class="code-block">POST /api/v1/odoo/webhooks/delivery  { event:"picked_up", backend_trip_id, backend_stop_id } → 202
-→ تكراره لكل مستودع حتى اكتمال الرحلة</div>
-</div></div>
-<div class="endpoint gap ok">
-<div class="ep-head"><span class="badge badge-green">محقق ✓</span> المعمل يؤكد الاستلام الكامل → نقاط</div>
-<div class="ep-body">
-<p style="font-size:13px">بعد وصول كل القطع <span class="kbd">DELIVERED</span>، المعمل (FACTORY/EXTERNAL_PARTNER) يؤكد: <span class="kbd">POST /orders/:orderId/confirm-receipt</span> → <span class="kbd">COMPLETED</span> + <span class="kbd">points_awarded</span>.</p>
-<div class="code-block">POST /api/v1/orders/3fa85.../confirm-receipt → { status:"COMPLETED", grand_total:3000, currency:"SYP", points_awarded:30, points_balance:128 }</div>
-<p style="font-size:12px;margin-top:8px">الحساب: <span class="kbd">points = floor(grandTotal / amountPerPoint)</span> — مثلاً <span class="kbd">amount_per_point=100</span> و <span class="kbd">grandTotal=3000 → 30 نقطة</span>. يتم عبر <span class="kbd">PointsWalletService.awardForOrder</span> (best-effort: الاستلام ينجح حتى بلا رصيد).</p>
-</div></div>
-<div class="endpoint gap ok">
-<div class="ep-head"><span class="badge badge-green">محقق ✓</span> الادمن يحدد قيمة النقطة</div>
-<div class="ep-body">
-<p style="font-size:13px">الادمن يحدد كم تساوي النقطة بالعملة لكل دور:</p>
-<div class="code-block">GET  /api/v1/admin/points-rate → [{ role:"FACTORY", amount_per_point:"100.000", currency:"SYP" }]
-POST /api/v1/admin/points-rate { role:"FACTORY", amount_per_point:100 }        // 1 نقطة = 100 عملة
-PATCH /api/v1/admin/points-rate/FACTORY { amount_per_point:100 }
-PATCH /api/v1/admin/platform-settings { default_currency:"SYP" }                 // العملة المركزية</div>
-<p style="font-size:12px;color:var(--muted)">العملة من <span class="kbd">platform-settings.default_currency</span>، لا تُحدد لكل rate.</p>
-</div></div>
-</section>
+      </table>
+    </div>
+  </div>
 
-<!-- ============ COMPLAINTS ============ -->
-<section id="complaints" class="section">
-<h2>الشكاوى — <span class="kbd">/admin/orders/complaints</span> <span class="count">3 endpoints</span></h2>
-<p class="section-desc">مكتب شكاوى الإدارة — يرى كل الشكاوى ويجيب على ما يخصه (توصيل/فاتورة/غير مصنف)</p>
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- 📡 Webhook — 1 endpoint                                                   -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
 
-<div class="endpoint" data-method="GET">
-<div class="ep-head"><span class="badge badge-green">GET</span><code>/api/v1/admin/orders/complaints?status=&amp;route=&amp;kind=&amp;page=&amp;limit=</code><span class="tag">admin.orders.view</span></div>
-<div class="ep-body">
-<table class="tbl"><tr><th>Query</th><th>النوع</th></tr>
-<tr><td>status</td><td>OPEN | IN_REVIEW | RESOLVED | REJECTED</td></tr>
-<tr><td>route</td><td>WAREHOUSE | ADMIN</td></tr>
-<tr><td>kind</td><td>SHORTAGE | QUALITY | DELIVERY | BILLING | OTHER</td></tr></table>
-<div class="code-block">GET /api/v1/admin/orders/complaints?route=ADMIN&status=OPEN
-→ { "data": [{ "id": "cmp-001", "kind": "DELIVERY", "route": "ADMIN", "status": "OPEN" }], "total": 12 }</div>
-</div></div>
+  <div class="role-section" id="role-webhook" style="border-color:#0ea5e9">
+    <h2>📡 Webhook التوصيل — Odoo <span class="badge gray">1 endpoint</span></h2>
+    <div class="sub">أحداث الرحلة القادمة من Odoo — السائق ينفذ الرحلة في Odoo ويُبلغ الـ backend ليحرك الأجزاء. مصادقة بسر مشترك <code>x-odoo-webhook-secret</code> بمقارنة آمنة زمنياً.</div>
+  </div>
 
-<div class="endpoint" data-method="GET">
-<div class="ep-head"><span class="badge badge-green">GET</span><code>/api/v1/admin/orders/complaints/:id</code><span class="tag">admin.orders.view</span></div>
-<div class="ep-body">
-<div class="code-block">GET /api/v1/admin/orders/complaints/cmp-001
-→ { "id": "cmp-001", "kind": "SHORTAGE", "description": "...", "claimed_shortfall": 20, "status": "OPEN" }</div>
-</div></div>
+  <div class="flow-box">
+    <h3>أحداث الرحلة — /odoo/webhooks/delivery</h3>
+    <div class="table-wrap">
+      <table class="api-table">
+        <tr><th style="width:74px">الطريقة</th><th style="width:34%">المسار</th><th>الشرح</th><th style="width:80px">الدالة</th><th style="width:50px">Body</th></tr>
 
-<div class="endpoint" data-method="PATCH">
-<div class="ep-head"><span class="badge badge-purple">PATCH</span><code>/api/v1/admin/orders/complaints/:id</code><span class="tag">admin.orders.manage</span></div>
-<div class="ep-body">
-<table class="tbl"><tr><th>الحقل</th><th>النوع</th></tr><tr><td>status</td><td>RESOLVED | REJECTED | IN_REVIEW</td></tr><tr><td>resolution</td><td>string ≤2000 (اختياري)</td></tr></table>
-<div class="code-block">PATCH /api/v1/admin/orders/complaints/cmp-001
-{ "status": "RESOLVED", "resolution": "تم التعويض" }
-→ { "id": "cmp-001", "status": "RESOLVED" }</div>
-</div></div>
-</section>
-
-<!-- ============ CONSTRAINTS ============ -->
-<section id="constraints" class="section">
-<h2>القيود التجارية — <span class="kbd">/admin/order-constraints</span> <span class="count">6 endpoints</span></h2>
-<p class="section-desc">الصلاحية: <span class="kbd">admin.pricing.manage</span> — الأرضية (الحد الأدنى) والسقف (سقف الإنفاق) لكل دور</p>
-
-<div class="endpoint" data-method="GET">
-<div class="ep-head"><span class="badge badge-green">GET</span><code>/api/v1/admin/order-constraints/minimums</code><span class="tag">admin.pricing.manage</span></div>
-<div class="ep-body"><div class="code-block">GET /api/v1/admin/order-constraints/minimums
-→ { "message": "Order minimums fetched",
-    "result": [{ "role": "FACTORY", "minOrderValue": "100.000", "currency": "JOD", "isActive": true }] }</div></div></div>
-
-<div class="endpoint" data-method="PUT">
-<div class="ep-head"><span class="badge badge-blue">PUT</span><code>/api/v1/admin/order-constraints/minimums/:role</code><span class="tag">admin.pricing.manage</span></div>
-<div class="ep-body">
-<p style="font-size:13px">إنشاء/تحديث الحد الأدنى لدور — PUT لأن الدور هو المفتاح كاملاً.</p>
-<div class="code-block">PUT /api/v1/admin/order-constraints/minimums/FACTORY
-{ "min_order_value": 150, "currency": "JOD", "is_active": true }
-→ { "message": "Order minimum saved", "result": { "role": "FACTORY", "minOrderValue": "150.000" } }</div>
-</div></div>
-
-<div class="endpoint" data-method="DELETE">
-<div class="ep-head"><span class="badge badge-red">DELETE</span><code>/api/v1/admin/order-constraints/minimums/:role</code><span class="tag">admin.pricing.manage</span><span class="status-chip s-200">200</span></div>
-<div class="ep-body"><div class="code-block">DELETE /api/v1/admin/order-constraints/minimums/FACTORY
-→ { "message": "Order minimum removed" }</div></div></div>
-
-<div class="endpoint" data-method="GET">
-<div class="ep-head"><span class="badge badge-green">GET</span><code>/api/v1/admin/order-constraints/spending-caps</code><span class="tag">admin.pricing.manage</span></div>
-<div class="ep-body"><div class="code-block">GET /api/v1/admin/order-constraints/spending-caps
-→ { "message": "Spending caps fetched",
-    "result": [{ "role": "FACTORY", "maxAmount": "5000.000", "period": "MONTHLY", "currency": "JOD" }] }</div></div></div>
-
-<div class="endpoint" data-method="PUT">
-<div class="ep-head"><span class="badge badge-blue">PUT</span><code>/api/v1/admin/order-constraints/spending-caps/:role</code><span class="tag">admin.pricing.manage</span></div>
-<div class="ep-body">
-<div class="code-block">PUT /api/v1/admin/order-constraints/spending-caps/FACTORY
-{ "max_amount": 5000, "period": "MONTHLY", "currency": "JOD", "is_active": true }
-→ { "message": "Spending cap saved", "result": { "role": "FACTORY", "maxAmount": "5000.000" } }</div>
-</div></div>
-
-<div class="endpoint" data-method="DELETE">
-<div class="ep-head"><span class="badge badge-red">DELETE</span><code>/api/v1/admin/order-constraints/spending-caps/:role</code><span class="tag">admin.pricing.manage</span><span class="status-chip s-200">200</span></div>
-<div class="ep-body"><div class="code-block">DELETE /api/v1/admin/order-constraints/spending-caps/FACTORY
-→ { "message": "Spending cap removed" }</div></div></div>
-</section>
-
-<!-- ============ WEBHOOK ============ -->
-<section id="webhook" class="section">
-<h2>Webhook التوصيل — <span class="kbd">/odoo/webhooks/delivery</span> <span class="count">1 endpoint</span></h2>
-<p class="section-desc">أحداث الرحلة القادمة من Odoo — السائق ينفذ الرحلة في Odoo ويُبلغ الـ backend ليحرك الأجزاء</p>
-<div class="endpoint" data-method="POST">
-<div class="ep-head"><span class="badge badge-orange">POST</span><code>/api/v1/odoo/webhooks/delivery</code><span class="status-chip s-202">202</span><span class="tag">x-odoo-webhook-secret</span></div>
-<div class="ep-body">
-<p style="font-size:13px">مصادقة بسر مشترك (<span class="kbd">ODOO_WEBHOOK_SECRET</span>) بمقارنة آمنة زمنياً. حدث مكرر لا يُعيد خطأ — يُسجل ويُؤكد (202) وتصحح الفروقات لاحقاً.</p>
-<table class="tbl"><tr><th>الحقل</th><th>النوع</th><th>مطلوب</th></tr>
-<tr><td>event</td><td>string — picked_up | completed</td><td>نعم</td></tr>
-<tr><td>backend_trip_id</td><td>string ≤64</td><td>نعم</td></tr>
-<tr><td>backend_stop_id</td><td>string ≤64</td><td>لـ picked_up</td></tr>
-<tr><td>status / trip_number / picked_up_at</td><td>string</td><td>اختياري</td></tr></table>
-<div class="code-label"><span>مثال — السائق استلم من مستودع</span></div><div class="code-block">POST /api/v1/odoo/webhooks/delivery
-Headers: x-odoo-webhook-secret: &lt;secret&gt;
+<tr><td><span class="m m-post">POST</span></td><td class="mono">/api/v1/odoo/webhooks/delivery</td><td>أحداث picked_up / completed — السائق يؤكد في Odoo فيُحرَّك الطلب؛ 202 دوماً حتى عند التجاهل</td><td><span class="hint">deliveryWebhook()</span></td><td><span class="body-toggle">▼</span></td></tr>
+<tr><td colspan="5"><div class="body-block">
+<div class="body-section"><div class="body-label">📤 Request Body — مثال: السائق استلم من مستودع</div>
+<pre class="body-code">Headers: x-odoo-webhook-secret: &lt;secret&gt;
 {
-  "event": "picked_up",
-  "backend_trip_id": "trip-uuid",
-  "backend_stop_id": "stop-uuid",
+  "event": "picked_up",                 // picked_up | completed
+  "backend_trip_id": "trip-uuid",       // مطلوب
+  "backend_stop_id": "stop-uuid",       // للـ picked_up
   "picked_up_at": "2026-08-22T10:30:00Z"
-}
-→ 202 { "message": "Applied", "applied": true }</div>
-<div class="code-label"><span>مثال — اكتملت الرحلة</span></div><div class="code-block">{
+}</pre></div>
+<div class="body-section"><div class="body-label">📥 Response (202)</div>
+<pre class="body-code">→ 202 { "message": "Applied", "applied": true }</pre></div>
+<div class="body-section"><div class="body-label">📤 مثال: اكتملت الرحلة</div>
+<pre class="body-code">{
   "event": "completed",
   "backend_trip_id": "trip-uuid"
 }
-→ 202 { "message": "Applied", "applied": true }</div>
-<div class="code-label"><span>حدث غير معروف / مكرر</span></div><div class="code-block">→ 202 { "message": "Ignored — unhandled event", "applied": false }
-→ 202 { "message": "Noted", "applied": false }  // مكرر</div>
-<div class="status-list"><span class="status-chip s-403">403 سر غير صحيح</span><span class="status-chip s-202">202 دوماً (حتى عند التجاهل)</span></div>
-</div></div>
-</section>
+→ 202 { "message": "Applied", "applied": true }</pre></div>
+<div class="body-section"><div class="body-label">📥 أحداث غير معروفة / مكررة</div>
+<pre class="body-code">→ 202 { "message": "Ignored — unhandled event", "applied": false }
+→ 202 { "message": "Noted", "applied": false }   // مكرر</pre></div>
+<div class="body-section"><div class="body-label">⚠️ الأخطاء</div>
+<pre class="body-code">403 سر غير صحيح
+202 دوماً حتى عند التجاهل</pre></div>
+</div></td></tr>
 
-<!-- ============ ENUMS ============ -->
-<section id="enums" class="section">
-<h2>مرجع الحالات</h2>
-<div class="enum-grid">
-<div>
-<h3 style="font-size:13px;margin-bottom:8px">OrderStatus — حالة الطلب</h3>
-<table class="tbl"><tr><th>القيمة</th><th>المعنى</th></tr>
-<tr><td>PENDING_ALLOCATION</td><td>قيد اختيار المستودعات</td></tr>
-<tr><td>AWAITING_APPROVAL</td><td>معروض على مدراء المستودعات — الكل يجب أن يقبل</td></tr>
-<tr><td>NEEDS_CUSTOMER_DECISION</td><td>لا تغطية كاملة — المشتري يقرر</td></tr>
-<tr><td>REJECTED_AWAITING_BUYER</td><td>طلب مقسوم رفضته الإدارة — ينتظر تأكيد المشتري</td></tr>
-<tr><td>NEEDS_ADMIN</td><td>استنفد محاولات التخصيص — تدخل بشري</td></tr>
-<tr><td style="background:#dcfce7">AWAITING_SPLIT_APPROVAL <span class="badge badge-green" style="font-size:9px">جديد</span></td><td>مقسوم بانتظار مدير المستودعات (A+B→A+C أو اعتماد)</td></tr>
-<tr><td>PREPARING</td><td>الكل قَبِل — نقطة اللاعودة</td></tr>
-<tr><td>IN_TRANSIT</td><td>على الطريق (توصيل)</td></tr>
-<tr><td>CONSOLIDATING</td><td>يُجمع في أقرب مستودع</td></tr>
-<tr><td>READY_FOR_PICKUP</td><td>جاهز للاستلام</td></tr>
-<tr><td>DELIVERED</td><td>تم التسليم</td></tr>
-<tr><td>COMPLETED</td><td>أكد الاستلام وقيّم</td></tr>
-<tr><td>CANCELLED</td><td>ملغى</td></tr>
-</table>
-</div>
-<div>
-<h3 style="font-size:13px;margin-bottom:8px">OrderPartStatus — حالة الجزء</h3>
-<table class="tbl"><tr><th>القيمة</th><th>المعنى</th></tr>
-<tr><td>OFFERED</td><td>محجوز بانتظار قبول المدير</td></tr>
-<tr><td>ACCEPTED</td><td>قبله المدير — في قائمة التحضير</td></tr>
-<tr><td>PROCESSING</td><td>موظف الإخراج يعمل عليه</td></tr>
-<tr><td>STOCK_DEDUCTED</td><td>خصم المخزون وإصدار الفاتورة</td></tr>
-<tr><td>IN_OUTPUT_ZONE</td><td>جاهز في منطقة الإخراج</td></tr>
-<tr><td>READY_FOR_PICKUP</td><td>بانتظار المشتري (استلام)</td></tr>
-<tr><td>DISPATCHED</td><td>أكد المدير خروجه مع الناقل</td></tr>
-<tr><td>DELIVERED</td><td>تم التسليم</td></tr>
-<tr><td>REJECTED / EXPIRED</td><td>رفض / انتهت المهلة</td></tr>
-<tr><td>CANCELLED</td><td>ألغي مع الطلب</td></tr>
-</table>
-</div>
-<div>
-<h3 style="font-size:13px;margin-bottom:8px">FulfilmentMode</h3>
-<table class="tbl"><tr><th>القيمة</th><th>لمن</th></tr>
-<tr><td>DELIVERY</td><td>المعمل فقط — <span class="kbd">canUseDelivery(FACTORY)</span></td></tr>
-<tr><td>PICKUP</td><td>الكل — المنشأة الحرة تُجبر عليه</td></tr></table>
-<h3 style="font-size:13px;margin:14px 0 8px">ComplaintKind → Route</h3>
-<table class="tbl"><tr><th>النوع</th><th>المسار</th></tr>
-<tr><td>SHORTAGE / QUALITY</td><td>WAREHOUSE (سجل المناطق في Odoo)</td></tr>
-<tr><td>DELIVERY / BILLING / OTHER</td><td>ADMIN</td></tr></table>
-</div>
-<div>
-<h3 style="font-size:13px;margin-bottom:8px">ComplaintStatus / DeliveryTripStatus</h3>
-<table class="tbl"><tr><th>الحالة</th><th>المعنى</th></tr>
-<tr><td>OPEN / IN_REVIEW</td><td>مفتوحة / قيد المراجعة</td></tr>
-<tr><td>RESOLVED / REJECTED</td><td>حُلت / رُفضت</td></tr>
-</table>
-<table class="tbl" style="margin-top:10px"><tr><th>TripStatus</th><th>المعنى</th></tr>
-<tr><td>PLANNED</td><td>مخططة</td></tr>
-<tr><td>ASSIGNED</td><td>عُينت شاحنة وسائق</td></tr>
-<tr><td>IN_PROGRESS</td><td>قيد التنفيذ</td></tr>
-<tr><td>COMPLETED / CANCELLED</td><td>مكتملة / ملغاة</td></tr>
-</table>
-<p style="font-size:11px;color:var(--muted);margin-top:8px">قاعدة: <b>أبطأ جزء يقرر</b> حالة الطلب الأب — <span class="kbd">deriveOrderStatus()</span></p>
-</div>
-</div>
-</section>
+      </table>
+    </div>
+  </div>
 
-<!-- ============ GAPS ============ -->
-<section id="gaps" class="section">
-<h2>الفجوات الملاحظة — السيناريو مقابل الكود</h2>
-<p class="section-desc">مقارنة التفريغين الصوتيين بالكود المطبق في <span class="kbd">src/order</span> — 3 فجوات، واحدة حرجة</p>
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- مرجع الحالات                                                            -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
 
-<div class="endpoint gap ok">
-<div class="ep-head"><span class="badge badge-green">فجوة 1 — تم إصلاحها ✓</span> بوابة مدير المستودعات للطلبات المقسمة</div>
-<div class="ep-body">
-<table class="tbl"><tr><th style="width:50%">قبل الإصلاح</th><th>بعد الإصلاح</th></tr>
-<tr><td><span class="kbd">allocate()</span> ينشئ الـ parts فوراً بحالة <span class="kbd">OFFERED</span> ويدفعها لكل مدير — تدخل الإدارة متزامن اختياري فقط</td><td>للطلب المقسوم (<span class="kbd">plan.parts.length &gt; 1</span>) تُحفظ <span class="kbd">requestedLines</span> ويوضع الطلب في <span class="kbd">AWAITING_SPLIT_APPROVAL</span> <b>دون إنشاء parts</b>. مدير المستودعات يعتمد عبر <span class="kbd">POST .../approve-split</span> (كما هو A+B) أو يعدل عبر <span class="kbd">.../modify</span> (A+B→A+C) — حينها فقط تُنشأ الـ parts وتُدفع إلى Odoo</td></tr></table>
-<p style="font-size:12px;margin-top:8px"><b>الملفات:</b> <span class="kbd">enums/order-status.enum.ts</span> (حالة جديدة) + <span class="kbd">providers/order-allocation.service.ts</span> (تأجيل الإنشاء + <span class="kbd">approveSplit/createSplitParts</span>) + <span class="kbd">admin-order.controller.ts</span> (endpoint جديد)</p>
-</div></div>
+  <div class="card" id="enums">
+    <h3>مرجع الحالات</h3>
+    <div class="enum-grid">
+      <div>
+        <h4 style="font-size:13px;margin-bottom:8px">OrderStatus — حالة الطلب</h4>
+        <table class="tbl"><tr><th>القيمة</th><th>المعنى</th></tr>
+          <tr><td>PENDING_ALLOCATION</td><td>قيد اختيار المستودعات</td></tr>
+          <tr><td>AWAITING_APPROVAL</td><td>معروض على مدراء المستودعات — الكل يجب أن يقبل</td></tr>
+          <tr><td>NEEDS_CUSTOMER_DECISION</td><td>لا تغطية كاملة — المشتري يقرر</td></tr>
+          <tr><td>REJECTED_AWAITING_BUYER</td><td>طلب مقسوم رفضته الإدارة — ينتظر تأكيد المشتري</td></tr>
+          <tr><td>NEEDS_ADMIN</td><td>استنفد محاولات التخصيص — تدخل بشري</td></tr>
+          <tr><td style="background:#dcfce7">AWAITING_SPLIT_APPROVAL <span class="tag">جديد</span></td><td>مقسوم بانتظار مدير المستودعات (A+B→A+C أو اعتماد)</td></tr>
+          <tr><td>PREPARING</td><td>الكل قَبِل — نقطة اللاعودة</td></tr>
+          <tr><td>IN_TRANSIT</td><td>على الطريق (توصيل)</td></tr>
+          <tr><td>CONSOLIDATING</td><td>يُجمع في أقرب مستودع</td></tr>
+          <tr><td>READY_FOR_PICKUP</td><td>جاهز للاستلام</td></tr>
+          <tr><td>DELIVERED</td><td>تم التسليم</td></tr>
+          <tr><td>COMPLETED</td><td>أكد الاستلام وقيّم</td></tr>
+          <tr><td>CANCELLED</td><td>ملغى</td></tr>
+        </table>
+      </div>
+      <div>
+        <h4 style="font-size:13px;margin-bottom:8px">OrderPartStatus — حالة الجزء</h4>
+        <table class="tbl"><tr><th>القيمة</th><th>المعنى</th></tr>
+          <tr><td>OFFERED</td><td>محجوز بانتظار قبول المدير</td></tr>
+          <tr><td>ACCEPTED</td><td>قبله المدير — في قائمة التحضير</td></tr>
+          <tr><td>PROCESSING</td><td>موظف الإخراج يعمل عليه</td></tr>
+          <tr><td>STOCK_DEDUCTED</td><td>خصم المخزون وإصدار الفاتورة</td></tr>
+          <tr><td>IN_OUTPUT_ZONE</td><td>جاهز في منطقة الإخراج</td></tr>
+          <tr><td>READY_FOR_PICKUP</td><td>بانتظار المشتري (استلام)</td></tr>
+          <tr><td>DISPATCHED</td><td>أكد المدير خروجه مع الناقل</td></tr>
+          <tr><td>DELIVERED</td><td>تم التسليم</td></tr>
+          <tr><td>REJECTED / EXPIRED</td><td>رفض / انتهت المهلة</td></tr>
+          <tr><td>CANCELLED</td><td>ألغي مع الطلب</td></tr>
+        </table>
+      </div>
+      <div>
+        <h4 style="font-size:13px;margin-bottom:8px">FulfilmentMode / ComplaintKind</h4>
+        <table class="tbl"><tr><th>القيمة</th><th>لمن</th></tr>
+          <tr><td>DELIVERY</td><td>المعمل فقط — <span class="kbd">canUseDelivery(FACTORY)</span></td></tr>
+          <tr><td>PICKUP</td><td>الكل — المنشأة الحرة تُجبر عليه</td></tr>
+        </table>
+        <table class="tbl" style="margin-top:10px"><tr><th>النوع</th><th>المسار</th></tr>
+          <tr><td>SHORTAGE / QUALITY</td><td>WAREHOUSE (سجل المناطق في Odoo)</td></tr>
+          <tr><td>DELIVERY / BILLING / OTHER</td><td>ADMIN</td></tr>
+        </table>
+      </div>
+      <div>
+        <h4 style="font-size:13px;margin-bottom:8px">ComplaintStatus / TripStatus</h4>
+        <table class="tbl"><tr><th>الحالة</th><th>المعنى</th></tr>
+          <tr><td>OPEN / IN_REVIEW</td><td>مفتوحة / قيد المراجعة</td></tr>
+          <tr><td>RESOLVED / REJECTED</td><td>حُلت / رُفضت</td></tr>
+        </table>
+        <table class="tbl" style="margin-top:10px"><tr><th>TripStatus</th><th>المعنى</th></tr>
+          <tr><td>PLANNED</td><td>مخططة</td></tr>
+          <tr><td>ASSIGNED</td><td>عُينت شاحنة وسائق</td></tr>
+          <tr><td>IN_PROGRESS</td><td>قيد التنفيذ</td></tr>
+          <tr><td>COMPLETED / CANCELLED</td><td>مكتملة / ملغاة</td></tr>
+        </table>
+        <p style="font-size:11px;color:#64748b;margin-top:8px">قاعدة: <b>أبطأ جزء يقرر</b> حالة الطلب الأب — <span class="kbd">deriveOrderStatus()</span></p>
+      </div>
+    </div>
+  </div>
 
-<div class="endpoint gap">
-<div class="ep-head" style="background:#fffbeb"><span class="badge badge-orange">فجوة 2 — متوسطة</span> طلب التوصيل المقسوم: تجميع ثم توصيل مقابل milk-run</div>
-<div class="ep-body">
-<table class="tbl"><tr><th>السيناريو (التفريغ الأول)</th><th>الكود الحالي</th></tr>
-<tr><td>الأبعد يرسل حصته إلى <b>الأقرب</b>، ثم سيارة واحدة من الأقرب للمشتري (تجميع وسيط + توصيل)</td><td>التجميع <b>مرفوض صراحة</b> لطلب التوصيل (<span class="kbd">consolidationEligibility: 'is a delivery order'</span>). بدلاً منه <b>milk-run</b>: شاحنة تبدأ من الأبعد وتمر بالأقرب وتصل محملة مباشرة</td></tr></table>
-<p style="font-size:12px;margin-top:8px"><b>الأثر:</b> نفس الهدف (شاحنة واحدة محملة) لكن آلية مختلفة — لا مرحلة تجميع وسيطة. قد يكون مقصوداً (أكفأ)، لكنه يخالف السرد.</p>
-<p style="font-size:12px"><b>الإصلاح المقترح:</b> إما توثيق الـ milk-run كسلوك معتمد، أو السماح بتجميع لطلب التوصيل كمرحلة وسيطة ثم توصيل واحد من الأقرب.</p>
-</div></div>
-
-<div class="endpoint gap">
-<div class="ep-head" style="background:#fffbeb"><span class="badge badge-gray">فجوة 3 — طفيفة</span> هوية مدير المستودعات</div>
-<div class="ep-body">
-<p style="font-size:13px">السيناريو يضعه في <b>Odoo</b> (مدير منطقة). الكود يحمي <span class="kbd">modify / modification-options</span> بصلاحية backend محلية <span class="kbd">admin.orders.manage</span> لحساب JWT — لا ربط بمفهوم مدير المنطقة في Odoo.</p>
-<p style="font-size:12px;color:var(--muted)">الإصلاح: ربط الصلاحية بدور Odoo أو توثيق أن مدير المستودعات = حامل صلاحية <span class="kbd">admin.orders.manage</span> في الـ backend.</p>
-</div></div>
-
-<div class="endpoint gap ok">
-<div class="ep-head"><span class="badge badge-green">لا فجوة</span> ما هو مطابق ✓</div>
-<div class="ep-body">
-<ul style="font-size:13px;padding-right:18px">
-<li>مستودع واحد يغطي → إسناد لأقربه مباشرة ✓</li>
-<li>تقسيم بأقل عدد مستودعات وبأقل مسافة إجمالية، تعبئة الأقرب أولاً ✓</li>
-<li>بدائل التعديل بنفس حجم التقسيم فقط (A+B ↔ A+C) ✓</li>
-<li>تجميع الاستلام عند أقرب مستودع + تكلفة مسار التجميع ✓</li>
-</ul>
-</div></div>
-</section>
-
-<footer style="text-align:center;padding:18px;color:var(--muted);font-size:12px">Dawrha — وحدة الطلبات · <span class="kbd">src/order</span> · مولد من الكود المصدري</footer>
+  <footer style="text-align:center;padding:18px;color:#64748b;font-size:12px">Dawrha — وحدة الطلبات · <span class="kbd">src/order</span> · محوّل لنمط توثيق API الموحّد</footer>
 </main>
-</div>
+
 <script>
+document.querySelectorAll('.body-toggle').forEach(function(t){
+  t.addEventListener('click', function(){
+    var block = t.closest('tr').nextElementSibling.querySelector('.body-block');
+    block.classList.toggle('open');
+    t.textContent = block.classList.contains('open') ? '▲' : '▼';
+  });
+});
 const search=document.getElementById('search');
 const sel=document.getElementById('methodFilter');
 function filter(){
   const q=(search.value||'').toLowerCase();
   const m=(sel.value||'').toUpperCase();
-  document.querySelectorAll('.endpoint[data-method]').forEach(el=>{
-    const method=el.dataset.method;
-    const text=el.textContent.toLowerCase();
+  document.querySelectorAll('.api-table tr').forEach(tr=>{
+    const methodTd=tr.querySelector('td:first-child .m');
+    if(!methodTd) return;
+    const method=methodTd.textContent.trim();
+    const text=tr.textContent.toLowerCase();
     const okQ=!q||text.includes(q);
     const okM=!m||method===m;
-    el.style.display=(okQ&&okM)?'':'none';
+    tr.style.display=(okQ&&okM)?'':'none';
   });
 }
 search.addEventListener('input',filter);
 sel.addEventListener('change',filter);
-document.querySelectorAll('.nav a').forEach(a=>{
-  a.addEventListener('click',e=>{
-    document.querySelectorAll('.nav a').forEach(x=>x.classList.remove('active'));
-    a.classList.add('active');
-  });
-});
 </script>
 </body>
 </html>

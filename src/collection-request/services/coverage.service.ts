@@ -1,9 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
+import Redis from 'ioredis';
 import { AccountStatus } from '@src/user/enums/account-status.enum';
 import { TruckStatus } from '@src/truck/enums/truck-status.enum';
 import { HandoverStatus } from '@src/truck/enums/handover-status.enum';
+import { TruckEntity } from '@src/truck/entities/truck.entity';
 import { TruckHandover } from '@src/truck/entities/truck-handover.entity';
 import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
 import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
@@ -55,6 +57,7 @@ export class CoverageService {
     private readonly truckAssignmentRepo: Repository<TruckAssignmentEntity>,
     @InjectRepository(CollectorProfile)
     private readonly profileRepo: Repository<CollectorProfile>,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
   /** Re-distributes every eligible idle driver onto the best point. */
@@ -145,6 +148,10 @@ export class CoverageService {
   // ---------------------------------------------------------------------------
   // User-facing: nearby zones
   // ---------------------------------------------------------------------------
+
+  /** Radius (meters) used to sweep live GPS drivers around a coverage point. */
+  private readonly GPS_FALLBACK_RADIUS_M = 5000;
+
   async findNearbyZones(
     lat: number,
     lng: number,
@@ -170,49 +177,79 @@ export class CoverageService {
       return empty;
     }
 
-    const pointIds = withDistance.map((p) => p.id);
+    // Candidate pool: every eligible on-duty driver (parked OR just passing by).
+    const eligibleIds = await this.eligibleIdleDriverIds();
+    const profiles = eligibleIds.length
+      ? await this.profileRepo.find({
+          where: { id: In(eligibleIds) },
+          relations: ['account', 'shift', 'assignment', 'assignment.truck'],
+        })
+      : [];
 
+    // Live GPS positions keyed by truckId.
+    const profilesByTruck = new Map<string, CollectorProfile>();
+    const truckIds: string[] = [];
+    for (const p of profiles) {
+      const tid = p.assignment?.truck?.id;
+      if (tid) {
+        profilesByTruck.set(tid, p);
+        truckIds.push(tid);
+      }
+    }
+    const locValues = truckIds.length
+      ? await this.redis.mget(truckIds.map((id) => `truck:location:${id}`))
+      : [];
+    const locByTruck = new Map<string, { lat: number; lng: number }>();
+    truckIds.forEach((id, i) => {
+      const raw = locValues[i];
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw) as { lat?: number; lng?: number };
+        if (typeof parsed.lat === 'number' && typeof parsed.lng === 'number') {
+          locByTruck.set(id, { lat: parsed.lat, lng: parsed.lng });
+        }
+      } catch {
+        // A corrupt frame must not sink the lookup — ignore it.
+      }
+    });
+
+    // Official "parked at point" assignments for the nearby points.
     const assignments = await this.assignmentRepo.find({
-      where: pointIds.map((id) => ({ coveragePointId: id, isActive: true })),
+      where: withDistance.map((p) => ({ coveragePointId: p.id, isActive: true })),
       relations: ['driver', 'driver.account', 'driver.shift', 'driver.assignment', 'driver.assignment.truck'],
     });
 
-    const driverIds = assignments.map((a) => a.driverId);
-    const routeWeightMap = await this.activeRouteWeights(driverIds);
-
+    const routeWeightMap = await this.activeRouteWeights(eligibleIds);
     const now = new Date();
     const result: any[] = [];
 
     for (const point of withDistance) {
       const pointAssignments = assignments.filter((a) => a.coveragePointId === point.id);
       const drivers: any[] = [];
+      const addedDriverIds = new Set<string>();
 
+      // 1) Primary: drivers officially parked at this point.
       for (const a of pointAssignments) {
         const profile = a.driver;
         if (!profile?.assignment?.truck) continue;
         const truck = profile.assignment.truck;
         if (truck.status === TruckStatus.DISABLED) continue;
+        drivers.push(this.enrichDriver(profile, truck, routeWeightMap, now, a.assignedFrom, 'assigned'));
+        addedDriverIds.add(profile.id);
+      }
 
-        const maxKg = Number(truck.maxPayloadKg) || 0;
-        const usedKg = routeWeightMap.get(profile.id) || 0;
-        const remainingKg = Math.max(0, maxKg - usedKg);
-
-        const shift = profile.shift;
-        let shiftRemainingMinutes = 0;
-        if (shift) {
-          shiftRemainingMinutes = this.shiftRemainingMinutes(shift.startTime, shift.endTime, now);
-        }
-
-        drivers.push({
-          driver_id: profile.id,
-          driver_name: profile.account?.name ?? null,
-          truck_plate: truck.plateNumber,
-          truck_id: truck.id,
-          max_payload_kg: maxKg,
-          remaining_kg: +remainingKg.toFixed(2),
-          remaining_shift_minutes: shiftRemainingMinutes,
-          parked_since: a.assignedFrom,
-        });
+      // 2) Fallback: eligible drivers within GPS radius of the point.
+      const radiusM = Math.max(Number(point.radiusM) || 0, this.GPS_FALLBACK_RADIUS_M);
+      for (const [tid, profile] of profilesByTruck) {
+        if (addedDriverIds.has(profile.id)) continue;
+        const loc = locByTruck.get(tid);
+        if (!loc) continue;
+        const distKm = this.haversineKm(Number(point.lat), Number(point.lng), loc.lat, loc.lng);
+        if (distKm * 1000 > radiusM) continue;
+        const truck = profile.assignment?.truck;
+        if (!truck || truck.status === TruckStatus.DISABLED) continue;
+        drivers.push(this.enrichDriver(profile, truck, routeWeightMap, now, null, 'gps'));
+        addedDriverIds.add(profile.id);
       }
 
       result.push({
@@ -233,6 +270,37 @@ export class CoverageService {
     return result;
   }
 
+  private enrichDriver(
+    profile: CollectorProfile,
+    truck: TruckEntity,
+    routeWeightMap: Map<string, number>,
+    now: Date,
+    parkedSince: Date | null,
+    source: 'assigned' | 'gps',
+  ): any {
+    const maxKg = Number(truck.maxPayloadKg) || 0;
+    const usedKg = routeWeightMap.get(profile.id) || 0;
+    const remainingKg = Math.max(0, maxKg - usedKg);
+
+    const shift = profile.shift;
+    let shiftRemainingMinutes = 0;
+    if (shift) {
+      shiftRemainingMinutes = this.shiftRemainingMinutes(shift.startTime, shift.endTime, now);
+    }
+
+    return {
+      driver_id: profile.id,
+      driver_name: profile.account?.name ?? null,
+      truck_plate: truck.plateNumber,
+      truck_id: truck.id,
+      max_payload_kg: maxKg,
+      remaining_kg: +remainingKg.toFixed(2),
+      remaining_shift_minutes: shiftRemainingMinutes,
+      parked_since: parkedSince,
+      source,
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------
@@ -245,7 +313,8 @@ export class CoverageService {
       .innerJoin('cp.shift', 'shift')
       .innerJoin('cp.assignment', 'assignment')
       .innerJoin('assignment.truck', 'truck')
-      .select('DISTINCT cp.id', 'driverId')
+      .select('cp.id', 'driverId')
+      .distinct(true)
       .addSelect('shift.startTime', 'startTime')
       .addSelect('shift.endTime', 'endTime')
       .where('h.status = :open', { open: HandoverStatus.OPEN })
