@@ -27,6 +27,15 @@ export function isWalletEligible(role: Role): boolean {
   return WALLET_ELIGIBLE_ROLES.includes(role);
 }
 
+/**
+ * Points carry two decimals — the order/collection value ÷ the per-point rate,
+ * rounded (never floored), so 3500 at 1000-per-point is 3.5. Rounding at each
+ * step keeps the stored balance from drifting on binary-float remainders.
+ */
+export function roundPoints(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 @Injectable()
 export class PointsWalletService {
   private readonly logger = new Logger('PointsWallet');
@@ -63,7 +72,9 @@ export class PointsWalletService {
       const per = Number(rate.amountPerPoint);
       if (!(per > 0) || !(orderValue > 0)) return null;
 
-      const points = Math.floor(orderValue / per);
+      // The value converted at the rate, kept to 2 decimals — NOT floored: a
+      // 3500 order at 1000-per-point earns 3.5 points, not 3.
+      const points = roundPoints(orderValue / per);
       if (points <= 0) return { points: 0, balance: (await this.view(accountId, role)).points };
 
       const wallet = await this.ensureForAccount(accountId, role);
@@ -75,7 +86,7 @@ export class PointsWalletService {
       // later. Best-effort: it must never hold up (or fail) the actual award.
       await this.snapshots.refreshBaseline().catch(() => undefined);
 
-      wallet.points += points;
+      wallet.points = roundPoints(Number(wallet.points) + points);
       await this.walletRepo.save(wallet);
 
       await this.notifications
@@ -124,7 +135,8 @@ export class PointsWalletService {
       const per = Number(rate.amountPerPoint);
       if (!(per > 0) || !(value > 0)) return null;
 
-      const points = Math.floor(value / per);
+      // Same conversion as an order — kept to 2 decimals, never floored.
+      const points = roundPoints(value / per);
       if (points <= 0) return { points: 0, balance: (await this.view(accountId, role)).points };
 
       const wallet = await this.ensureForAccount(accountId, role);
@@ -136,7 +148,7 @@ export class PointsWalletService {
       // baseline was only ever refreshed by ORDER awards. Best-effort.
       await this.snapshots.refreshBaseline().catch(() => undefined);
 
-      wallet.points += points;
+      wallet.points = roundPoints(Number(wallet.points) + points);
       await this.walletRepo.save(wallet);
 
       await this.notifications

@@ -52,6 +52,7 @@ import { CollectionRequestController } from './controllers/collection-request.co
 import { CollectionPlanController } from './controllers/collection-plan.controller';
 import { DriverOfferController } from './controllers/driver-offer.controller';
 import { ShipmentController } from './controllers/shipment.controller';
+import { OdooReceptionController } from './controllers/odoo-reception.controller';
 import { ShipmentService } from './services/shipment.service';
 import { DropOffService } from './services/drop-off.service';
 import { COLLECTION_DISPATCH_QUEUE } from './constants/dispatch.constants';
@@ -127,6 +128,7 @@ import { COLLECTION_DISPATCH_QUEUE } from './constants/dispatch.constants';
     DispatchConfigController,
     CollectionReportsController,
     ShipmentController,
+    OdooReceptionController,
   ],
   exports: [
     CollectionStateService,

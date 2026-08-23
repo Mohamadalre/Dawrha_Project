@@ -43,6 +43,15 @@ import {
 
 const LOG_META = { context: 'ORDER_ALLOCATION', channel: 'orders' } as const;
 
+/**
+ * An order id is a UUID. Odoo-native orders carry a non-UUID `backend_order_id`
+ * (or none), and a query on the uuid column with such a value throws a raw
+ * Postgres error. Callers that come from Odoo (the modify bridge) must get a
+ * clean "not found", never a 500 that reads like a bug.
+ */
+const ORDER_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** What a buyer asked for, in the shape both the planner and Odoo speak. */
 export interface RequestedLine {
   productId: string;
@@ -222,6 +231,9 @@ export class OrderAllocationService {
    * it is a re-allocation onto exactly those warehouses.
    */
   async modificationOptions(orderId: string) {
+    if (!ORDER_UUID_RE.test((orderId ?? '').trim())) {
+      throw new NotFoundException('Order not found');
+    }
     const order = await this.orderRepo.findOne({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Order not found');
 
@@ -383,6 +395,9 @@ export class OrderAllocationService {
   }
 
   async applyModification(orderId: string, warehouseIds: string[], adminId?: string) {
+    if (!ORDER_UUID_RE.test((orderId ?? '').trim())) {
+      throw new NotFoundException('Order not found');
+    }
     const order = await this.orderRepo.findOne({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Order not found');
     const isSplitApproval = order.status === OrderStatus.AWAITING_SPLIT_APPROVAL;

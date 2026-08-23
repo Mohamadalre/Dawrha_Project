@@ -41,6 +41,8 @@ import { FleetReconcileService } from './fleet-reconcile.service';
 import { DriverRequestReconcileService } from './driver-request-reconcile.service';
 import { DriverStateReconcileService } from './driver-state-reconcile.service';
 import { OrderStateReconcileService } from './order-state-reconcile.service';
+import { OdooHealthMonitorService } from './odoo-health-monitor.service';
+import { DeadLetterJob } from './entities/dead-letter-job.entity';
 import { CatalogPushReconcileService } from './catalog-push-reconcile.service';
 import { ShiftChangeStateReconcileService } from './shift-change-state-reconcile.service';
 import { OrphanReconcileService } from './orphan-reconcile.service';
@@ -97,6 +99,8 @@ import { OdooWebhookController } from './odoo-webhook.controller';
       DistanceCache,
       // Re-pricing a reassigned leg reads the backend-admin delivery rate.
       DeliveryRate,
+      // Durable landing spot for permanently-failed sync jobs (the DLQ).
+      DeadLetterJob,
     ]),
   ],
   controllers: [OdooWebhookController],
@@ -121,6 +125,8 @@ import { OdooWebhookController } from './odoo-webhook.controller';
     WarehouseReconcileService,
     OfferMirrorReconcileService,
     DeliveryTariffReconcileService,
+    // Watches the backend↔Odoo link and alerts (ERROR log) on down/recovery.
+    OdooHealthMonitorService,
   ],
   exports: [OdooSyncService],
 })

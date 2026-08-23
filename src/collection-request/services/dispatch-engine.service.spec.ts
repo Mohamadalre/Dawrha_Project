@@ -11,6 +11,7 @@ import { DispatchGatewayEvents } from '../gateways/dispatch.gateway';
 import { CollectionRequest } from '../entities/collection-request.entity';
 import { CollectionRequestAssignment } from '../entities/collection-request-assignment.entity';
 import { CollectionRoute } from '../entities/collection-route.entity';
+import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
 import { CollectionRequestStatus } from '../enums/collection-request-status.enum';
 import { CollectionRequestAssignmentStatus } from '../enums/collection-request-assignment-status.enum';
 import { CollectionRouteStatus } from '../enums/collection-route-status.enum';
@@ -118,6 +119,9 @@ describe('DispatchEngineService', () => {
       create: jest.fn((r: Partial<CollectionRoute>) => ({ id: 'rt-1', ...r })),
       save: jest.fn((r: CollectionRoute) => Promise.resolve(r)),
     };
+    const truckAssignmentRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
     const configProvider = { get: jest.fn().mockResolvedValue(config) };
     const candidates = { findEligible: jest.fn().mockResolvedValue([]) };
     const events = {
@@ -138,6 +142,7 @@ describe('DispatchEngineService', () => {
       requestRepo,
       assignmentRepo,
       routeRepo,
+      truckAssignmentRepo,
       configProvider,
       candidates,
       events,
@@ -158,6 +163,7 @@ describe('DispatchEngineService', () => {
         { provide: getRepositoryToken(CollectionRequest), useValue: m.requestRepo },
         { provide: getRepositoryToken(CollectionRequestAssignment), useValue: m.assignmentRepo },
         { provide: getRepositoryToken(CollectionRoute), useValue: m.routeRepo },
+        { provide: getRepositoryToken(TruckAssignmentEntity), useValue: m.truckAssignmentRepo },
         { provide: DispatchConfigProvider, useValue: m.configProvider },
         { provide: DispatchCandidatesService, useValue: m.candidates },
         { provide: DispatchGatewayEvents, useValue: m.events },

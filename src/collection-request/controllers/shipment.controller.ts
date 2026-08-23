@@ -1,5 +1,4 @@
 import {
-  Body,
   Controller,
   Get,
   Param,
@@ -13,7 +12,6 @@ import { PermissionsGuard } from '@src/permission/guards/permissions.guard';
 import { Permissions } from '@src/permission/derorators/permissions.decorator';
 import { CurrentUser } from '@src/auth/decorators/current-user.decorator';
 import { ShipmentService } from '../services/shipment.service';
-import { DeliverShipmentDto } from '../dto/shipment.dto';
 import { ShipmentStatus } from '../enums/shipment-status.enum';
 
 /**
@@ -51,17 +49,13 @@ export class ShipmentController {
     return { message: 'Shipment fetched', result };
   }
 
-  /** Deliver to warehouse: IN_TRANSIT → DELIVERED. All requests → COMPLETED. */
-  @Patch(':id/deliver')
-  @Permissions('collection.driver.manage')
-  async deliver(
-    @CurrentUser() user: any,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: DeliverShipmentDto,
-  ) {
-    const result = await this.shipmentService.deliver(user.id, id, dto);
-    return { message: 'Shipment delivered — all requests completed', result };
-  }
+  // NOTE: the driver no longer marks a shipment delivered by hand. A shipment
+  // becomes DELIVERED automatically when the driver's tour completes (he dropped
+  // the load), and RECEIVED when the RECEPTION employee CONFIRMS its receipt in
+  // Odoo — scanning the QR only fetches the load (getShipmentForReception); the
+  // confirm step flips the status (confirmShipmentReceipt). See
+  // OdooReceptionController. Receipt is the warehouse's confirmation, not the
+  // driver's claim.
 
   /** Cancel shipment and unlink requests. */
   @Patch(':id/cancel')

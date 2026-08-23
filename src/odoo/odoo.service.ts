@@ -224,6 +224,21 @@ export class OdooService {
   }
 
   /**
+   * A cheap, real round-trip to Odoo — used by the health monitor to tell
+   * whether the connection is up. Returns a boolean and NEVER throws, so the
+   * monitor stays a simple up/down check. `search_count` on a tiny built-in
+   * model touches the network and the session without reading real data.
+   */
+  async isReachable(): Promise<boolean> {
+    try {
+      await this.callKw('res.users', 'search_count', [[]]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * The Odoo id of the record in `model` whose `backend_id` matches ours, or
    * null. This is the STABLE identity — the backend matches on its own uuid,
    * never on the numeric Odoo id — so an Odoo wipe/restore that reassigns ids

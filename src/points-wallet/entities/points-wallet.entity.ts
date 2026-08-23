@@ -40,8 +40,24 @@ export class PointsWallet {
   /**
    * The balance. Starts at 0 and is only ever raised by the platform (orders),
    * never written directly by the account holder — the view route is read-only.
+   *
+   * DECIMAL, not integer: points are the order value converted at the per-role
+   * rate WITHOUT rounding down — a 3500 order at 1000-per-point is worth 3.5
+   * points, not 3. Two decimals is the resolution. The transformer returns a JS
+   * number on read (TypeORM hands decimals back as strings otherwise, which
+   * would turn `points += n` into string concatenation).
    */
-  @Column({ type: 'int', default: 0 })
+  @Column({
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+    transformer: {
+      to: (value?: number) => value,
+      from: (value?: string | null) =>
+        value === null || value === undefined ? 0 : Number(value),
+    },
+  })
   points: number;
 
   @CreateDateColumn()

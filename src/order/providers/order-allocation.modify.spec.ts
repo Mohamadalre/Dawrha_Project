@@ -33,7 +33,7 @@ describe('OrderAllocationService.modificationOptions', () => {
   const build = () => {
     const orderRepo = {
       findOne: jest.fn().mockResolvedValue({
-        id: 'ord1',
+        id: '00000000-0000-0000-0000-0000000000d1',
         orderNumber: 'ORD-1',
         buyerProfileId: 'buyer1',
         provinceId: 'prov1',
@@ -80,7 +80,7 @@ describe('OrderAllocationService.modificationOptions', () => {
 
   it('offers every OTHER covering pair, nearest first, excluding the current set', async () => {
     const { svc } = build();
-    const res: any = await svc.modificationOptions('ord1');
+    const res: any = await svc.modificationOptions('00000000-0000-0000-0000-0000000000d1');
 
     expect(res.split_size).toBe(2);
     expect(res.current.map((w: any) => w.id).sort()).toEqual(['a', 'b']);
@@ -102,7 +102,7 @@ describe('OrderAllocationService.modificationOptions', () => {
       { warehouseId: 'a', status: OrderPartStatus.IN_OUTPUT_ZONE, lines: [line('80')] },
     ]);
 
-    const res: any = await svc.modificationOptions('ord1');
+    const res: any = await svc.modificationOptions('00000000-0000-0000-0000-0000000000d1');
     expect(res.is_split).toBe(false);
     expect(res.options).toEqual([]);
   });
@@ -122,14 +122,14 @@ describe('OrderAllocationService.applyModification', () => {
   const buildApply = () => {
     // The split, awaiting approval, on a and b. References so status mutations
     // persist across the save/read the method does.
-    const livePartA = { id: 'pa', orderId: 'ord1', warehouseId: 'a', status: 'OFFERED', stockReserved: true, lines: [line('40')] };
-    const livePartB = { id: 'pb', orderId: 'ord1', warehouseId: 'b', status: 'OFFERED', stockReserved: true, lines: [line('40')] };
+    const livePartA = { id: 'pa', orderId: '00000000-0000-0000-0000-0000000000d1', warehouseId: 'a', status: 'OFFERED', stockReserved: true, lines: [line('40')] };
+    const livePartB = { id: 'pb', orderId: '00000000-0000-0000-0000-0000000000d1', warehouseId: 'b', status: 'OFFERED', stockReserved: true, lines: [line('40')] };
     const liveParts = [livePartA, livePartB];
     const createdParts: any[] = [];
 
     const orderRepo = {
       findOne: jest.fn().mockResolvedValue({
-        id: 'ord1',
+        id: '00000000-0000-0000-0000-0000000000d1',
         orderNumber: 'ORD-1',
         buyerProfileId: 'buyer1',
         provinceId: 'prov1',
@@ -188,7 +188,7 @@ describe('OrderAllocationService.applyModification', () => {
   it('re-routes onto the chosen set: cancels the old parts, offers the new ones', async () => {
     const { svc, orderRepo, offerRepo, odooSync, liveParts, createdParts } = buildApply();
 
-    const res: any = await svc.applyModification('ord1', ['a', 'c'], 'admin-9');
+    const res: any = await svc.applyModification('00000000-0000-0000-0000-0000000000d1', ['a', 'c'], 'admin-9');
 
     // The old parts were cancelled and their reservations released in Odoo.
     expect(liveParts.every((p) => p.status === 'CANCELLED')).toBe(true);
@@ -209,14 +209,14 @@ describe('OrderAllocationService.applyModification', () => {
   it('refuses to modify an order that is no longer awaiting approval', async () => {
     const { svc, orderRepo } = buildApply();
     orderRepo.findOne.mockResolvedValue({
-      id: 'ord1', orderNumber: 'ORD-1', status: OrderStatus.PREPARING,
+      id: '00000000-0000-0000-0000-0000000000d1', orderNumber: 'ORD-1', status: OrderStatus.PREPARING,
       fulfilmentMode: 'PICKUP', allocationRound: 1,
     });
-    await expect(svc.applyModification('ord1', ['a', 'c'])).rejects.toThrow();
+    await expect(svc.applyModification('00000000-0000-0000-0000-0000000000d1', ['a', 'c'])).rejects.toThrow();
   });
 
   it('refuses a chosen set of the wrong size', async () => {
     const { svc } = buildApply();
-    await expect(svc.applyModification('ord1', ['a'])).rejects.toThrow();
+    await expect(svc.applyModification('00000000-0000-0000-0000-0000000000d1', ['a'])).rejects.toThrow();
   });
 });

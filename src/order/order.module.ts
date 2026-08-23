@@ -43,6 +43,7 @@ import { OrderCheckoutService } from './providers/order-checkout.service';
 import { OrderViewService } from './providers/order-view.service';
 import { OrderController } from './order.controller';
 import { AdminOrderController } from './admin-order.controller';
+import { OdooOrderModifyController } from './odoo-order-modify.controller';
 import { OrderConstraintsController } from './order-constraints.controller';
 import { OrderTasksProcessor } from './order-tasks.processor';
 import { ORDER_TASKS_QUEUE } from './order-tasks.constants';
@@ -132,6 +133,7 @@ import { PointsWalletModule } from '@src/points-wallet/points-wallet.module';
     // the trip IN ODOO (pickups + handover), reported back by the webhook below.
     // The backend admin neither triggers, views, nor tracks delivery trips.
     DeliveryWebhookController,
+    OdooOrderModifyController,
     AdminComplaintController,
   ],
   exports: [

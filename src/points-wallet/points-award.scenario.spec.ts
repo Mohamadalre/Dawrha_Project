@@ -70,6 +70,19 @@ describe('Points award on order receipt (scenario)', () => {
     );
   });
 
+  it('credits FRACTIONAL points — a 3500 order at 1000-per-point earns 3.5, not 3', async () => {
+    const { view, order, walletRepo } = wire({ rate: '1000', startingPoints: 5 });
+    order.grandTotal = '3500'; // 3500 / 1000 = 3.5, never floored to 3
+
+    const res: any = await view.confirmReceipt('acc1', 'ord1');
+
+    expect(res.points_awarded).toBe(3.5);
+    expect(res.points_balance).toBe(8.5);
+    expect(walletRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ points: 8.5 }),
+    );
+  });
+
   it('completes the receipt but awards nothing when the admin set no rate', async () => {
     const { view, order, walletRepo } = wire({ rate: null, startingPoints: 5 });
 
