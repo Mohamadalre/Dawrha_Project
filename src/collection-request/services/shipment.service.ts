@@ -24,6 +24,7 @@ import {
 } from '../enums/shipment-status.enum';
 import { DeliverShipmentDto } from '../dto/shipment.dto';
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const LOG_META = { context: 'SHIPMENT_SERVICE', channel: 'collection' } as const;
 
 /** A shipment id is a UUID; anything else off a QR is treated as not-found. */
@@ -542,6 +543,7 @@ export class ShipmentService {
   // ---------------------------------------------------------------------------
   private async createShipment(
     driverId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     firstRequest: CollectionRequest,
   ): Promise<Shipment> {
     const assignment = await this.assignmentRepo.findOne({
