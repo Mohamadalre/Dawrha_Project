@@ -186,7 +186,7 @@ export class RouteExecutionService {
   async collected(
     caller: { id: string; role: string },
     requestId: string,
-    dto: { actualWeightKg: number; received_lines?: { product_id: string; quantity: number }[]; truck_full?: boolean; driver_note?: string },
+    dto: { actualWeightKg: number; received_lines?: { product_id?: string; quantity: number }[]; truck_full?: boolean; driver_note?: string },
   ): Promise<{ truck_capacity: { max_kg: number; used_kg: number; remaining_kg: number; is_full: boolean } | null; shipment_id: string | null }> {
     const { profile, route, stop } = await this.loadStop(caller.id, requestId);
     if (stop.status === CollectionRequestStatus.PICKING) return { truck_capacity: null, shipment_id: stop.shipmentId ?? null };
@@ -205,10 +205,12 @@ export class RouteExecutionService {
     stop.pickedAt = new Date();
     await this.requestRepo.save(stop);
 
-    // Save actual quantities per line
+    // Save actual quantities per line — blank product_id entries carry no
+    // line info (bulk weigh) and are skipped.
     if (dto.received_lines?.length) {
       const lines = await this.lineRepo.find({ where: { requestId: stop.id } });
       for (const rl of dto.received_lines) {
+        if (!rl.product_id) continue;
         const line = lines.find((l) => l.productId === rl.product_id);
         if (line) {
           line.actualQuantity = String(rl.quantity);

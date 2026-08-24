@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository } from 'typeorm';
 import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
 import { CollectionRequestAssignment } from '../entities/collection-request-assignment.entity';
 import { CollectionRequest } from '../entities/collection-request.entity';
@@ -9,7 +9,7 @@ import { CollectionRoute } from '../entities/collection-route.entity';
 import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
 import { DispatchEngineService } from './dispatch-engine.service';
 import { CollectionRequestAssignmentStatus } from '../enums/collection-request-assignment-status.enum';
-import { CollectionRouteStatus } from '../enums/collection-route-status.enum';
+import { CollectionRequestStatus } from '../enums/collection-request-status.enum';
 import {
   CollectionOfferExpiredException,
   CollectionOfferNotFoundException,
@@ -44,20 +44,30 @@ export class DriverOfferService {
   ) {}
 
   async accept(caller: Caller, requestId: string) {
-    const assignment = await this.loadPendingOffer(caller.id, requestId);
-    if (assignment.offerExpiresAt && assignment.offerExpiresAt.getTime() <= Date.now()) {
+    try {
+      const assignment = await this.loadPendingOffer(caller.id, requestId);
+      if (assignment.offerExpiresAt && assignment.offerExpiresAt.getTime() <= Date.now()) {
+        await this.engine.settleOffer(
+          assignment,
+          CollectionRequestAssignmentStatus.EXPIRED,
+        );
+        throw new CollectionOfferExpiredException();
+      }
+
       await this.engine.settleOffer(
         assignment,
-        CollectionRequestAssignmentStatus.EXPIRED,
+        CollectionRequestAssignmentStatus.ACCEPTED,
       );
-      throw new CollectionOfferExpiredException();
+      return this.buildView(assignment.request);
+    } catch (error) {
+      // Only fall through when there truly was no open offer.
+      if (!(error instanceof CollectionOfferNotFoundException)) throw error;
     }
 
-    await this.engine.settleOffer(
-      assignment,
-      CollectionRequestAssignmentStatus.ACCEPTED,
-    );
-    return this.buildView(assignment.request);
+    // The synchronous dispatch path binds the stop without ever creating an
+    // open offer — a driver app still calling accept after creation must get
+    // his task view, not a 404.
+    return this.buildViewIfAlreadyBound(caller.id, requestId);
   }
 
   async reject(caller: Caller, requestId: string) {
@@ -91,6 +101,33 @@ export class DriverOfferService {
     });
     if (!assignment) throw new CollectionOfferNotFoundException();
     return assignment;
+  }
+
+  /**
+   * The stop is already on this driver's tour (sync dispatch or a merge) —
+   * serve it as if he had just accepted. Anything still unbound (QUEUED/
+   * CREATED) or bound to someone else stays a clean not-found.
+   */
+  private async buildViewIfAlreadyBound(accountId: string, requestId: string) {
+    const profile = await this.profileRepo.findOne({
+      where: { account: { id: accountId } },
+    });
+    if (!profile) throw new CollectionOfferNotFoundException();
+
+    const request = await this.requestRepo
+      .createQueryBuilder('r')
+      .innerJoin('r.route', 'route')
+      .where('r.id = :id', { id: requestId })
+      .andWhere('route.driverId = :driverId', { driverId: profile.id })
+      .getOne();
+
+    const bound =
+      request &&
+      request.status !== CollectionRequestStatus.QUEUED &&
+      request.status !== CollectionRequestStatus.CREATED;
+    if (!bound) throw new CollectionOfferNotFoundException();
+
+    return this.buildView(request);
   }
 
   private async buildView(request: CollectionRequest | null) {

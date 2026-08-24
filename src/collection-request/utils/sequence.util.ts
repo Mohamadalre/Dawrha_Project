@@ -4,10 +4,9 @@ import { Like, Repository } from 'typeorm';
 /**
  * Sequential business numbers ('CR-2026-08-00001', 'RTE-2026-08-17-001', ...).
  *
- * Count-of-prefix + 1 stays collision-free as long as rows are never deleted,
- * which holds for both numbers in this domain (a cancelled request keeps its
- * number). The DB unique constraint is the backstop for races; three retries
- * absorb them.
+ * The next number is MAX(existing numeric suffix) + 1, so deleted rows leave
+ * harmless gaps instead of wedging allocation the way count-of-prefix did.
+ * The DB unique constraint is the backstop for races; retries absorb them.
  */
 export async function nextSequentialNumber(
   repo: Repository<{ id: string }>,
@@ -16,10 +15,16 @@ export async function nextSequentialNumber(
   padding: number,
 ): Promise<string> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const count = await repo.count({
+    const rows = await repo.find({
       where: { [field]: Like(`${prefix}-%`) },
+      select: [field] as any,
     });
-    const candidate = `${prefix}-${String(count + 1).padStart(padding, '0')}`;
+    let maxSeq = 0;
+    for (const row of rows) {
+      const suffix = Number(String(row[field]).split('-').pop());
+      if (Number.isFinite(suffix) && suffix > maxSeq) maxSeq = suffix;
+    }
+    const candidate = `${prefix}-${String(maxSeq + 1).padStart(padding, '0')}`;
     const exists = await repo.findOne({ where: { [field]: candidate } });
     if (!exists) return candidate;
   }
