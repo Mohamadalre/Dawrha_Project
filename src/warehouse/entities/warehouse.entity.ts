@@ -36,7 +36,7 @@ export class Warehouse {
    * pushed this backend-created warehouse to Odoo.
    */
   @Column({ type: 'int', nullable: true })
-  odooWarehouseId?: number;
+  odooWarehouseId?: number | null;
 
   @Column({ type: 'enum', enum: OdooSyncStatus, default: OdooSyncStatus.PENDING })
   odooSyncStatus: OdooSyncStatus;

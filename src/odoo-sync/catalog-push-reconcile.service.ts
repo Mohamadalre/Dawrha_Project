@@ -8,6 +8,7 @@ import { MeasurementUnit } from '@src/waste-management/entities/measurement-unit
 import { MaterialCondition } from '@src/waste-management/entities/material-condition.entity';
 import { Warehouse } from '@src/warehouse/entities/warehouse.entity';
 import { OdooSyncStatus } from '@src/waste-management/enums/odoo-sync-status.enum';
+import { OdooService } from '@src/odoo/odoo.service';
 import { OdooSyncService } from './odoo-sync.service';
 import { winstonLogger } from '@src/core/logger-config/winston.config';
 
@@ -63,15 +64,22 @@ export class CatalogPushReconcileService implements OnModuleInit {
     @InjectRepository(Warehouse)
     private readonly warehouseRepo: Repository<Warehouse>,
     private readonly odooSync: OdooSyncService,
+    private readonly odoo: OdooService,
   ) {}
 
   async onModuleInit(): Promise<void> {
     await this.reconcile('startup');
+    await this.repairDangling('startup');
   }
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async scheduledReconcile(): Promise<void> {
     await this.reconcile('cron');
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async scheduledDanglingRepair(): Promise<void> {
+    await this.repairDangling('cron');
   }
 
   async reconcile(
@@ -140,6 +148,93 @@ export class CatalogPushReconcileService implements OnModuleInit {
       // Runs on a timer — a bad tick must never kill the loop.
       winstonLogger.warn(
         `Catalogue push reconcile error (${trigger}): ${(err as Error).message}`,
+        LOG_META,
+      );
+    }
+    return counts;
+  }
+
+  /**
+   * Repairs the OTHER half of the split brain: rows stamped SYNCED whose
+   * stored Odoo id no longer EXISTS in Odoo.
+   *
+   * The push reconcile above can only see rows it knows failed (status !=
+   * SYNCED). But when the Odoo database is wiped or replaced, every catalogue
+   * row here stays "SYNCED" while pointing at a ghost id — nothing would ever
+   * re-push it, and Odoo stayed empty forever even though both sides were
+   * "healthy" by their own books. This sweep diffs each table against the ids
+   * actually live in Odoo (`fetchCatalogueIds`) and re-enqueues the ghosts.
+   *
+   * Safe to run constantly: handlers upsert by backend_id, so a row that DID
+   * land is refreshed, never duplicated; and rows that are not SYNCED are
+   * left to the push reconcile, so the two passes never fight over a row.
+   * Warehouses are excluded on purpose — their reconcile recreates dangling
+   * ones itself (and refreshes the mirror right after).
+   */
+  async repairDangling(
+    trigger: 'startup' | 'cron' | 'manual',
+  ): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {
+      categories: 0,
+      products: 0,
+      units: 0,
+      conditions: 0,
+    };
+    try {
+      const odooIds = await this.odoo.fetchCatalogueIds();
+      const live = {
+        categories: new Set(odooIds.categories),
+        products: new Set(odooIds.products),
+        units: new Set(odooIds.units),
+        conditions: new Set(odooIds.conditions),
+      };
+
+      for (const row of await this.categoryRepo.find()) {
+        if (row.odooSyncStatus !== OdooSyncStatus.SYNCED) continue;
+        if (row.odooCategoryId != null && !live.categories.has(row.odooCategoryId)) {
+          await this.odooSync.enqueueSyncCategory({ categoryId: row.id });
+          counts.categories++;
+        }
+      }
+      for (const row of await this.productRepo.find()) {
+        if (row.odooSyncStatus !== OdooSyncStatus.SYNCED) continue;
+        if (row.odooProductId != null && !live.products.has(row.odooProductId)) {
+          // The product handler also re-pushes its tier price matrix at the
+          // end, so pricing travels with it.
+          await this.odooSync.enqueueSyncProduct({ productId: row.id });
+          counts.products++;
+        }
+      }
+      for (const row of await this.unitRepo.find()) {
+        if (row.odooSyncStatus !== OdooSyncStatus.SYNCED) continue;
+        if (row.odooUnitId != null && !live.units.has(row.odooUnitId)) {
+          await this.odooSync.enqueueSyncUnit({ unitId: row.id });
+          counts.units++;
+        }
+      }
+      for (const row of await this.conditionRepo.find()) {
+        if (row.odooSyncStatus !== OdooSyncStatus.SYNCED) continue;
+        if (row.odooConditionId != null && !live.conditions.has(row.odooConditionId)) {
+          await this.odooSync.enqueueSyncCondition({ conditionId: row.id });
+          counts.conditions++;
+        }
+      }
+
+      const total = Object.values(counts).reduce((a, b) => a + b, 0);
+      if (total) {
+        winstonLogger.warn(
+          `Re-pushed ${total} catalogue row(s) whose Odoo record no longer exists (${trigger}) — ` +
+            Object.entries(counts)
+              .filter(([, n]) => n)
+              .map(([k, n]) => `${k}: ${n}`)
+              .join(', '),
+          LOG_META,
+        );
+      }
+    } catch (err) {
+      // Odoo unreachable → nothing to diff against this tick; the next one retries.
+      winstonLogger.warn(
+        `Catalogue dangling repair error (${trigger}): ${(err as Error).message}`,
         LOG_META,
       );
     }

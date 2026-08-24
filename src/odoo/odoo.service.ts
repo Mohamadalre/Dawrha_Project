@@ -252,6 +252,54 @@ export class OdooService {
     return ids?.[0] ?? null;
   }
 
+  /**
+   * Finds a catalogue record by its NATURAL key (the same field Odoo's unique
+   * constraint is built on), archived rows included.
+   *
+   * This is the adopt path: when `findIdByBackendId` misses (an Odoo wipe, a
+   * row authored in Odoo before the backend knew about it) the old flow went
+   * straight to `create`, which Odoo rejected with "already exists" — and that
+   * failure looped forever because nothing ever re-linked the existing row.
+   * Searching by the natural key first turns that dead end into an adoption.
+   *
+   * Exact match only (`=`), on purpose: Odoo's constraint compares exact
+   * strings, so a case-variant code would NOT collide and must not be adopted.
+   */
+  private async findIdByNaturalKey(
+    model: string,
+    domain: [string, string, any][],
+  ): Promise<number | null> {
+    const ids = await this.callKw<number[]>(model, 'search', [domain], {
+      limit: 1,
+      context: { active_test: false },
+    });
+    return ids?.[0] ?? null;
+  }
+
+  /** A measurement unit by its unique CODE (e.g. 'KG'). */
+  findMeasurementUnitIdByCode(code: string): Promise<number | null> {
+    if (!code) return Promise.resolve(null);
+    return this.findIdByNaturalKey('recycle.measurement.unit', [['code', '=', code]]);
+  }
+
+  /** A product category by its unique NAME. */
+  findProductCategoryIdByName(name: string): Promise<number | null> {
+    if (!name) return Promise.resolve(null);
+    return this.findIdByNaturalKey('recycle.product.category', [['name', '=', name]]);
+  }
+
+  /** A material condition by its unique (product, CODE) pair. */
+  findMaterialConditionIdByProductAndCode(
+    productOdooId: number,
+    code: string,
+  ): Promise<number | null> {
+    if (!productOdooId || !code) return Promise.resolve(null);
+    return this.findIdByNaturalKey(
+      'recycle.material.condition',
+      [['product_id', '=', productOdooId], ['code', '=', code]],
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Catalogue (category / product)
   // ---------------------------------------------------------------------------

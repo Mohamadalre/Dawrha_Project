@@ -330,7 +330,18 @@ export class OdooSyncProcessor extends WorkerHost {
     if (odooId) {
       await this.odoo.updateProductCategory(odooId, { name: category.name });
     } else {
-      odooId = await this.odoo.createProductCategory(category.name, category.id);
+      // A category with this NAME may already exist in Odoo (its unique
+      // constraint) without carrying our backend_id — adopt it (stamp our
+      // backend_id on) instead of letting create die on "already exists".
+      odooId = await this.odoo.findProductCategoryIdByName(category.name);
+      if (odooId) {
+        await this.odoo.updateProductCategory(odooId, {
+          name: category.name,
+          backend_id: category.id,
+        });
+      } else {
+        odooId = await this.odoo.createProductCategory(category.name, category.id);
+      }
     }
     category.odooCategoryId = odooId;
     category.odooSyncStatus = OdooSyncStatus.SYNCED;
@@ -401,6 +412,15 @@ export class OdooSyncProcessor extends WorkerHost {
     }
     let odooId = await this.odoo.findIdByBackendId(
       'recycle.product.category', category.id);
+    if (!odooId) {
+      // A category with this NAME may already exist in Odoo (its unique
+      // constraint) without carrying our backend_id — adopt it rather than
+      // letting the create fail with "already exists" forever.
+      odooId = await this.odoo.findProductCategoryIdByName(category.name);
+      if (odooId) {
+        await this.odoo.updateProductCategory(odooId, { backend_id: category.id });
+      }
+    }
     if (!odooId) {
       odooId = await this.odoo.createProductCategory(category.name, category.id);
     }
@@ -597,7 +617,8 @@ export class OdooSyncProcessor extends WorkerHost {
   // --- Warehouse creation (backend → Odoo) ----------------------------------
   /**
    * Pushes a backend-created warehouse to Odoo (recycle.warehouse + zones).
-   * On final failure the compensation step removes the orphan backend row.
+   * On final failure the warehouse is stamped FAILED — never deleted — and the
+   * catalog push reconcile re-enqueues it until it lands.
    */
   private async createWarehouse(payload: CreateWarehousePayload) {
     const warehouse = await this.warehouseRepo.findOne({ where: { id: payload.warehouseId } });
@@ -656,12 +677,28 @@ export class OdooSyncProcessor extends WorkerHost {
         allows_tolerance: unit.allowsTolerance,
       });
     } else {
-      odooId = await this.odoo.createMeasurementUnit({
-        name: unit.nameEn,
-        code: unit.code,
-        allowsTolerance: unit.allowsTolerance,
-        backendId: unit.id,
-      });
+      // No row carries our backend_id — but a unit with this CODE may still
+      // exist in Odoo (authored there directly, or left behind by a wipe that
+      // kept its data). Creating would hit Odoo's unique(code) and fail the
+      // job forever ("A measurement unit with this code already exists"), so
+      // ADOPT the existing row instead: stamp our backend_id on it and treat
+      // it as ours from here on.
+      odooId = await this.odoo.findMeasurementUnitIdByCode(unit.code);
+      if (odooId) {
+        await this.odoo.updateMeasurementUnit(odooId, {
+          name: unit.nameEn,
+          code: unit.code,
+          allows_tolerance: unit.allowsTolerance,
+          backend_id: unit.id,
+        });
+      } else {
+        odooId = await this.odoo.createMeasurementUnit({
+          name: unit.nameEn,
+          code: unit.code,
+          allowsTolerance: unit.allowsTolerance,
+          backendId: unit.id,
+        });
+      }
     }
     unit.odooUnitId = odooId;
     unit.odooSyncStatus = OdooSyncStatus.SYNCED;
@@ -719,13 +756,29 @@ export class OdooSyncProcessor extends WorkerHost {
         product_id: productOdooId,
       });
     } else {
-      odooId = await this.odoo.createMaterialCondition({
-        name: condition.nameEn,
-        code: condition.code,
-        sortOrder: condition.sortOrder,
-        productOdooId,
-        backendId: condition.id,
-      });
+      // Same adopt-or-create rule as units: a grade already sitting in Odoo
+      // under the same (product, CODE) — its natural unique key — is adopted
+      // (our backend_id stamped on) rather than letting create die on
+      // "This material already has a grade with that code."
+      odooId = await this.odoo.findMaterialConditionIdByProductAndCode(
+        productOdooId, condition.code);
+      if (odooId) {
+        await this.odoo.updateMaterialCondition(odooId, {
+          name: condition.nameEn,
+          code: condition.code,
+          sort_order: condition.sortOrder,
+          product_id: productOdooId,
+          backend_id: condition.id,
+        });
+      } else {
+        odooId = await this.odoo.createMaterialCondition({
+          name: condition.nameEn,
+          code: condition.code,
+          sortOrder: condition.sortOrder,
+          productOdooId,
+          backendId: condition.id,
+        });
+      }
     }
     condition.odooConditionId = odooId;
     condition.odooSyncStatus = OdooSyncStatus.SYNCED;
@@ -952,6 +1005,22 @@ export class OdooSyncProcessor extends WorkerHost {
    * understand is how an order ends up claiming to be somewhere it is not.
    */
   private async applyOrderEvent(payload: OrderEventPayload) {
+    // Odoo-side test data can carry a non-UUID part id ("ORD-RA-1-p1"); the
+    // uuid column would throw "invalid input syntax for type uuid" and
+    // dead-letter this event forever. An id that cannot possibly be one of
+    // ours is dropped with a warning instead of crashing the job.
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        payload.partId ?? '',
+      )
+    ) {
+      winstonLogger.warn(
+        `Odoo order event carried a non-UUID part id "${payload.partId}" — ignored`,
+        LOG_META,
+      );
+      return;
+    }
+
     const part = await this.orderPartRepo.findOne({
       where: { id: payload.partId },
       relations: ['order'],
@@ -1479,6 +1548,37 @@ export class OdooSyncProcessor extends WorkerHost {
     let refreshed = 0;
     let adopted = 0;
 
+    // A stored odooWarehouseId that Odoo NO LONGER HAS (an Odoo wipe, or a
+    // restore onto a different database) is the one broken state this mirror
+    // could never repair by itself: every backend-owned warehouse kept sitting
+    // "SYNCED" while pointing at a ghost, so nothing ever recreated it and the
+    // whole network stayed invisible to Odoo forever. Diff our rows against
+    // the list just fetched and rebuild any dangling one from scratch — the
+    // create path is idempotent (a row carrying our backend_id is re-linked,
+    // not duplicated), so a false positive cannot fork anything.
+    const odooIds = new Set(odooWarehouses.map((w) => w.id));
+    let recreated = 0;
+    for (const warehouse of await this.warehouseRepo.find()) {
+      if (!warehouse.odooWarehouseId || odooIds.has(warehouse.odooWarehouseId)) continue;
+      winstonLogger.warn(
+        `Warehouse "${warehouse.name}" points at Odoo id ${warehouse.odooWarehouseId}, which no longer exists in Odoo — recreating it`,
+        LOG_META,
+      );
+      warehouse.odooWarehouseId = null;
+      warehouse.odooSyncStatus = OdooSyncStatus.PENDING;
+      await this.warehouseRepo.save(warehouse);
+      try {
+        await this.createWarehouse({ warehouseId: warehouse.id });
+        recreated++;
+      } catch (err) {
+        // Left PENDING → the catalog push reconcile keeps retrying until it lands.
+        winstonLogger.warn(
+          `Warehouse "${warehouse.name}" could not be recreated in Odoo yet: ${(err as Error).message}`,
+          LOG_META,
+        );
+      }
+    }
+
     for (const ow of odooWarehouses) {
       try {
         const existing = await this.warehouseRepo.findOne({
@@ -1500,10 +1600,10 @@ export class OdooSyncProcessor extends WorkerHost {
     }
 
     winstonLogger.info(
-      `Warehouse reconcile: ${refreshed} refreshed, ${adopted} adopted from Odoo`,
+      `Warehouse reconcile: ${refreshed} refreshed, ${adopted} adopted from Odoo, ${recreated} recreated`,
       LOG_META,
     );
-    return { refreshed, adopted };
+    return { refreshed, adopted, recreated };
   }
 
   /**
@@ -2372,85 +2472,89 @@ export class OdooSyncProcessor extends WorkerHost {
   }
 
   // --- Compensation ---------------------------------------------------------
+  /**
+   * Runs when a job has exhausted every retry.
+   *
+   * This NEVER deletes the backend row any more. The old behaviour removed a
+   * category/product/unit/condition (or a whole warehouse) whose create never
+   * reached Odoo — which meant that whenever Odoo was unreachable or rejected
+   * the write, the compensation destroyed the ADMIN'S OWN DATA on the master
+   * side: an outage was enough to wipe the entire catalogue here while Odoo
+   * kept whatever it had. That is exactly the "sync deleted my data" incident.
+   *
+   * Instead the row is stamped FAILED and the admins are told. Catalogue rows
+   * marked FAILED are re-enqueued by the catalog push reconcile after its grace
+   * period, so a transient Odoo problem now heals itself instead of eating data.
+   */
   private async compensate(job: Job): Promise<void> {
     if (job.name === ODOO_JOBS.SYNC_CATEGORY) {
       const { categoryId } = job.data as SyncCategoryPayload;
       const category = await this.categoryRepo.findOne({ where: { id: categoryId } });
-      if (category && !category.odooCategoryId) {
-        await this.categoryRepo.delete(categoryId);
+      if (category) {
+        category.odooSyncStatus = OdooSyncStatus.FAILED;
+        await this.categoryRepo.save(category);
         await this.notifyAdmins({
           title: 'Category sync failed',
-          body: `The category "${category.name}" could not be synced to Odoo and was removed.`,
+          body: `The category "${category.name}" could not be synced to Odoo. It is kept and the sync will be retried automatically.`,
           titleKey: 'notifications.categorySyncFailed.title',
           bodyKey: 'notifications.categorySyncFailed.body',
           args: { name: category.name },
         });
-      } else if (category) {
-        category.odooSyncStatus = OdooSyncStatus.FAILED;
-        await this.categoryRepo.save(category);
       }
     }
 
     if (job.name === ODOO_JOBS.SYNC_PRODUCT) {
       const { productId } = job.data as SyncProductPayload;
       const product = await this.productRepo.findOne({ where: { id: productId } });
-      if (product && !product.odooProductId) {
-        await this.productRepo.delete(productId);
+      if (product) {
+        product.odooSyncStatus = OdooSyncStatus.FAILED;
+        await this.productRepo.save(product);
         await this.notifyAdmins({
           title: 'Product sync failed',
-          body: `The product "${product.name}" could not be synced to Odoo and was removed.`,
+          body: `The product "${product.name}" could not be synced to Odoo. It is kept and the sync will be retried automatically.`,
           titleKey: 'notifications.productSyncFailed.title',
           bodyKey: 'notifications.productSyncFailed.body',
           args: { name: product.name },
         });
-      } else if (product) {
-        product.odooSyncStatus = OdooSyncStatus.FAILED;
-        await this.productRepo.save(product);
       }
     }
 
     if (job.name === ODOO_JOBS.SYNC_UNIT) {
       const { unitId } = job.data as SyncUnitPayload;
       const unit = await this.unitRepo.findOne({ where: { id: unitId } });
-      if (unit && !unit.odooUnitId) {
-        // Never reached Odoo → remove it so sorting rules can't silently diverge.
-        await this.unitRepo.delete(unitId);
+      if (unit) {
+        unit.odooSyncStatus = OdooSyncStatus.FAILED;
+        await this.unitRepo.save(unit);
         await this.notifyAdmins({
           title: 'Unit sync failed',
-          body: `The measurement unit "${unit.code}" could not be synced to Odoo and was removed.`,
+          body: `The measurement unit "${unit.code}" could not be synced to Odoo. It is kept and the sync will be retried automatically.`,
           titleKey: 'notifications.unitSyncFailed.title',
           bodyKey: 'notifications.unitSyncFailed.body',
           args: { name: unit.code },
         });
-      } else if (unit) {
-        unit.odooSyncStatus = OdooSyncStatus.FAILED;
-        await this.unitRepo.save(unit);
       }
     }
 
     if (job.name === ODOO_JOBS.SYNC_CONDITION) {
       const { conditionId } = job.data as SyncConditionPayload;
       const condition = await this.conditionRepo.findOne({ where: { id: conditionId } });
-      if (condition && !condition.odooConditionId) {
-        await this.conditionRepo.delete(conditionId);
+      if (condition) {
+        condition.odooSyncStatus = OdooSyncStatus.FAILED;
+        await this.conditionRepo.save(condition);
         await this.notifyAdmins({
           title: 'Condition sync failed',
-          body: `The material condition "${condition.code}" could not be synced to Odoo and was removed.`,
+          body: `The material condition "${condition.code}" could not be synced to Odoo. It is kept and the sync will be retried automatically.`,
           titleKey: 'notifications.conditionSyncFailed.title',
           bodyKey: 'notifications.conditionSyncFailed.body',
           args: { name: condition.code },
         });
-      } else if (condition) {
-        condition.odooSyncStatus = OdooSyncStatus.FAILED;
-        await this.conditionRepo.save(condition);
       }
     }
 
-    // Any of the four catalogue branches above may have DELETED a category /
-    // product / unit / condition (compensation for a create that never reached
-    // Odoo) or flipped its sync status — a change the cached catalogue must not
-    // keep serving. Drop the catalogue cache whenever the failed job was a
-    // catalogue one, exactly as the admin CRUD and the reverse-sync do.
+    // A failed catalogue job changed sync statuses above (and the reconcile may
+    // re-push later) — a change the cached catalogue must not keep serving.
+    // Drop the catalogue cache whenever the failed job was a catalogue one,
+    // exactly as the admin CRUD and the reverse-sync do.
     if (
       job.name === ODOO_JOBS.SYNC_CATEGORY ||
       job.name === ODOO_JOBS.SYNC_PRODUCT ||
@@ -2463,19 +2567,16 @@ export class OdooSyncProcessor extends WorkerHost {
     if (job.name === ODOO_JOBS.CREATE_WAREHOUSE) {
       const { warehouseId } = job.data as CreateWarehousePayload;
       const warehouse = await this.warehouseRepo.findOne({ where: { id: warehouseId } });
-      if (warehouse && !warehouse.odooWarehouseId) {
-        // Never created in Odoo → remove the orphan backend row.
-        await this.warehouseRepo.delete(warehouseId);
+      if (warehouse) {
+        warehouse.odooSyncStatus = OdooSyncStatus.FAILED;
+        await this.warehouseRepo.save(warehouse);
         await this.notifyAdmins({
           title: 'Warehouse creation failed',
-          body: `The warehouse "${warehouse.name}" could not be created in Odoo and was removed.`,
+          body: `The warehouse "${warehouse.name}" could not be created in Odoo. It is kept and the sync will be retried automatically.`,
           titleKey: 'notifications.warehouseCreateFailed.title',
           bodyKey: 'notifications.warehouseCreateFailed.body',
           args: { name: warehouse.name },
         });
-      } else if (warehouse) {
-        warehouse.odooSyncStatus = OdooSyncStatus.FAILED;
-        await this.warehouseRepo.save(warehouse);
       }
     }
   }

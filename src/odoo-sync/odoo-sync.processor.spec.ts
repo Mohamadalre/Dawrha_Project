@@ -43,9 +43,16 @@ describe('OdooSyncProcessor', () => {
     odoo = {
       // Default: our record is not in Odoo yet → the sync takes the CREATE path.
       findIdByBackendId: jest.fn().mockResolvedValue(null),
+      // Natural-key lookups (adopt-instead-of-create fallbacks). Default: no
+      // pre-existing row under the unique key either → plain CREATE.
+      findProductCategoryIdByName: jest.fn().mockResolvedValue(null),
+      findMeasurementUnitIdByCode: jest.fn().mockResolvedValue(null),
+      findMaterialConditionIdByProductAndCode: jest.fn().mockResolvedValue(null),
       createProductCategory: jest.fn(),
       updateProductCategory: jest.fn(),
       createRecycleWarehouse: jest.fn(),
+      updateMeasurementUnit: jest.fn(),
+      createMeasurementUnit: jest.fn(),
       // Reverse link write for warehouses authored in Odoo.
       linkWarehouseBackendId: jest.fn().mockResolvedValue(undefined),
     };
@@ -63,6 +70,7 @@ describe('OdooSyncProcessor', () => {
     accountRepo = { find: jest.fn().mockResolvedValue([{ id: 'admin1' }]) };
     warehouseRepo = {
       findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
       save: jest.fn((x) => Promise.resolve(x)),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
     };
@@ -179,7 +187,10 @@ describe('OdooSyncProcessor', () => {
     expect(categoryRepo.delete).not.toHaveBeenCalled();
   });
 
-  it('compensates (deletes local + notifies admins) when Odoo fails on the last attempt', async () => {
+  it('compensates by stamping FAILED + notifying admins — the row is NEVER deleted', async () => {
+    // The old behaviour DELETED the admin's category when its push failed,
+    // which is how an Odoo outage wiped the backend catalogue. It must be
+    // kept (FAILED) so the push reconcile can re-push it once Odoo returns.
     categoryRepo.findOne.mockResolvedValue({ id: 'c1', name: 'Plastic' }); // no odooCategoryId
     odoo.createProductCategory.mockRejectedValue(new Error('Odoo down'));
 
@@ -191,7 +202,9 @@ describe('OdooSyncProcessor', () => {
     };
 
     await expect(processor.process(job)).rejects.toThrow('Odoo down');
-    expect(categoryRepo.delete).toHaveBeenCalledWith('c1');
+    expect(categoryRepo.delete).not.toHaveBeenCalled();
+    const saved = categoryRepo.save.mock.calls.at(-1)[0];
+    expect(saved.odooSyncStatus).toBe(OdooSyncStatus.FAILED);
     expect(notifications.createNotification).toHaveBeenCalled();
     expect(notifications.enqueueNotification).toHaveBeenCalled();
   });
@@ -230,7 +243,7 @@ describe('OdooSyncProcessor', () => {
     expect(warehouseRepo.delete).not.toHaveBeenCalled();
   });
 
-  it('compensates by deleting the backend warehouse when Odoo create fails on the last attempt', async () => {
+  it('compensates a failed warehouse create by stamping FAILED — never deleting it', async () => {
     warehouseRepo.findOne.mockResolvedValue({ id: 'w1', name: 'Hub', code: 'H1' }); // no odooWarehouseId
     odoo.createRecycleWarehouse.mockRejectedValue(new Error('Odoo down'));
 
@@ -242,7 +255,9 @@ describe('OdooSyncProcessor', () => {
     };
 
     await expect(processor.process(job)).rejects.toThrow('Odoo down');
-    expect(warehouseRepo.delete).toHaveBeenCalledWith('w1');
+    expect(warehouseRepo.delete).not.toHaveBeenCalled();
+    const saved = warehouseRepo.save.mock.calls.at(-1)[0];
+    expect(saved.odooSyncStatus).toBe(OdooSyncStatus.FAILED);
     expect(notifications.createNotification).toHaveBeenCalled();
   });
 
@@ -424,10 +439,11 @@ describe('OdooSyncProcessor', () => {
   });
 
   describe('APPLY_ORDER_EVENT — admin reassigned a split part', () => {
+    const PART_UUID = '11111111-1111-4111-8111-111111111111';
     const reassignJob = (warehouseOdooId = 77): any => ({
       name: ODOO_JOBS.APPLY_ORDER_EVENT,
       data: {
-        partId: 'part-1',
+        partId: PART_UUID,
         odooOrderId: 500,
         event: 'reassigned',
         warehouseOdooId,
@@ -499,6 +515,18 @@ describe('OdooSyncProcessor', () => {
 
       expect(orderPartRepo.save).not.toHaveBeenCalled();
     });
+
+    it('drops an event whose part id is not a UUID without querying the database', async () => {
+      // Odoo-side test data carried ids like "ORD-RA-1-p1"; the uuid column
+      // threw "invalid input syntax" and dead-lettered the event forever.
+      const job = reassignJob();
+      job.data.partId = 'ORD-RA-1-p1';
+
+      await processor.process(job);
+
+      expect(orderPartRepo.findOne).not.toHaveBeenCalled();
+      expect(orderPartRepo.save).not.toHaveBeenCalled();
+    });
   });
 
   describe('dead-letter queue', () => {
@@ -531,6 +559,113 @@ describe('OdooSyncProcessor', () => {
       await expect(processor.process(failingJob(0))).rejects.toThrow('transient');
 
       expect(deadLetterRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Adopt-instead-of-create: when no row carries our backend_id but one exists
+   * under the SAME natural key Odoo enforces (unique constraint), the push used
+   * to fail forever with "already exists". It must adopt that row instead —
+   * stamp our backend_id on it and treat it as ours.
+   */
+  describe('adopt-by-natural-key instead of failing on "already exists"', () => {
+    const syncJob = (name: string, data: any): any => ({
+      name,
+      data,
+      attemptsMade: 0,
+      opts: { attempts: 3 },
+    });
+
+    it('adopts an existing category by NAME and stamps our backend_id on it', async () => {
+      categoryRepo.findOne.mockResolvedValue({ id: 'c1', name: 'Plastic' });
+      odoo.findIdByBackendId.mockResolvedValue(null); // no row carries our uuid…
+      odoo.findProductCategoryIdByName.mockResolvedValue(44); // …but the name exists
+
+      await processor.process(syncJob(ODOO_JOBS.SYNC_CATEGORY, { categoryId: 'c1' }));
+
+      expect(odoo.createProductCategory).not.toHaveBeenCalled();
+      expect(odoo.updateProductCategory).toHaveBeenCalledWith(44, {
+        name: 'Plastic',
+        backend_id: 'c1',
+      });
+      const saved = categoryRepo.save.mock.calls[0][0];
+      expect(saved.odooCategoryId).toBe(44);
+      expect(saved.odooSyncStatus).toBe(OdooSyncStatus.SYNCED);
+    });
+
+    it('creates as before when neither backend_id nor the name matches', async () => {
+      categoryRepo.findOne.mockResolvedValue({ id: 'c1', name: 'Plastic' });
+      odoo.findProductCategoryIdByName.mockResolvedValue(null);
+      odoo.createProductCategory.mockResolvedValue(45);
+
+      await processor.process(syncJob(ODOO_JOBS.SYNC_CATEGORY, { categoryId: 'c1' }));
+
+      expect(odoo.updateProductCategory).not.toHaveBeenCalled();
+      expect(categoryRepo.save.mock.calls[0][0].odooCategoryId).toBe(45);
+    });
+
+    it('adopts an existing measurement unit by CODE', async () => {
+      unitRepo.findOne.mockResolvedValue({
+        id: 'u1', code: 'KG', nameEn: 'Kilogram', allowsTolerance: false,
+      });
+      odoo.findMeasurementUnitIdByCode.mockResolvedValue(7);
+
+      await processor.process(syncJob(ODOO_JOBS.SYNC_UNIT, { unitId: 'u1' }));
+
+      expect(odoo.createMeasurementUnit).not.toHaveBeenCalled();
+      expect(odoo.updateMeasurementUnit).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ code: 'KG', backend_id: 'u1' }),
+      );
+      const saved = unitRepo.save.mock.calls[0][0];
+      expect(saved.odooUnitId).toBe(7);
+      expect(saved.odooSyncStatus).toBe(OdooSyncStatus.SYNCED);
+    });
+  });
+
+  /**
+   * SYNC_ALL_WAREHOUSES must repair a stored odooWarehouseId that Odoo no
+   * longer has (wipe / restore): the warehouse used to stay "SYNCED" pointing
+   * at a ghost forever. It must be recreated from scratch.
+   */
+  describe('SYNC_ALL_WAREHOUSES recreates warehouses whose Odoo id dangles', () => {
+    it('clears the ghost id, re-creates the warehouse in Odoo and relinks it', async () => {
+      const dangling = {
+        id: 'w1', name: 'Hub', code: 'H1',
+        odooWarehouseId: 55, odooSyncStatus: OdooSyncStatus.SYNCED,
+      };
+      odoo.fetchWarehouses = jest.fn().mockResolvedValue([]); // Odoo has NOTHING
+      warehouseRepo.find.mockResolvedValue([dangling]);
+      // The recreate path re-fetches the row; hand it the SAME object the sweep
+      // mutates (ghost id already cleared) so the create actually runs.
+      warehouseRepo.findOne.mockResolvedValue(dangling);
+      odoo.createRecycleWarehouse.mockResolvedValue(90);
+
+      // Snapshot each save: the handler mutates ONE row object, so capturing
+      // references would show only its final state.
+      const saves: any[] = [];
+      warehouseRepo.save.mockImplementation((x: any) => {
+        saves.push({ ...x });
+        return Promise.resolve(x);
+      });
+
+      await processor.process({
+        name: ODOO_JOBS.SYNC_ALL_WAREHOUSES,
+        data: {},
+        attemptsMade: 0,
+        opts: { attempts: 3 },
+      } as any);
+
+      // The ghost id was cleared and the row reset to PENDING first…
+      expect(saves[0].odooWarehouseId).toBeNull();
+      expect(saves[0].odooSyncStatus).toBe(OdooSyncStatus.PENDING);
+      // …then the create path ran against Odoo.
+      expect(odoo.createRecycleWarehouse).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Hub', code: 'H1', backendId: 'w1' }),
+      );
+      // And the row ended SYNCED with the NEW id.
+      expect(saves.at(-1).odooWarehouseId).toBe(90);
+      expect(saves.at(-1).odooSyncStatus).toBe(OdooSyncStatus.SYNCED);
     });
   });
 });

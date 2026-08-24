@@ -31,6 +31,9 @@ const LOG_META = { context: 'SHIPMENT_SERVICE', channel: 'collection' } as const
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** The driver's identity QR (`getDriverQR`) prints this label before the id. */
+const DRIVER_QR_PREFIX_RE = /^DAWRHA-DRIVER:/i;
+
 @Injectable()
 export class ShipmentService {
   private readonly logger = new Logger('SHIPMENT_SERVICE');
@@ -224,17 +227,40 @@ export class ShipmentService {
     backendShipmentId: string,
     warehouseBackendId: string,
   ): Promise<{ shipment: Shipment; requests: CollectionRequest[] }> {
-    // The id must be a shipment UUID. A QR that carries something else — a
-    // label like "DAWRHA-DRIVER:…", a driver code, or a typo — must read as a
-    // clean "not found", never a raw Postgres "invalid uuid" 500 that looks
-    // like a bug in the reception screen.
-    if (!UUID_RE.test((backendShipmentId ?? '').trim())) {
+    // Two QR shapes reach the reception gate, and both must work:
+    //   1. the SHIPMENT qr — the bare shipment UUID;
+    //   2. the DRIVER identity qr — "DAWRHA-DRIVER:<driver profile uuid>"
+    //      (what `drop-off.service.getDriverQR` prints), which stands for
+    //      that driver's current in-flight shipment.
+    // Anything else — a driver code, or a typo — must read as a clean "not
+    // found", never a raw Postgres "invalid uuid" 500 that looks like a bug
+    // in the reception screen.
+    const ref = (backendShipmentId ?? '').trim().replace(DRIVER_QR_PREFIX_RE, '');
+    if (!UUID_RE.test(ref)) {
       throw new NotFoundException('Shipment not found');
     }
-    const shipment = await this.shipmentRepo.findOne({
-      where: { id: backendShipmentId.trim() },
+    let shipment = await this.shipmentRepo.findOne({
+      where: { id: ref },
       relations: ['warehouse', 'truck', 'driver', 'driver.account'],
     });
+    if (!shipment) {
+      // Not a shipment id — try it as a DRIVER profile id and fall back to
+      // that driver's current shipment (departed but not yet received).
+      const driver = await this.driverRepo.findOne({ where: { id: ref } });
+      if (driver) {
+        shipment = await this.shipmentRepo.findOne({
+          where: {
+            driverId: driver.id,
+            status: In([
+              ShipmentStatus.IN_TRANSIT,
+              ShipmentStatus.DELIVERED,
+            ]),
+          },
+          relations: ['warehouse', 'truck', 'driver', 'driver.account'],
+          order: { departedAt: 'DESC' },
+        });
+      }
+    }
     if (!shipment) throw new NotFoundException('Shipment not found');
 
     // The destination warehouse: set at pickup, or resolved from the driver's

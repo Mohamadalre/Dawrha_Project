@@ -3,15 +3,15 @@
   "notifications": {
     "categorySyncFailed": {
       "title": "Category sync failed",
-      "body": "The category \"{name}\" could not be synced to Odoo and was removed."
+      "body": "The category \"{name}\" could not be synced to Odoo. It is kept and the sync will be retried automatically."
     },
     "productSyncFailed": {
       "title": "Product sync failed",
-      "body": "The product \"{name}\" could not be synced to Odoo and was removed."
+      "body": "The product \"{name}\" could not be synced to Odoo. It is kept and the sync will be retried automatically."
     },
     "warehouseCreateFailed": {
       "title": "Warehouse creation failed",
-      "body": "The warehouse \"{name}\" could not be created in Odoo and was removed."
+      "body": "The warehouse \"{name}\" could not be created in Odoo. It is kept and the sync will be retried automatically."
     },
     "truckAssigned": {
       "title": "Truck assigned",
@@ -55,11 +55,11 @@
     },
     "unitSyncFailed": {
       "title": "Unit sync failed",
-      "body": "The measurement unit \"{name}\" could not be synced to Odoo and was removed."
+      "body": "The measurement unit \"{name}\" could not be synced to Odoo. It is kept and the sync will be retried automatically."
     },
     "conditionSyncFailed": {
       "title": "Condition sync failed",
-      "body": "The material condition \"{name}\" could not be synced to Odoo and was removed."
+      "body": "The material condition \"{name}\" could not be synced to Odoo. It is kept and the sync will be retried automatically."
     },
     "gradeTransferFailed": {
       "title": "Grade transfer could not be applied",
