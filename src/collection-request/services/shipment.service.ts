@@ -456,13 +456,24 @@ export class ShipmentService {
     };
   }
 
-  /** Public deliver: IN_TRANSIT → DELIVERED (no owner check, no auth). */
-  async publicDeliver(shipmentId: string, dto: DeliverShipmentDto) {
-    const shipment = await this.shipmentRepo.findOne({
-      where: { id: shipmentId },
-    });
-    if (!shipment) throw new NotFoundException('Shipment not found');
+  /**
+   * Driver deliver: IN_TRANSIT → DELIVERED, owner-checked — a driver may only
+   * drop off his OWN shipment, never another driver's.
+   */
+  async deliver(
+    accountId: string,
+    shipmentId: string,
+    dto: DeliverShipmentDto,
+  ) {
+    const driver = await this.getDriver(accountId);
+    const shipment = await this.getOwned(shipmentId, driver.id);
+    return this.performDeliver(shipment, dto);
+  }
 
+  private async performDeliver(
+    shipment: Shipment,
+    dto: DeliverShipmentDto,
+  ) {
     this.guardTransition(shipment.status, ShipmentStatus.DELIVERED);
 
     const now = new Date();

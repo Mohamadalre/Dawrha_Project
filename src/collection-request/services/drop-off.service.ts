@@ -106,11 +106,20 @@ export class DropOffService {
       });
     }
 
+    // A truck without a configured payload has no meaningful ceiling — every
+    // other consumer (candidate filter, capacity views) treats that as
+    // ungated, so the walk-in gate must not turn it into an always-failing
+    // check once any weight accumulates.
     const maxKg = Number(truck.maxPayloadKg) || 0;
     const currentWeight = await this.driverCurrentWeight(dto.driver_id);
-    const remainingKg = maxKg - currentWeight;
-    if (remainingKg < estimatedWeightKg) {
-      throw new BadRequestException(`Insufficient capacity. Remaining: ${remainingKg.toFixed(1)}kg, required: ${estimatedWeightKg.toFixed(1)}kg`);
+    if (maxKg > 0) {
+      const remainingKg = maxKg - currentWeight;
+      if (remainingKg < estimatedWeightKg) {
+        throw new BadRequestException(
+          `Insufficient capacity. Max: ${maxKg.toFixed(1)}kg, used: ${currentWeight.toFixed(1)}kg, ` +
+            `remaining: ${remainingKg.toFixed(1)}kg, required: ${estimatedWeightKg.toFixed(1)}kg`,
+        );
+      }
     }
 
     let route = await this.routeRepo.findOne({

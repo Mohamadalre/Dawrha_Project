@@ -39,13 +39,16 @@ export class ShipmentController {
   }
 
 
-  /** Public: deliver to warehouse (no auth). */
+  /** Driver: deliver my shipment to the warehouse (IN_TRANSIT → DELIVERED). */
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Patch(':id/deliver')
+  @Permissions('collection.driver.manage')
   async deliver(
+    @CurrentUser() user: any,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: DeliverShipmentDto,
   ) {
-    const result = await this.shipmentService.publicDeliver(id, dto);
+    const result = await this.shipmentService.deliver(user.id, id, dto);
     return { message: 'Shipment delivered — all requests completed', result };
   }
 

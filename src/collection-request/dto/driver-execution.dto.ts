@@ -8,14 +8,21 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  ValidateIf,
   ValidateNested,
   Min,
 } from 'class-validator';
 
 /** Actual quantity received for one product line. */
 export class ReceivedLineDto {
+  /**
+   * Blank when the driver app reports a bulk weigh without a per-product
+   * split — such entries carry no line info and are skipped by the service,
+   * so they pass validation instead of rejecting the whole weigh.
+   */
+  @ValidateIf((o) => o.product_id != null && o.product_id !== '')
   @IsUUID()
-  product_id: string;
+  product_id?: string;
 
   @Type(() => Number)
   @IsNumber()
