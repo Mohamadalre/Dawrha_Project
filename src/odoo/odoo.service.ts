@@ -391,6 +391,25 @@ export class OdooService {
     await this.callKw('recycle.warehouse', 'write', [[odooWarehouseId], payload]);
   }
 
+  /**
+   * Write the backend's own uuid onto an Odoo warehouse's `backend_id`, closing
+   * the reverse link for a warehouse AUTHORED IN ODOO.
+   *
+   * A warehouse created in Odoo is mirrored here (adopted) and gets our uuid,
+   * but Odoo never learned that uuid — so its `backend_id` stayed empty and the
+   * RECEPTION scan refused every shipment for it with `warehouse_not_synced`
+   * (the scan sends `warehouse_backend_id` to `/shipments/receive`, and Odoo had
+   * nothing to send). `backend_id` is NOT one of Odoo's mirrored fields, so this
+   * write raises no reverse ping — it closes the loop instead of starting one.
+   */
+  async linkWarehouseBackendId(odooWarehouseId: number, backendId: string): Promise<void> {
+    if (!odooWarehouseId || !backendId) return;
+    await this.callKw('recycle.warehouse', 'write', [
+      [odooWarehouseId],
+      { backend_id: backendId },
+    ]);
+  }
+
   /** Lists warehouses from the custom recycle_warehouse addon. */
   /**
    * Every warehouse Odoo has — INCLUDING the closed ones.
@@ -679,6 +698,9 @@ export class OdooService {
         [
           'name',
           'code',
+          // Our own uuid as Odoo currently holds it — empty for a warehouse
+          // authored in Odoo, so the sync can detect that and write it back.
+          'backend_id',
           // Lifecycle: allocation must never choose a warehouse that Odoo has
           // put into closing/inactive.
           'state',

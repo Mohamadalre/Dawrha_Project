@@ -46,6 +46,8 @@ describe('OdooSyncProcessor', () => {
       createProductCategory: jest.fn(),
       updateProductCategory: jest.fn(),
       createRecycleWarehouse: jest.fn(),
+      // Reverse link write for warehouses authored in Odoo.
+      linkWarehouseBackendId: jest.fn().mockResolvedValue(undefined),
     };
     notifications = {
       createNotification: jest.fn().mockResolvedValue({ id: 'n1' }),
@@ -343,6 +345,80 @@ describe('OdooSyncProcessor', () => {
         .mockRejectedValue(new Error('Odoo timed out'));
 
       await expect(processor.process(syncJob)).resolves.not.toThrow();
+      expect(odoo.fetchWarehouseInventory).toHaveBeenCalledWith(55);
+    });
+  });
+
+  /**
+   * The warehouse sync closes the REVERSE link.
+   *
+   * A warehouse AUTHORED IN ODOO is mirrored here and gets our uuid, but Odoo's
+   * `backend_id` stays empty — so the reception scan refused its shipments
+   * (`warehouse_not_synced`), because Odoo had no id to send to
+   * `/shipments/receive`. The sync now writes our uuid back onto Odoo, once and
+   * only when it differs. `backend_id` is not a mirrored field in Odoo, so the
+   * write raises no reverse ping — no loop.
+   */
+  describe('SYNC_WAREHOUSE writes backend_id back to Odoo (reverse link)', () => {
+    const syncJob: any = {
+      name: ODOO_JOBS.SYNC_WAREHOUSE,
+      data: { warehouseId: 'w1' },
+      attemptsMade: 0,
+      opts: { attempts: 3 },
+    };
+
+    beforeEach(() => {
+      warehouseRepo.findOne.mockResolvedValue({
+        id: 'wh-uuid-1',
+        name: 'Hub',
+        code: 'H1',
+        odooWarehouseId: 55,
+      });
+      odoo.fetchWarehouseInventory = jest.fn().mockResolvedValue([]);
+      odoo.fetchWarehouseManager = jest.fn().mockResolvedValue(null);
+      odoo.linkWarehouseBackendId = jest.fn().mockResolvedValue(undefined);
+    });
+
+    it('writes our uuid onto Odoo when its backend_id is empty (authored in Odoo)', async () => {
+      odoo.fetchWarehouseInfo = jest.fn().mockResolvedValue({
+        name: 'Hub', code: 'H1', state: 'active', backend_id: false,
+      });
+
+      await processor.process(syncJob);
+
+      expect(odoo.linkWarehouseBackendId).toHaveBeenCalledWith(55, 'wh-uuid-1');
+    });
+
+    it('does NOT rewrite when Odoo already holds the matching backend_id', async () => {
+      odoo.fetchWarehouseInfo = jest.fn().mockResolvedValue({
+        name: 'Hub', code: 'H1', state: 'active', backend_id: 'wh-uuid-1',
+      });
+
+      await processor.process(syncJob);
+
+      expect(odoo.linkWarehouseBackendId).not.toHaveBeenCalled();
+    });
+
+    it('re-links when Odoo holds a DIFFERENT backend_id (e.g. after a wipe/restore)', async () => {
+      odoo.fetchWarehouseInfo = jest.fn().mockResolvedValue({
+        name: 'Hub', code: 'H1', state: 'active', backend_id: 'stale-uuid',
+      });
+
+      await processor.process(syncJob);
+
+      expect(odoo.linkWarehouseBackendId).toHaveBeenCalledWith(55, 'wh-uuid-1');
+    });
+
+    it('never lets a failed backend_id write break the sync (best-effort)', async () => {
+      odoo.fetchWarehouseInfo = jest.fn().mockResolvedValue({
+        name: 'Hub', code: 'H1', state: 'active', backend_id: false,
+      });
+      odoo.linkWarehouseBackendId = jest
+        .fn()
+        .mockRejectedValue(new Error('Odoo write failed'));
+
+      await expect(processor.process(syncJob)).resolves.not.toThrow();
+      // The inventory refresh still ran despite the link failure.
       expect(odoo.fetchWarehouseInventory).toHaveBeenCalledWith(55);
     });
   });

@@ -1608,6 +1608,29 @@ export class OdooSyncProcessor extends WorkerHost {
       // The province link travels as the backend's OWN uuid (a related field on
       // recycle.warehouse), so this is a direct assignment — no name matching.
       warehouse.provinceId = info.province_backend_id || warehouse.provinceId;
+
+      // Close the REVERSE link for a warehouse AUTHORED IN ODOO. We mirrored it
+      // and hold its uuid, but Odoo's `backend_id` stayed empty until now — so
+      // the reception scan refused its shipments (`warehouse_not_synced`),
+      // because Odoo had no id to send to `/shipments/receive`. Write our uuid
+      // back once, and only when it differs (`backend_id` is false/empty on a
+      // freshly-created Odoo warehouse). It is NOT a mirrored field there, so
+      // this raises no reverse ping — no loop. Best-effort: a failed write is a
+      // link the next sync retries, never a broken mirror.
+      if (warehouse.odooWarehouseId && info.backend_id !== warehouse.id) {
+        try {
+          await this.odoo.linkWarehouseBackendId(warehouse.odooWarehouseId, warehouse.id);
+          winstonLogger.info(
+            `Linked Odoo warehouse ${warehouse.odooWarehouseId} back to backend id ${warehouse.id}`,
+            LOG_META,
+          );
+        } catch (err) {
+          winstonLogger.warn(
+            `Could not write backend_id onto Odoo warehouse ${warehouse.odooWarehouseId}: ${(err as Error).message}`,
+            LOG_META,
+          );
+        }
+      }
     }
 
     // 1b) The manager Odoo assigned to this warehouse.
