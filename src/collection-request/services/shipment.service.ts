@@ -569,9 +569,23 @@ export class ShipmentService {
 
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-    const count = await this.shipmentRepo.count();
-    const seq = String(count + 1).padStart(3, '0');
-    const shipmentNumber = `SHP-${dateStr}-${seq}`;
+
+    // Count-based sequencing collides whenever rows were ever deleted — probe
+    // candidates until one is genuinely free instead of trusting the count.
+    let shipmentNumber = '';
+    let seq = await this.shipmentRepo.count();
+    for (let i = 0; i < 25 && !shipmentNumber; i++) {
+      seq += 1;
+      const candidate = `SHP-${dateStr}-${String(seq).padStart(3, '0')}`;
+      const taken = await this.shipmentRepo.findOne({
+        where: { shipmentNumber: candidate },
+        select: ['id'],
+      });
+      if (!taken) shipmentNumber = candidate;
+    }
+    if (!shipmentNumber) {
+      throw new ConflictException('Could not allocate a unique shipment number');
+    }
 
     const shipment = this.shipmentRepo.create({
       shipmentNumber,

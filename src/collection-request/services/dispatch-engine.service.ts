@@ -2,7 +2,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Queue } from 'bullmq';
 import Redis from 'ioredis';
 import { NotificationService } from '@src/notification/notification.service';
@@ -795,8 +795,15 @@ export class DispatchEngineService {
     request: CollectionRequest,
     driverId: string,
   ): Promise<void> {
+    // Same definition of "the driver's current tour" that loadStop uses —
+    // oldest PLANNED *or* IN_PROGRESS. Binding to a PLANNED-only route while
+    // an older IN_PROGRESS one exists would strand the stop off his active
+    // tour ("stop not on your active tour").
     let route = await this.routeRepo.findOne({
-      where: { driverId, status: CollectionRouteStatus.PLANNED },
+      where: {
+        driverId,
+        status: In([CollectionRouteStatus.PLANNED, CollectionRouteStatus.IN_PROGRESS]),
+      },
       order: { createdAt: 'ASC' },
     });
     if (!route) {
