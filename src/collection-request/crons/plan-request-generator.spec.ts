@@ -49,6 +49,7 @@ describe('PlanRequestGenerator', () => {
       create: jest.fn((x) => x),
       save: jest.fn((x) => Promise.resolve({ id: 'req1', ...x })),
       count: jest.fn().mockResolvedValue(0),
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(null),
     };
     lineRepo = { create: jest.fn((x) => x) };
