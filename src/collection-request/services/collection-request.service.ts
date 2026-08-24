@@ -162,6 +162,12 @@ export class CollectionRequestService {
     // request is created as ASSIGNED (never hits the queue). If no driver is
     // available the request is NOT created — we throw a 409.
     if (saved.type === CollectionRequestType.IMMEDIATE) {
+      // Both election paths bind via QUEUED -> ASSIGNED; make the move legal
+      // up front so a merge into an active route cannot hit an illegal
+      // CREATED -> ASSIGNED transition inside bindMerged.
+      this.state.applyRequestStatus(saved, CollectionRequestStatus.QUEUED);
+      await this.requestRepo.save(saved);
+
       const election = await this.dispatchEngine.electSynchronous(saved);
       if (!election) {
         await this.requestRepo.remove(saved);
@@ -183,11 +189,9 @@ export class CollectionRequestService {
       const driverProfile = await this.dispatchEngine.loadCandidateProfile(election.candidate);
       if (driverProfile) driverProfile.score = +election.score.toFixed(2);
 
-      // Set to QUEUED so settleOffer's status guard passes, then create
-      // the assignment record and settle it synchronously.
-      this.state.applyRequestStatus(saved, CollectionRequestStatus.QUEUED);
-      await this.requestRepo.save(saved);
-
+      // The request is already QUEUED (hoisted before the election), so
+      // settleOffer's status guard passes; create the assignment record and
+      // settle it synchronously.
       const assignment = this.assignmentRepo.create({
         request: saved,
         requestId: saved.id,

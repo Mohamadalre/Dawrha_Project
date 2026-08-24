@@ -12,6 +12,7 @@ import { CollectionRequest } from '../entities/collection-request.entity';
 import { CollectionRequestAssignment } from '../entities/collection-request-assignment.entity';
 import { ShipmentService } from './shipment.service';
 import { TruckAssignmentEntity } from '@src/truck/entities/truck-assignment.entity';
+import { CollectorProfile } from '@src/user/entities/profile/collector-profile.entity';
 import {
   CollectionRequestNotFoundException,
   CollectionRequestInvalidTransitionException,
@@ -86,6 +87,8 @@ export class DispatchEngineService {
     private readonly routeRepo: Repository<CollectionRoute>,
     @InjectRepository(TruckAssignmentEntity)
     private readonly truckAssignmentRepo: Repository<TruckAssignmentEntity>,
+    @InjectRepository(CollectorProfile)
+    private readonly profileRepo: Repository<CollectorProfile>,
     private readonly state: CollectionStateService,
     private readonly configProvider: DispatchConfigProvider,
     private readonly candidates: DispatchCandidatesService,
@@ -179,7 +182,7 @@ export class DispatchEngineService {
 
     if (await this.tryMergeRequest(request, config)) {
       const route = await this.routeRepo.findOne({
-        where: { id: request.routeId! },
+        where: { id: request.routeId },
       });
       return route ? { merged: true, driverId: route.driverId } : null;
     }
@@ -256,7 +259,7 @@ export class DispatchEngineService {
     const now = new Date();
     const constraints = {
       mergeMaxMinutes: config.routeMergeMaxMin,
-      mergeMaxKm: Number(config.routeMergeMaxKm) || 2,
+      mergeMaxKm: Number(config.routeMergeMaxKm) || 5,
       institutionToleranceMin: config.institutionToleranceMin,
     };
 
@@ -289,9 +292,17 @@ export class DispatchEngineService {
         );
       if (open.some((s) => s.lat == null || s.lng == null)) continue;
 
+      // Mid-round there is no served stop yet — anchor the merge at the
+      // driver's live truck fix instead, so a nearby request can still join
+      // the running tour (and its shipment) while he works.
+      const anchor =
+        done != null
+          ? this.wrapStop(done)
+          : await this.liveAnchor(route.driverId);
+
       const verdict = canMergeInto({
         stops: open.map((s) => this.wrapStop(s)),
-        lastServed: done ? this.wrapStop(done) : null,
+        lastServed: anchor,
         incoming: this.wrapStop(request),
         now,
         constraints,
@@ -423,6 +434,9 @@ export class DispatchEngineService {
         this.statusPayload(request),
       );
       await this.notifyProducerAssigned(request);
+      // The synchronous path has no OFFERED step, so the driver would never
+      // learn about the task until he opens his route list — tell him now.
+      await this.notifyDriverAssigned(assignment.driverId, request);
       winstonLogger.info(
         `Collection request ${request.requestNumber}: assigned to driver ${assignment.driverId}`,
         LOG_META,
@@ -744,6 +758,38 @@ export class DispatchEngineService {
     };
   }
 
+  /**
+   * The driver's live truck fix as a merge anchor, for tours that have not
+   * served a stop yet. Null when the driver has no assignment or no fresh
+   * position — the merge then honestly refuses rather than guessing.
+   */
+  private async liveAnchor(driverId: string): Promise<RouteStop | null> {
+    try {
+      const assignment = await this.truckAssignmentRepo.findOne({
+        where: { driverId },
+        select: ['truckId'],
+      });
+      if (!assignment?.truckId) return null;
+
+      const raw = await this.redis.get(
+        `truck:location:${assignment.truckId}`,
+      );
+      if (!raw) return null;
+      const fix = JSON.parse(raw) as LiveLocation;
+      if (fix.lat == null || fix.lng == null) return null;
+
+      return {
+        requestId: '__live_anchor__',
+        lat: Number(fix.lat),
+        lng: Number(fix.lng),
+        scheduledAt: null,
+      };
+    } catch {
+      // A corrupt frame or a tracking hiccup must not sink the election.
+      return null;
+    }
+  }
+
   /** Binds an accepted request to the driver's open route (or creates one). */
   private async bindToRoute(
     request: CollectionRequest,
@@ -874,6 +920,49 @@ export class DispatchEngineService {
       `تم تعيين سائق لطلب الجمع رقم ${request.requestNumber}.`,
       request,
     );
+  }
+
+  /**
+   * Tells the driver his tour gained a stop: a socket push to his room plus a
+   * notification. Covers the synchronous dispatch and the admin override —
+   * both settle ACCEPTED without ever creating an open offer.
+   */
+  private async notifyDriverAssigned(
+    driverId: string,
+    request: CollectionRequest,
+  ): Promise<void> {
+    try {
+      const profile = await this.profileRepo.findOne({
+        where: { id: driverId },
+        relations: ['account'],
+      });
+      const accountId = profile?.account?.id;
+      if (!accountId) return;
+
+      this.events.announceToDriver(accountId, 'request:assigned', {
+        event: 'ASSIGNED',
+        request_id: request.id,
+        request_number: request.requestNumber,
+        type: request.type,
+        scheduled_at: request.scheduledAt ?? null,
+        address_text: request.addressText,
+        lat: request.lat != null ? Number(request.lat) : null,
+        lng: request.lng != null ? Number(request.lng) : null,
+        estimated_weight_kg: Number(request.estimatedWeightKg),
+        estimated_grand_total: Number(request.estimatedGrandTotal),
+        route_id: request.routeId ?? null,
+        route_sequence: request.routeSequence ?? null,
+      });
+      await this.tryNotify(
+        accountId,
+        'تم إسناد طلب جمع جديد لك',
+        `تم تعيين طلب الجمع ${request.requestNumber} عليك — تفقد جولتك في تطبيق السائق.`,
+        request,
+      );
+    } catch (error) {
+      // A driver-facing push must never break the binding.
+      this.logger.warn('notifyDriverAssigned failed', error as Error);
+    }
   }
 
   private async tryNotify(

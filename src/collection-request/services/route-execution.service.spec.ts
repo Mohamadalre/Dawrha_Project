@@ -97,9 +97,7 @@ describe('RouteExecutionService', () => {
       find: jest.fn().mockResolvedValue([]),
     };
     const configProvider = { get: jest.fn().mockResolvedValue(config) };
-    const engine = {
-      untrackRequest: jest.fn().mockResolvedValue(undefined),
-    } as unknown as DispatchEngineService;
+    const engine = { untrackRequest: jest.fn().mockResolvedValue(undefined) } as unknown as DispatchEngineService;
     const odooSync = { enqueueRegisterIntake: jest.fn().mockResolvedValue(undefined) };
     const wallet = { awardForCollection: jest.fn().mockResolvedValue({ points: 1, balance: 1 }) };
     const notifications = { createNotification: jest.fn().mockResolvedValue({ id: 'n-1' }) };

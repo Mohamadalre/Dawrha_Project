@@ -1071,7 +1071,7 @@ this.server.to('truck:' + truckId).emit('truck:location', stored);
 }</pre></div>
 </div></td></tr>
 
-  <tr><td><code>user:nearby_drivers</code><br><small>alias: <code>nearby_drivers</code></small></td><td><span class="m m-post">← مستخدم</span></td><td>طلب السائقين القريبين — يرسل الموقع ويحصل على مناطق التغطية والسائقين المتاحين + تحديثات تلقائية عند تغير الحالة. يُقبل الاسم المختصر <code>nearby_drivers</code> أيضاً. القيود: <code>lat</code> ضمن <b>-90..90</b>، <code>lng</code> ضمن <b>-180..180</b>، و<code>radius_km</code> محدود بـ <b>1..50</b> (افتراضي 10).</td><td><span class="body-toggle">▼</span></td></tr>
+  <tr><td><code>user:nearby_drivers</code><br><small>alias: <code>nearby_drivers</code></small></td><td><span class="m m-post">← مستخدم</span></td><td>طلب السائقين القريبين — يرسل الموقع ويحصل على مناطق التغطية والسائقين المتاحين (الموزّعون رسميًا عند النقطة + أي سائق مؤهل ضمن دائرة 5 كم حولها حسب موقعه الحي GPS) + تحديثات تلقائية عند تغير الحالة. يُقبل الاسم المختصر <code>nearby_drivers</code> أيضاً. القيود: <code>lat</code> ضمن <b>-90..90</b>، <code>lng</code> ضمن <b>-180..180</b>، و<code>radius_km</code> محدود بـ <b>1..50</b> (افتراضي 10).</td><td><span class="body-toggle">▼</span></td></tr>
 <tr><td colspan="4"><div class="body-block">
 <div class="body-section"><div class="body-label">📤 Payload</div>
 <pre class="body-code">{
@@ -1100,7 +1100,8 @@ this.server.to('truck:' + truckId).emit('truck:location', stored);
       <span class="k">"max_payload_kg"</span>: <span class="n">1000</span>,
       <span class="k">"remaining_kg"</span>: <span class="n">425.0</span>,
       <span class="k">"remaining_shift_minutes"</span>: <span class="n">180</span>,
-      <span class="k">"parked_since"</span>: <span class="s">"2026-08-21T08:00:00Z"</span>
+      <span class="k">"parked_since"</span>: <span class="s">"2026-08-21T08:00:00Z"</span>,
+        <span class="k">"source"</span>: <span class="s">"assigned"</span>        <span class="c">// assigned = موقوف رسميًا عند النقطة | gps = ضمن دائرة 5 كم حسب موقعه الحي</span>
     }]
   }]
 }</pre></div>
